@@ -108,7 +108,7 @@ export function ApprovalDetailModal({ approval, onClose }: ApprovalDetailModalPr
           animate={{ scale: 1, opacity: 1 }}
           exit={{ scale: 0.9, opacity: 0 }}
           transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-          className="w-full max-w-lg bg-gray-900 rounded-xl shadow-xl overflow-hidden border border-gray-700"
+          className="w-full max-w-2xl max-h-[90vh] bg-gray-900 rounded-xl shadow-xl overflow-hidden border border-gray-700 flex flex-col"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
@@ -151,8 +151,8 @@ export function ApprovalDetailModal({ approval, onClose }: ApprovalDetailModalPr
             </Button>
           </div>
 
-          {/* Content */}
-          <div className="p-6 space-y-6">
+          {/* Content - Scrollable */}
+          <div className="flex-1 overflow-y-auto p-6 space-y-6">
             {/* Description */}
             <div>
               <p className="text-gray-200 leading-relaxed">
@@ -168,15 +168,15 @@ export function ApprovalDetailModal({ approval, onClose }: ApprovalDetailModalPr
               </div>
             )}
 
-            {/* Details Toggle */}
+            {/* Details Toggle - Always expanded for better developer experience */}
             {(approval.tool_input || (approval.details && Object.keys(approval.details).length > 0)) && (
               <div>
                 <button
                   onClick={() => setShowDetails(!showDetails)}
-                  className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-200 transition-colors"
+                  className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-200 transition-colors mb-3"
                 >
                   <InfoCircledIcon className="h-4 w-4" />
-                  <span>View details</span>
+                  <span>Technical Details</span>
                   <ChevronDownIcon className={cn(
                     "h-4 w-4 transition-transform",
                     showDetails && "rotate-180"
@@ -190,28 +190,40 @@ export function ApprovalDetailModal({ approval, onClose }: ApprovalDetailModalPr
                       animate={{ height: 'auto', opacity: 1 }}
                       exit={{ height: 0, opacity: 0 }}
                       transition={{ duration: 0.2 }}
-                      className="overflow-hidden mt-3"
+                      className="overflow-hidden"
                     >
-                      <div className="bg-gray-800 rounded-lg p-3 space-y-3 border border-gray-700">
+                      <div className="bg-gray-800/50 rounded-lg border border-gray-700 overflow-hidden">
                         {/* Tool Input */}
                         {approval.tool_input && (
-                          <div>
-                            <div className="text-xs font-medium text-gray-400 mb-2">Request Parameters</div>
-                            <pre className="text-xs text-gray-200 overflow-x-auto font-mono bg-gray-900 p-2 rounded border border-gray-700">
-                              {JSON.stringify(approval.tool_input, null, 2)}
-                            </pre>
+                          <div className="border-b border-gray-700 last:border-b-0">
+                            <div className="bg-gray-800 px-3 py-2 border-b border-gray-700">
+                              <div className="text-xs font-medium text-gray-300 flex items-center gap-2">
+                                <CodeIcon className="h-3 w-3" />
+                                Request Parameters
+                              </div>
+                            </div>
+                            <div className="p-3">
+                              <pre className="text-xs text-gray-200 overflow-x-auto font-mono bg-gray-900/50 p-3 rounded border border-gray-700 max-h-48 overflow-y-auto">
+                                <code className="text-cyan-400">{JSON.stringify(approval.tool_input, null, 2)}</code>
+                              </pre>
+                            </div>
                           </div>
                         )}
 
                         {/* Additional Details */}
                         {approval.details && Object.keys(approval.details).length > 0 && (
                           <div>
-                            <div className="text-xs font-medium text-gray-400 mb-2">Additional Context</div>
-                            <div className="space-y-1">
+                            <div className="bg-gray-800 px-3 py-2 border-b border-gray-700">
+                              <div className="text-xs font-medium text-gray-300 flex items-center gap-2">
+                                <InfoCircledIcon className="h-3 w-3" />
+                                Additional Context
+                              </div>
+                            </div>
+                            <div className="p-3 space-y-2 max-h-32 overflow-y-auto">
                               {Object.entries(approval.details).map(([key, value]) => (
-                                <div key={key} className="flex gap-2 text-sm">
-                                  <span className="font-medium text-gray-400 min-w-0">{key}:</span>
-                                  <span className="text-gray-200 break-all">
+                                <div key={key} className="flex gap-3 text-sm py-1">
+                                  <span className="font-medium text-gray-400 min-w-[80px] flex-shrink-0">{key}:</span>
+                                  <span className="text-gray-200 break-all font-mono text-xs">
                                     {typeof value === 'string' ? value : JSON.stringify(value)}
                                   </span>
                                 </div>
@@ -241,8 +253,8 @@ export function ApprovalDetailModal({ approval, onClose }: ApprovalDetailModalPr
             </div>
           </div>
 
-          {/* Actions */}
-          <div className="flex flex-col-reverse sm:flex-row gap-3 p-6 bg-gray-800 border-t border-gray-700">
+          {/* Actions - Fixed at bottom */}
+          <div className="flex flex-col-reverse sm:flex-row gap-3 p-6 bg-gray-800/95 backdrop-blur-sm border-t border-gray-700 flex-shrink-0">
             <Button
               variant="outline"
               onClick={() => handleDecision('rejected')}
@@ -287,10 +299,18 @@ export function ApprovalDetailModal({ approval, onClose }: ApprovalDetailModalPr
             </Button>
           </div>
 
-          {/* Keyboard hint */}
-          <div className="px-6 pb-4">
-            <div className="text-xs text-gray-500 text-center">
-              Press ⌘+Enter to approve, or Esc to close
+          {/* Keyboard hint - Fixed at bottom */}
+          <div className="px-6 pb-4 bg-gray-800/95 flex-shrink-0">
+            <div className="text-xs text-gray-500 text-center flex items-center justify-center gap-4">
+              <span className="flex items-center gap-1">
+                <kbd className="px-1.5 py-0.5 bg-gray-700 rounded text-xs">⌘</kbd>
+                <kbd className="px-1.5 py-0.5 bg-gray-700 rounded text-xs">Enter</kbd>
+                to approve
+              </span>
+              <span className="flex items-center gap-1">
+                <kbd className="px-1.5 py-0.5 bg-gray-700 rounded text-xs">Esc</kbd>
+                to close
+              </span>
             </div>
           </div>
         </motion.div>
