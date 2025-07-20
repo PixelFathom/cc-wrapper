@@ -269,7 +269,7 @@ async def send_chat_query(
 async def get_chat_hooks(
     chat_id: UUID,
     session_id: Optional[str] = None,
-    limit: int = 50,
+    limit: int = 500,
     session: AsyncSession = Depends(get_session)
 ):
     """Get chat processing hooks"""
