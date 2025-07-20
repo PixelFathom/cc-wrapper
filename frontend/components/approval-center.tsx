@@ -160,8 +160,8 @@ export function ApprovalCenter() {
               transition={{ type: 'spring', damping: 20, stiffness: 300 }}
               className={cn(
                 "fixed z-50 bg-gray-900 rounded-lg shadow-xl border border-gray-700",
-                "bottom-20 right-6 w-80 max-w-[calc(100vw-3rem)]",
-                "max-h-[70vh] overflow-hidden"
+                "bottom-20 right-6 w-96 max-w-[calc(100vw-2rem)]",
+                "max-h-[80vh] overflow-hidden flex flex-col"
               )}
             >
               {/* Header */}
@@ -184,8 +184,8 @@ export function ApprovalCenter() {
                 </Button>
               </div>
 
-              {/* Content */}
-              <div className="max-h-[50vh] overflow-y-auto">
+              {/* Content - Improved scrolling */}
+              <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-800">
                 {isLoading ? (
                   <div className="flex items-center justify-center py-8">
                     <UpdateIcon className="h-5 w-5 animate-spin text-gray-400" />
@@ -197,72 +197,91 @@ export function ApprovalCenter() {
                     <p className="text-xs text-gray-400">No pending approvals</p>
                   </div>
                 ) : (
-                  <div className="p-2">
-                    {approvals.map((approval: ApprovalItem) => (
-                      <button
+                  <div className="divide-y divide-gray-700">
+                    {approvals.map((approval: ApprovalItem, index: number) => (
+                      <motion.button
                         key={approval.id}
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: index * 0.05 }}
                         onClick={() => {
                           setSelectedApproval(approval)
                           setIsOpen(false)
                         }}
-                        className="w-full text-left p-3 rounded-lg hover:bg-gray-800 transition-colors group"
+                        className="w-full text-left p-4 hover:bg-gray-800/50 transition-colors group relative overflow-hidden"
                       >
-                        <div className="flex items-start gap-3">
+                        {/* Urgency indicator */}
+                        <div className={cn(
+                          "absolute left-0 top-0 bottom-0 w-1",
+                          approval.urgency === 'high' && "bg-red-500",
+                          approval.urgency === 'medium' && "bg-amber-500",
+                          approval.urgency === 'low' && "bg-gray-500"
+                        )} />
+                        
+                        <div className="flex items-start gap-3 pl-2">
                           {/* Icon */}
                           <div className={cn(
-                            "p-2 rounded-md shrink-0",
-                            approval.urgency === 'high' && "bg-red-900/50 text-red-400 border border-red-800",
-                            approval.urgency === 'medium' && "bg-amber-900/50 text-amber-400 border border-amber-800",
-                            approval.urgency === 'low' && "bg-gray-700 text-gray-300 border border-gray-600"
+                            "p-2 rounded-lg shrink-0 border",
+                            approval.urgency === 'high' && "bg-red-900/30 text-red-400 border-red-800/50",
+                            approval.urgency === 'medium' && "bg-amber-900/30 text-amber-400 border-amber-800/50",
+                            approval.urgency === 'low' && "bg-gray-700/50 text-gray-300 border-gray-600/50"
                           )}>
                             {getToolIcon(approval)}
                           </div>
 
                           {/* Content */}
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-1">
-                              <span className="font-medium text-white text-sm">
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="font-semibold text-white text-sm font-mono">
                                 {approval.type === 'mcp' 
                                   ? approval.tool_name 
                                   : approval.action_type || 'Action'}
                               </span>
                               {approval.urgency === 'high' && (
-                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-red-900/50 text-red-400 border border-red-800">
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-red-900/50 text-red-300 border border-red-800/50">
                                   urgent
                                 </span>
                               )}
                             </div>
                             
-                            <p className="text-sm text-gray-300 line-clamp-2 mb-1">
+                            <p className="text-sm text-gray-300 line-clamp-2 mb-3 leading-relaxed">
                               {approval.display_text || approval.prompt || 'Approval needed'}
                             </p>
 
-                            <div className="flex items-center justify-between text-xs text-gray-500">
+                            <div className="flex items-center justify-between text-xs">
                               {approval.cwd && (
-                                <span className="font-mono truncate max-w-[180px]">
+                                <span className="font-mono text-gray-400 bg-gray-800 px-2 py-1 rounded truncate max-w-[200px]">
                                   {approval.cwd}
                                 </span>
                               )}
-                              <span className="ml-auto">
+                              <span className="ml-auto text-gray-500 flex items-center gap-1">
+                                <ClockIcon className="h-3 w-3" />
                                 {formatTimeAgo(approval.created_at)}
                               </span>
                             </div>
                           </div>
 
-                          <ChevronRightIcon className="h-4 w-4 text-gray-500 group-hover:text-gray-400 transition-colors shrink-0" />
+                          <ChevronRightIcon className="h-4 w-4 text-gray-500 group-hover:text-gray-300 transition-colors shrink-0 mt-1" />
                         </div>
-                      </button>
+                      </motion.button>
                     ))}
                   </div>
                 )}
               </div>
 
-              {/* Footer */}
+              {/* Footer - Enhanced */}
               {pendingCount > 0 && (
-                <div className="px-4 py-3 bg-gray-800 border-t border-gray-700">
+                <div className="px-4 py-3 bg-gray-800/95 backdrop-blur-sm border-t border-gray-700 flex-shrink-0">
                   <div className="flex items-center justify-between text-xs text-gray-400">
-                    <span>⌘A to open</span>
-                    <span>ESC to close</span>
+                    <div className="flex items-center gap-1">
+                      <kbd className="px-1.5 py-0.5 bg-gray-700 rounded text-xs">⌘</kbd>
+                      <kbd className="px-1.5 py-0.5 bg-gray-700 rounded text-xs">A</kbd>
+                      <span>to open</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <kbd className="px-1.5 py-0.5 bg-gray-700 rounded text-xs">ESC</kbd>
+                      <span>to close</span>
+                    </div>
                   </div>
                 </div>
               )}
