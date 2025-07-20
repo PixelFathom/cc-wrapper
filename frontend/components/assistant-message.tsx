@@ -78,8 +78,8 @@ export function AssistantMessage({
         )}
       </div>
       
-      {/* Processing Steps / Hooks - Only show for incomplete messages or when explicitly requested */}
-      {hasHooks && (!isCompleteMessage || showHooks) && (
+      {/* Processing Steps / Hooks - Always show expand button for any message with hooks */}
+      {hasHooks && (
         <div className="space-y-2">
           <button
             onClick={() => setShowHooks(!showHooks)}
