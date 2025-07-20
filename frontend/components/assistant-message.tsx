@@ -7,6 +7,7 @@ import { MessageHooks } from './message-hooks'
 import { UpdateIcon, CircleIcon, ChevronDownIcon, DotFilledIcon } from '@radix-ui/react-icons'
 import { cn } from '@/lib/utils'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useMobile } from '@/lib/hooks/useMobile'
 
 interface Message {
   id: string
@@ -37,23 +38,14 @@ export function AssistantMessage({
   isWaitingForResponse = false 
 }: AssistantMessageProps) {
   const [showHooks, setShowHooks] = useState(false)
-  const [isMobile, setIsMobile] = useState(false)
+  const isMobile = useMobile(768)
 
-  // Check if screen is mobile size and close hooks by default on mobile
+  // Close hooks by default on mobile for better UX
   useEffect(() => {
-    const checkMobile = () => {
-      const mobile = window.innerWidth < 768
-      setIsMobile(mobile)
-      // Close hooks by default on mobile
-      if (mobile && showHooks) {
-        setShowHooks(false)
-      }
+    if (isMobile && showHooks && hooks.length > 3) {
+      setShowHooks(false)
     }
-    
-    checkMobile()
-    window.addEventListener('resize', checkMobile)
-    return () => window.removeEventListener('resize', checkMobile)
-  }, [])
+  }, [isMobile, hooks.length, showHooks])
   
   // Extract content from message
   const content = message.content?.text || ''
@@ -75,12 +67,16 @@ export function AssistantMessage({
         ) : isProcessing ? (
           <div className="flex items-center space-x-2 flex-wrap">
             <UpdateIcon className="h-4 w-4 text-purple-500 animate-spin flex-shrink-0" />
-            <span className="text-purple-500 font-mono text-sm break-words">Processing your request...</span>
+            <span className="text-purple-500 font-mono text-xs sm:text-sm break-words">
+              {isMobile ? 'Processing...' : 'Processing your request...'}
+            </span>
           </div>
         ) : (
           <div className="flex items-center space-x-2 text-muted-foreground flex-wrap">
             <DotFilledIcon className="h-4 w-4 animate-pulse flex-shrink-0" />
-            <span className="font-mono text-sm break-words">Waiting for response...</span>
+            <span className="font-mono text-xs sm:text-sm break-words">
+              {isMobile ? 'Waiting...' : 'Waiting for response...'}
+            </span>
           </div>
         )}
       </div>
@@ -96,7 +92,9 @@ export function AssistantMessage({
               "h-3 w-3 transition-transform flex-shrink-0",
               showHooks && "rotate-180"
             )} />
-            <span className="truncate">Processing Steps</span>
+            <span className="truncate">
+              {isMobile ? 'Steps' : 'Processing Steps'}
+            </span>
             <span className="text-purple-400 font-semibold flex-shrink-0">({hooks.length})</span>
           </button>
           
@@ -140,7 +138,7 @@ export function AssistantMessage({
                             {/* Tool input preview */}
                             {hook.tool_name && hook.data?.tool_input && (
                               <div className="text-[10px] text-muted-foreground/70 mt-1 font-mono truncate">
-                                {JSON.stringify(hook.data.tool_input).substring(0, isMobile ? 50 : 100)}...
+                                {JSON.stringify(hook.data.tool_input).substring(0, isMobile ? 30 : 80)}...
                               </div>
                             )}
                           </div>
@@ -157,23 +155,23 @@ export function AssistantMessage({
                           {hook.data.tool_input && (
                             <div>
                               <div className="text-[10px] text-white/40 mb-1">Input:</div>
-                              <pre className="bg-black/30 p-2 rounded text-[10px] overflow-x-auto border border-white/10 max-w-full">
-                                <code className="text-cyan-400/80 break-words whitespace-pre-wrap">{JSON.stringify(hook.data.tool_input, null, 2)}</code>
+                              <pre className="bg-black/30 p-1 sm:p-2 rounded text-[9px] sm:text-[10px] overflow-x-auto border border-white/10 max-w-full">
+                                <code className="text-cyan-400/80 break-words whitespace-pre-wrap">{JSON.stringify(hook.data.tool_input, null, isMobile ? 1 : 2)}</code>
                               </pre>
                             </div>
                           )}
                           {hook.data.result && (
                             <div>
                               <div className="text-[10px] text-white/40 mb-1">Result:</div>
-                              <pre className="bg-black/30 p-2 rounded text-[10px] overflow-x-auto max-h-32 sm:max-h-40 border border-white/10 max-w-full">
-                                <code className="text-green-400/80 break-words whitespace-pre-wrap">{typeof hook.data.result === 'string' ? hook.data.result : JSON.stringify(hook.data.result, null, 2)}</code>
+                              <pre className="bg-black/30 p-1 sm:p-2 rounded text-[9px] sm:text-[10px] overflow-x-auto max-h-24 sm:max-h-40 border border-white/10 max-w-full">
+                                <code className="text-green-400/80 break-words whitespace-pre-wrap">{typeof hook.data.result === 'string' ? hook.data.result : JSON.stringify(hook.data.result, null, isMobile ? 1 : 2)}</code>
                               </pre>
                             </div>
                           )}
                           {hook.data.error && (
                             <div>
                               <div className="text-[10px] text-red-400 mb-1">Error:</div>
-                              <pre className="bg-red-900/20 p-2 rounded text-[10px] overflow-x-auto border border-red-500/20 max-w-full">
+                              <pre className="bg-red-900/20 p-1 sm:p-2 rounded text-[9px] sm:text-[10px] overflow-x-auto border border-red-500/20 max-w-full">
                                 <code className="text-red-400 break-words whitespace-pre-wrap">{hook.data.error}</code>
                               </pre>
                             </div>

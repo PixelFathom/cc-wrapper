@@ -68,27 +68,29 @@ export function MessageHooks({ messageId, isProcessing = false, showByDefault = 
       className="mt-3"
     >
       <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-        <CollapsibleTrigger className="flex items-center space-x-2 text-xs text-cyan-400 hover:text-cyan-300 transition-colors group">
-          <div className="flex items-center space-x-2 bg-cyan-500/10 rounded-md px-2 py-1 border border-cyan-500/20">
-            <InfoCircledIcon className="h-3 w-3" />
-            <span className="font-mono">Processing Steps</span>
+        <CollapsibleTrigger className="flex items-center space-x-2 text-xs text-cyan-400 hover:text-cyan-300 transition-colors group w-full sm:w-auto">
+          <div className="flex items-center space-x-1 sm:space-x-2 bg-cyan-500/10 rounded-md px-2 py-1 border border-cyan-500/20 w-full sm:w-auto justify-center sm:justify-start">
+            <InfoCircledIcon className="h-3 w-3 flex-shrink-0" />
+            <span className="font-mono hidden sm:inline">Processing Steps</span>
+            <span className="font-mono sm:hidden">Steps</span>
             {(isProcessing || isLoading) && (
-              <CircleIcon className="h-3 w-3 text-yellow-500" />
+              <CircleIcon className="h-3 w-3 text-yellow-500 flex-shrink-0" />
             )}
             {thinkingHooks.length > 0 && (
-              <Badge variant="outline" className="text-xs px-1 py-0 ml-2">
+              <Badge variant="outline" className="text-xs px-1 py-0 ml-1 sm:ml-2 flex-shrink-0">
                 {thinkingHooks.length}
               </Badge>
             )}
-            <ChevronRightIcon className="h-3 w-3 transition-transform group-data-[state=open]:rotate-90" />
+            <ChevronRightIcon className="h-3 w-3 transition-transform group-data-[state=open]:rotate-90 flex-shrink-0" />
           </div>
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <div className="mt-2 ml-4 space-y-1.5 border-l-2 border-cyan-500/20 pl-4">
+          <div className="mt-2 ml-2 sm:ml-4 space-y-1.5 border-l-2 border-cyan-500/20 pl-2 sm:pl-4">
             {isLoading && (
               <div className="flex items-center space-x-2 text-xs text-muted-foreground">
                 <UpdateIcon className="h-3 w-3 animate-spin" />
-                <span>Loading thinking steps...</span>
+                <span className="hidden sm:inline">Loading thinking steps...</span>
+                <span className="sm:hidden">Loading...</span>
               </div>
             )}
             {thinkingHooks.map((hook, index) => {
