@@ -368,34 +368,36 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
   }
 
   return (
-    <div className="flex flex-col h-[600px]">
+    <div className="flex flex-col h-[400px] sm:h-[500px] md:h-[600px] lg:h-[700px]">
       <div className="flex-1 overflow-hidden flex flex-col gradient-border-neon rounded-lg relative bg-black/30">
         {/* Terminal header */}
-        <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-card/80 backdrop-blur-sm">
+        <div className="flex items-center justify-between px-2 sm:px-4 py-2 border-b border-border bg-card/80 backdrop-blur-sm">
           <div className="flex items-center space-x-2">
             <div className="flex items-center space-x-1.5">
               <div className="w-2.5 h-2.5 rounded-full bg-red-500"></div>
               <div className="w-2.5 h-2.5 rounded-full bg-yellow-500"></div>
               <div className="w-2.5 h-2.5 rounded-full bg-green-500"></div>
             </div>
-            <span className="text-xs font-mono text-muted-foreground">developer-chat</span>
+            <span className="text-xs font-mono text-muted-foreground hidden sm:inline">developer-chat</span>
           </div>
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-1 sm:space-x-2">
             <Button
               variant="ghost"
               size="sm"
               onClick={() => setShowSessions(!showSessions)}
-              className="text-xs font-mono h-6 px-2"
+              className="text-xs font-mono h-6 px-1 sm:px-2"
             >
-              {sessions.length} sessions
+              <span className="hidden sm:inline">{sessions.length} sessions</span>
+              <span className="sm:hidden">{sessions.length}</span>
             </Button>
             <Button
               variant="ghost"
               size="sm"
               onClick={startNewSession}
-              className="text-xs font-mono h-6 px-2"
+              className="text-xs font-mono h-6 px-1 sm:px-2"
             >
-              + New
+              <span className="hidden sm:inline">+ New</span>
+              <span className="sm:hidden">+</span>
             </Button>
             {sessionId && (
               <>
@@ -404,7 +406,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                   sessionError ? "bg-red-500" : "bg-green-500"
                 )}></span>
                 <span className={cn(
-                  "text-xs font-mono",
+                  "text-xs font-mono hidden md:inline",
                   sessionError ? "text-red-500" : "text-green-500"
                 )}>
                   session:{sessionId.slice(0, 8)}
@@ -417,7 +419,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
 
         {/* Sessions Dropdown */}
         {showSessions && (
-          <div className="absolute top-12 right-4 z-50 bg-card/95 backdrop-blur-sm border border-border rounded-lg shadow-xl p-2 max-h-64 overflow-y-auto min-w-[300px]">
+          <div className="absolute top-12 right-2 sm:right-4 z-50 bg-card/95 backdrop-blur-sm border border-border rounded-lg shadow-xl p-2 max-h-64 overflow-y-auto min-w-[280px] sm:min-w-[300px] max-w-[calc(100vw-2rem)]">
             <div className="text-xs font-mono text-muted-foreground mb-2 px-2">Chat Sessions:</div>
             {sessions.length === 0 ? (
               <div className="text-xs text-muted-foreground text-center py-4">No sessions yet</div>
@@ -459,7 +461,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
         )}
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto bg-card/30 p-4 space-y-4 font-mono text-sm relative">
+        <div className="flex-1 overflow-y-auto bg-card/30 p-2 sm:p-4 space-y-3 sm:space-y-4 font-mono text-xs sm:text-sm relative">
           {loadingHistory && (
             <div className="absolute inset-0 bg-card/80 flex items-center justify-center">
               <div className="flex flex-col items-center gap-2">
@@ -497,11 +499,11 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.2 }}
-                className="space-y-3"
+                className="space-y-2 sm:space-y-3"
               >
                 {/* Message Header */}
-                <div className="flex items-start justify-between">
-                  <div className="flex items-start space-x-2">
+                <div className="flex items-start justify-between flex-wrap gap-1 sm:gap-0 sm:flex-nowrap">
+                  <div className="flex items-start space-x-1 sm:space-x-2 flex-shrink-0">
                     <span className="text-xs text-muted-foreground">
                       [{formatTimestamp(message.timestamp)}]
                     </span>
@@ -523,25 +525,26 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                   {message.role === 'assistant' && hasHooks && (
                     <button
                       onClick={() => setShowAllHooks(!showAllHooks)}
-                      className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+                      className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1 flex-shrink-0"
                     >
                       <GearIcon className="h-3 w-3" />
-                      {showAllHooks ? 'Hide' : 'Show'} processing steps ({hooks.length})
+                      <span className="hidden sm:inline">{showAllHooks ? 'Hide' : 'Show'} processing steps ({hooks.length})</span>
+                      <span className="sm:hidden">({hooks.length})</span>
                     </button>
                   )}
                 </div>
                 
-                <div className="ml-6">
+                <div className="ml-3 sm:ml-6">
                   {/* Message Content */}
-                  <div className="space-y-3">
+                  <div className="space-y-2 sm:space-y-3">
                     {message.role === 'user' ? (
-                      <div className="bg-cyan-500/10 rounded-lg p-3 border border-cyan-500/30">
+                      <div className="bg-cyan-500/10 rounded-lg p-2 sm:p-3 border border-cyan-500/30">
                         <div className="whitespace-pre-wrap text-foreground">
                           {message.content.text || message.content}
                         </div>
                       </div>
                     ) : (
-                      <div className="bg-purple-500/10 rounded-lg p-3 border border-purple-500/30">
+                      <div className="bg-purple-500/10 rounded-lg p-2 sm:p-3 border border-purple-500/30">
                         <AssistantMessage 
                           message={message}
                           hooks={messageHooks?.get(message.id) || []}
@@ -556,7 +559,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                     
                     {/* Webhook Logs - moved to assistant messages */}
                     {message.role === 'assistant' && hasHooks && showAllHooks && (
-                      <div className="space-y-2 ml-4 border-l-2 border-muted pl-4">
+                      <div className="space-y-2 ml-2 sm:ml-4 border-l-2 border-muted pl-2 sm:pl-4">
                         <div className="text-xs text-muted-foreground mb-2">Processing logs:</div>
                         {hooks.map((hook, hookIndex) => {
                           const isExpanded = expandedHooks.has(hook.id)
@@ -644,28 +647,31 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
         </div>
 
         {/* Input */}
-        <form onSubmit={handleSubmit} className="border-t border-border bg-card/50 p-3">
-          <div className="flex items-center space-x-2 font-mono">
+        <form onSubmit={handleSubmit} className="border-t border-border bg-card/50 p-2 sm:p-3">
+          <div className="flex items-center space-x-1 sm:space-x-2 font-mono">
             <span className="text-green-400">➜</span>
             <span className="text-cyan-500">msg</span>
             <ChevronRightIcon className="h-4 w-4 text-muted-foreground" />
             <Input
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Enter your message..."
+              placeholder="Type message..."
               disabled={sendMutation.isPending}
-              className="flex-1 bg-transparent border-0 focus:ring-0 font-mono placeholder:text-muted-foreground/50"
+              className="flex-1 bg-transparent border-0 focus:ring-0 font-mono placeholder:text-muted-foreground/50 text-xs sm:text-sm"
             />
             <Button 
               type="submit" 
               disabled={sendMutation.isPending || !input.trim()}
-              className="bg-cyan-500 hover:bg-cyan-600 text-black font-mono hover:glow-cyan transition-all h-8 px-3"
+              className="bg-cyan-500 hover:bg-cyan-600 text-black font-mono hover:glow-cyan transition-all h-8 px-2 sm:px-3 min-w-[40px] sm:min-w-[60px]"
               size="sm"
             >
               {sendMutation.isPending ? (
                 <UpdateIcon className="h-4 w-4 animate-spin" />
               ) : (
-                <>send</>  
+                <>
+                  <span className="hidden sm:inline">send</span>
+                  <span className="sm:hidden">→</span>
+                </>
               )}
             </Button>
           </div>

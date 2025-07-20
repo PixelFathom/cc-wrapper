@@ -140,35 +140,37 @@ export function ChatSessionsList({ projectName, taskName, subProjectId }: ChatSe
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <h3 className="text-lg font-mono font-semibold flex items-center space-x-2">
-          <ChatBubbleIcon className="h-5 w-5 text-cyan-500" />
-          <span>Chat Sessions</span>
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm sm:text-lg font-mono font-semibold flex items-center space-x-1 sm:space-x-2">
+          <ChatBubbleIcon className="h-4 w-4 sm:h-5 sm:w-5 text-cyan-500" />
+          <span className="hidden sm:inline">Chat Sessions</span>
+          <span className="sm:hidden">Chats</span>
         </h3>
         <Button 
           onClick={() => setShowNewChat(true)}
-          className="bg-cyan-500 hover:bg-cyan-600 text-black font-mono hover:glow-cyan transition-all"
+          className="bg-cyan-500 hover:bg-cyan-600 text-black font-mono hover:glow-cyan transition-all px-2 sm:px-3"
           size="sm"
         >
-          <PlusIcon className="mr-2 h-4 w-4" />
-          New Chat
+          <PlusIcon className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+          <span className="hidden sm:inline">New Chat</span>
+          <span className="sm:hidden">New</span>
         </Button>
       </div>
 
       {/* Sessions List */}
       {isLoading ? (
-        <div className="terminal-bg rounded-lg border border-border p-8 text-center">
-          <UpdateIcon className="h-8 w-8 mx-auto mb-4 text-cyan-500 animate-spin" />
-          <div className="font-mono text-muted-foreground">Loading sessions...</div>
+        <div className="terminal-bg rounded-lg border border-border p-4 sm:p-8 text-center">
+          <UpdateIcon className="h-6 w-6 sm:h-8 sm:w-8 mx-auto mb-2 sm:mb-4 text-cyan-500 animate-spin" />
+          <div className="font-mono text-muted-foreground text-sm sm:text-base">Loading sessions...</div>
         </div>
       ) : sessions.length === 0 ? (
-        <div className="terminal-bg rounded-lg border border-border p-8 text-center">
-          <ChatBubbleIcon className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
-          <div className="font-mono text-muted-foreground">No chat sessions yet</div>
-          <div className="text-xs mt-2">Click "New Chat" to start a conversation</div>
+        <div className="terminal-bg rounded-lg border border-border p-4 sm:p-8 text-center">
+          <ChatBubbleIcon className="h-8 w-8 sm:h-12 sm:w-12 mx-auto mb-2 sm:mb-4 text-muted-foreground/50" />
+          <div className="font-mono text-muted-foreground text-sm sm:text-base">No chat sessions yet</div>
+          <div className="text-xs mt-1 sm:mt-2">Click "New Chat" to start a conversation</div>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-2 sm:space-y-3">
           {sessions.map((session: SessionPreview, index: number) => (
             <motion.div
               key={session.session_id}
@@ -179,63 +181,69 @@ export function ChatSessionsList({ projectName, taskName, subProjectId }: ChatSe
             >
               <button
                 onClick={() => setSelectedSessionId(session.session_id)}
-                className="w-full text-left p-4 hover:bg-card/50 transition-colors"
+                className="w-full text-left p-3 sm:p-4 hover:bg-card/50 transition-colors"
               >
-                <div className="space-y-3">
+                <div className="space-y-2 sm:space-y-3">
                   {/* Session Header */}
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center space-x-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center space-x-1 sm:space-x-2 flex-wrap">
                         <span className="font-mono text-xs text-cyan-500">
-                          session:{session.session_id.slice(0, 8)}
+                          session:{session.session_id.slice(0, 6)}
                         </span>
                         {session.has_active_processing && (
                           <Badge variant="secondary" className="text-xs px-1 py-0">
                             <UpdateIcon className="h-3 w-3 mr-1 animate-spin" />
-                            Processing
+                            <span className="hidden sm:inline">Processing</span>
+                            <span className="sm:hidden">•</span>
                           </Badge>
                         )}
                         {session.error_count > 0 && (
                           <Badge variant="destructive" className="text-xs px-1 py-0">
-                            {session.error_count} error{session.error_count > 1 ? 's' : ''}
+                            <span className="hidden sm:inline">{session.error_count} error{session.error_count > 1 ? 's' : ''}</span>
+                            <span className="sm:hidden">!</span>
                           </Badge>
                         )}
                       </div>
-                      <div className="text-sm font-medium mt-1 text-foreground">
-                        {session.first_message.slice(0, 100)}
-                        {session.first_message.length > 100 && '...'}
+                      <div className="text-xs sm:text-sm font-medium mt-1 text-foreground line-clamp-2">
+                        {session.first_message.slice(0, 60)}
+                        {session.first_message.length > 60 && '...'}
                       </div>
                     </div>
-                    <ChevronRightIcon className="h-4 w-4 text-muted-foreground" />
+                    <ChevronRightIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                   </div>
 
                   {/* Session Stats */}
-                  <div className="flex items-center justify-between text-xs text-muted-foreground font-mono">
-                    <div className="flex items-center space-x-3">
+                  <div className="flex items-center justify-between text-xs text-muted-foreground font-mono flex-wrap gap-1">
+                    <div className="flex items-center space-x-2 sm:space-x-3">
                       <span className="flex items-center space-x-1">
                         <ChatBubbleIcon className="h-3 w-3" />
-                        <span>{session.message_count} messages</span>
+                        <span className="hidden sm:inline">{session.message_count} messages</span>
+                        <span className="sm:hidden">{session.message_count}m</span>
                       </span>
                       {session.hook_count > 0 && (
                         <span className="flex items-center space-x-1">
                           <RocketIcon className="h-3 w-3" />
-                          <span>{session.hook_count} steps</span>
+                          <span className="hidden sm:inline">{session.hook_count} steps</span>
+                          <span className="sm:hidden">{session.hook_count}s</span>
                         </span>
                       )}
                     </div>
-                    <span>{new Date(session.updated_at).toLocaleString()}</span>
+                    <span className="text-[10px] sm:text-xs">
+                      {new Date(session.updated_at).toLocaleDateString()}
+                    </span>
                   </div>
 
-                  {/* Last Message Preview */}
+                  {/* Last Message Preview - Hidden on mobile */}
                   {session.last_message && (
-                    <div className="text-xs text-muted-foreground bg-muted/30 rounded p-2">
+                    <div className="text-xs text-muted-foreground bg-muted/30 rounded p-2 hidden sm:block">
                       <div className="flex items-center space-x-1 mb-1">
                         <PersonIcon className="h-3 w-3" />
                         <span>Last message:</span>
                       </div>
                       <div className="ml-4">
-                        {session.last_message.slice(0, 150)}
-                        {session.last_message.length > 150 && '...'}
+                        {session.last_message.slice(0, 120)}
+                        {session.last_message.length > 120 && '...'}
                       </div>
                     </div>
                   )}

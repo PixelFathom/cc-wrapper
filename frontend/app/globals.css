@@ -122,6 +122,14 @@
     border: 1px solid transparent;
   }
   
+  .gradient-border-subtle {
+    background: linear-gradient(var(--card), var(--card)) padding-box,
+                linear-gradient(135deg, 
+                  hsl(180 100% 50% / 0.3), 
+                  hsl(286 60% 67% / 0.3)) border-box;
+    border: 1px solid transparent;
+  }
+  
   .hover-lift {
     @apply transition-all duration-300;
   }
@@ -161,10 +169,17 @@
   box-shadow: 0 0 30px rgba(34, 197, 94, 0.7);
 }
 
-/* Custom scrollbar for dark theme */
+/* Custom scrollbar for dark theme - Mobile optimized */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
+}
+
+@media (max-width: 768px) {
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
 }
 
 ::-webkit-scrollbar-track {
@@ -249,5 +264,71 @@
   .backdrop-blur-xl {
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
+  }
+  
+  /* Mobile-specific utilities */
+  .line-clamp-1 {
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 1;
+  }
+  
+  .line-clamp-2 {
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+  
+  .line-clamp-3 {
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+  }
+  
+  /* Touch-friendly tap targets for mobile */
+  .tap-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  /* Mobile-specific spacing */
+  @media (max-width: 768px) {
+    .mobile-padding {
+      padding: 0.75rem;
+    }
+    
+    .mobile-text-sm {
+      font-size: 0.75rem;
+      line-height: 1rem;
+    }
+    
+    .mobile-gap-sm {
+      gap: 0.25rem;
+    }
+  }
+  
+  /* Prevent horizontal scroll on mobile */
+  @media (max-width: 768px) {
+    body {
+      overflow-x: hidden;
+    }
+    
+    * {
+      max-width: 100%;
+    }
+  }
+  
+  /* Mobile-friendly button styles */
+  .mobile-button {
+    @apply tap-target px-3 py-2 text-sm font-medium rounded-md transition-colors;
+  }
+  
+  @media (max-width: 768px) {
+    .mobile-button {
+      @apply px-2 py-1.5 text-xs;
+    }
   }
 }
