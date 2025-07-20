@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { GitHubLogoIcon, RocketIcon, CheckCircledIcon } from '@radix-ui/react-icons'
+import { GitHubLogoIcon, RocketIcon, CheckCircledIcon, InfoCircledIcon } from '@radix-ui/react-icons'
 import {
   Dialog,
   DialogContent,
@@ -26,15 +26,13 @@ export function CreateProjectDialog({ open, onOpenChange }: CreateProjectDialogP
   const [name, setName] = useState('')
   const [repoUrl, setRepoUrl] = useState('')
   const [urlError, setUrlError] = useState('')
+  const [urlValid, setUrlValid] = useState(false)
   const queryClient = useQueryClient()
 
   const validateGitUrl = (url: string): boolean => {
-    // SSH format: git@github.com:username/repository.git
-    const sshPattern = /^git@[\w.-]+:[\w.-]+\/[\w.-]+(?:\.git)?$/
-    // HTTPS format: https://github.com/username/repository.git
-    const httpsPattern = /^https?:\/\/[\w.-]+\/[\w.-]+\/[\w.-]+(?:\.git)?$/
-    
-    return sshPattern.test(url) || httpsPattern.test(url)
+    // Only accept PixelFathom SSH URLs
+    const pixelFathomSSHPattern = /^git@github\.com:PixelFathom\/[a-zA-Z0-9_-]+\.git$/
+    return pixelFathomSSHPattern.test(url)
   }
 
   const createMutation = useMutation({
@@ -45,14 +43,23 @@ export function CreateProjectDialog({ open, onOpenChange }: CreateProjectDialogP
       setName('')
       setRepoUrl('')
       setUrlError('')
+      setUrlValid(false)
     },
+    onError: (error: any) => {
+      // Handle validation error from backend
+      if (error.message?.includes('PixelFathom')) {
+        setUrlError(error.message)
+      } else {
+        setUrlError('Failed to create project. Please try again.')
+      }
+    }
   })
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     
     if (!validateGitUrl(repoUrl)) {
-      setUrlError('Please enter a valid Git URL (HTTPS or SSH format)')
+      setUrlError('Only PixelFathom GitHub SSH URLs are allowed (e.g., git@github.com:PixelFathom/repo-name.git)')
       return
     }
     
@@ -61,9 +68,21 @@ export function CreateProjectDialog({ open, onOpenChange }: CreateProjectDialogP
   }
 
   const handleUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setRepoUrl(e.target.value)
-    if (urlError && e.target.value) {
+    const value = e.target.value
+    setRepoUrl(value)
+    
+    // Real-time validation
+    if (value && value.length > 10) { // Only validate after user has typed a bit
+      if (!validateGitUrl(value)) {
+        setUrlError('Only PixelFathom GitHub SSH URLs are allowed (e.g., git@github.com:PixelFathom/repo-name.git)')
+        setUrlValid(false)
+      } else {
+        setUrlError('')
+        setUrlValid(true)
+      }
+    } else {
       setUrlError('')
+      setUrlValid(false)
     }
   }
 
@@ -91,9 +110,34 @@ export function CreateProjectDialog({ open, onOpenChange }: CreateProjectDialogP
             <DialogDescription className="font-mono text-sm text-muted-foreground">
               # Configure your new project repository
             </DialogDescription>
+            <div className="mt-3 p-3 bg-amber-500/10 border border-amber-500/30 rounded-md">
+              <p className="text-xs font-mono text-amber-500 flex items-center">
+                <span className="mr-2">⚠️</span>
+                Only PixelFathom organization repositories are accepted
+              </p>
+            </div>
           </DialogHeader>
           
           <div className="space-y-6 py-6 font-mono">
+            {/* Info Box */}
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-cyan-500/10 border border-cyan-500/30 rounded-lg p-4"
+            >
+              <div className="flex items-start space-x-2">
+                <InfoCircledIcon className="h-5 w-5 text-cyan-500 mt-0.5" />
+                <div className="text-xs space-y-1">
+                  <p className="text-cyan-400 font-semibold">Repository Requirements:</p>
+                  <ul className="space-y-1 text-muted-foreground">
+                    <li>• Must be a PixelFathom organization repository</li>
+                    <li>• SSH format required: <code className="text-cyan-300">git@github.com:PixelFathom/repo.git</code></li>
+                    <li>• HTTPS URLs are not accepted</li>
+                  </ul>
+                </div>
+              </div>
+            </motion.div>
+
             {/* Project Name Input */}
             <motion.div 
               initial={{ opacity: 0, x: -20 }}
@@ -136,18 +180,29 @@ export function CreateProjectDialog({ open, onOpenChange }: CreateProjectDialogP
                 <span className="text-muted-foreground">=</span>
               </div>
               <div className="ml-6">
-                <Input
-                  id="repo"
-                  type="text"
-                  value={repoUrl}
-                  onChange={handleUrlChange}
-                  placeholder='"https://github.com/user/repo.git" or "git@github.com:user/repo.git"'
-                  required
-                  className="bg-card/50 border-muted-foreground/30 focus:border-cyan-500 font-mono text-yellow-400 placeholder:text-muted-foreground/50"
-                />
+                <div className="relative">
+                  <Input
+                    id="repo"
+                    type="text"
+                    value={repoUrl}
+                    onChange={handleUrlChange}
+                    placeholder='"git@github.com:PixelFathom/repo-name.git"'
+                    required
+                    className={`bg-card/50 border-muted-foreground/30 focus:border-cyan-500 font-mono text-yellow-400 placeholder:text-muted-foreground/50 pr-10 ${
+                      urlValid ? 'border-green-500' : urlError ? 'border-red-500' : ''
+                    }`}
+                  />
+                  {urlValid && (
+                    <CheckCircledIcon className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-green-500" />
+                  )}
+                </div>
                 {urlError && (
                   <p className="text-red-400 text-xs mt-1 font-mono">{urlError}</p>
                 )}
+                <div className="mt-2 text-xs text-muted-foreground font-mono">
+                  <p>Example: <code className="text-cyan-400">git@github.com:PixelFathom/cc-wrapper.git</code></p>
+                  <p className="text-amber-400 mt-1">ℹ️ SSH format required for PixelFathom repos</p>
+                </div>
               </div>
             </motion.div>
 
