@@ -12,6 +12,8 @@ interface UploadZoneProps {
   cwd: string
   remotePath?: string
   onUploadComplete?: () => void
+  onUpload?: (file: File) => Promise<any>
+  acceptedFileTypes?: Record<string, string[]>
 }
 
 interface UploadStatus {
@@ -21,7 +23,7 @@ interface UploadStatus {
   remotePath?: string
 }
 
-export function UploadZone({ orgName, cwd, remotePath, onUploadComplete }: UploadZoneProps) {
+export function UploadZone({ orgName, cwd, remotePath, onUploadComplete, onUpload, acceptedFileTypes }: UploadZoneProps) {
   const [uploadStatuses, setUploadStatuses] = useState<UploadStatus[]>([])
 
   const onDrop = useCallback(
@@ -46,7 +48,9 @@ export function UploadZone({ orgName, cwd, remotePath, onUploadComplete }: Uploa
               : status
           ))
 
-          const result = await api.uploadFile(file, orgName, cwd, remotePath)
+          const result = onUpload 
+            ? await onUpload(file)
+            : await api.uploadFile(file, orgName, cwd, remotePath)
           
           // Update status to success
           setUploadStatuses(prev => prev.map((status, idx) => 
@@ -75,12 +79,12 @@ export function UploadZone({ orgName, cwd, remotePath, onUploadComplete }: Uploa
       }
       onUploadComplete?.()
     },
-    [orgName, cwd, remotePath, uploadStatuses.length, onUploadComplete]
+    [orgName, cwd, remotePath, uploadStatuses.length, onUploadComplete, onUpload]
   )
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
-    accept: {
+    accept: acceptedFileTypes || {
       'text/*': [],
       'image/*': [],
       'application/pdf': [],

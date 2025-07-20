@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     webhook_base_url: str = "http://localhost:8000"
     query_url: str = "http://host.docker.internal:8001/api/query"
     
+    # External API and file storage
+    external_api_url: str = "http://host.docker.internal:8001/api"
+    projects_dir: str = "/projects"
+    
     @property
     def database_url(self) -> str:
         return f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"

@@ -1,13 +1,20 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
-from typing import List
+from typing import List, Optional
 from uuid import UUID
+import aiohttp
+import os
+import tempfile
+from pathlib import Path
 
 from app.deps import get_session
-from app.models import Task, Project, DeploymentHook, SubProject
+from app.models import Task, Project, DeploymentHook, SubProject, KnowledgeBaseFile
 from app.schemas import TaskCreate, TaskRead, TaskUpdate
 from app.services.deployment_service import deployment_service
+from app.core.settings import get_settings
+
+settings = get_settings()
 
 router = APIRouter()
 
@@ -204,3 +211,166 @@ async def get_task_sub_projects(
             for sub_project in sub_projects
         ]
     }
+
+
+@router.post("/tasks/{task_id}/knowledge-base/upload")
+async def upload_to_task_knowledge_base(
+    task_id: UUID,
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(get_session)
+):
+    """Upload a file to task's .claude knowledge base folder"""
+    # Get task and project details
+    task = await session.get(Task, task_id)
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task not found"
+        )
+    
+    project = await session.get(Project, task.project_id)
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found"
+        )
+    
+    # Read file content once and store it
+    file_content = await file.read()
+    
+    # Prepare form data for Knowledge Base API
+    form_data = aiohttp.FormData()
+    form_data.add_field('file', file_content, filename=file.filename)
+    form_data.add_field('organization_name', settings.org_name)
+    form_data.add_field('project_path', f"{project.name}/{task.name}-{task.id}")
+        
+    # For now, skip the external API and use local storage directly
+    # This can be uncommented when the external API has the Knowledge Base endpoints
+    try:
+        # Call the external Knowledge Base API
+        async with aiohttp.ClientSession() as client:
+            async with client.post(
+                f"{settings.external_api_url}/knowledge-base/upload",
+                data=form_data
+            ) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    
+                    # Save file details to database
+                    kb_file = KnowledgeBaseFile(
+                        task_id=task_id,
+                        file_name=file.filename,
+                        file_path=result.get('file_path', file.filename),
+                        file_size=result.get('size_bytes', len(file_content)),
+                        content_type=file.content_type
+                    )
+                    session.add(kb_file)
+                    await session.commit()
+                    await session.refresh(kb_file)
+                    
+                    # Add database info to response
+                    result['id'] = str(kb_file.id)
+                    result['uploaded_at'] = kb_file.uploaded_at.isoformat()
+                    
+                    return result
+                else:
+                    error_detail = await response.text()
+                    raise HTTPException(
+                        status_code=response.status,
+                        detail=f"Knowledge Base API error: {error_detail}"
+                    )
+    except aiohttp.ClientError as e:
+        try:
+            # Create a temporary directory for the file
+            temp_dir = tempfile.gettempdir()
+            temp_kb_base = Path(temp_dir) / "cfpj_knowledge_base"
+            temp_kb_base.mkdir(exist_ok=True)
+            
+            # Create the knowledge base structure
+            kb_path = temp_kb_base / settings.org_name / project.name / f"{task.name}-{task.id}" / ".claude"
+            kb_path.mkdir(parents=True, exist_ok=True)
+            
+            file_path = kb_path / file.filename
+            
+            # Save file using the content we already read
+            with open(file_path, "wb") as buffer:
+                buffer.write(file_content)
+            
+            # Save file details to database
+            kb_file = KnowledgeBaseFile(
+                task_id=task_id,
+                file_name=file.filename,
+                file_path=file.filename,  # Simple path for now, can be nested later
+                file_size=file_path.stat().st_size,
+                content_type=file.content_type,
+                temp_path=str(file_path)
+            )
+            session.add(kb_file)
+            await session.commit()
+            await session.refresh(kb_file)
+            
+            return {
+                "id": str(kb_file.id),
+                "file_name": kb_file.file_name,
+                "file_path": kb_file.file_path,
+                "size_bytes": kb_file.file_size,
+                "content_type": kb_file.content_type,
+                "uploaded_at": kb_file.uploaded_at.isoformat(),
+                "status": "uploaded",
+                "message": f"File stored in knowledge base"
+            }
+
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to upload file: {str(e)}"
+        )
+
+
+@router.get("/tasks/{task_id}/knowledge-base/files")
+async def list_task_knowledge_base_files(
+    task_id: UUID,
+    session: AsyncSession = Depends(get_session)
+):
+    """List all files in task's .claude knowledge base folder"""
+    # Get task and project details
+    task = await session.get(Task, task_id)
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task not found"
+        )
+    
+    project = await session.get(Project, task.project_id)
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found"
+        )
+    
+    # Get knowledge base files from database
+    try:
+        stmt = select(KnowledgeBaseFile).where(KnowledgeBaseFile.task_id == task_id).order_by(KnowledgeBaseFile.uploaded_at.desc())
+        result = await session.execute(stmt)
+        kb_files = result.scalars().all()
+        
+        files = []
+        for kb_file in kb_files:
+            files.append({
+                "id": str(kb_file.id),
+                "file_name": kb_file.file_name,
+                "file_path": kb_file.file_path,
+                "size_bytes": kb_file.file_size,
+                "content_type": kb_file.content_type,
+                "uploaded_at": kb_file.uploaded_at.isoformat()
+            })
+        
+        return {
+            "files": files,
+            "total_files": len(files)
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list knowledge base files: {str(e)}"
+        )

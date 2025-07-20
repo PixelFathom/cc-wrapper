@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from .project import Project
     from .sub_project import SubProject
     from .deployment_hook import DeploymentHook
+    from .knowledge_base_file import KnowledgeBaseFile
 
 
 class Task(BaseModel, table=True):
@@ -30,3 +31,4 @@ class Task(BaseModel, table=True):
     project: Optional["Project"] = Relationship(back_populates="tasks")
     sub_projects: List["SubProject"] = Relationship(back_populates="task")
     deployment_hooks: List["DeploymentHook"] = Relationship(back_populates="task")
+    knowledge_base_files: List["KnowledgeBaseFile"] = Relationship(back_populates="task")

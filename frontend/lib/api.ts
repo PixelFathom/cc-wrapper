@@ -281,6 +281,49 @@ class ApiClient {
       method: 'POST',
     })
   }
+
+  // Knowledge Base
+  uploadToKnowledgeBase = async (taskId: string, file: File, filePath?: string): Promise<{
+    id: string
+    file_name: string
+    file_path: string
+    size_bytes: number
+    content_type: string | null
+    uploaded_at: string
+    status: string
+    message: string
+  }> => {
+    const formData = new FormData()
+    formData.append('file', file)
+    if (filePath) {
+      formData.append('file_path', filePath)
+    }
+
+    const response = await fetch(`${this.baseUrl}/tasks/${taskId}/knowledge-base/upload`, {
+      method: 'POST',
+      body: formData,
+    })
+
+    if (!response.ok) {
+      throw new Error(`Knowledge Base upload error: ${response.statusText}`)
+    }
+
+    return response.json()
+  }
+
+  getKnowledgeBaseFiles = async (taskId: string): Promise<{
+    files: Array<{
+      id: string
+      file_name: string
+      file_path: string
+      size_bytes: number
+      content_type: string | null
+      uploaded_at: string
+    }>
+    total_files: number
+  }> => {
+    return this.request(`/tasks/${taskId}/knowledge-base/files`)
+  }
 }
 
 export const api = new ApiClient()

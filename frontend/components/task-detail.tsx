@@ -6,7 +6,8 @@ import {
   ChatBubbleIcon, FileIcon, RocketIcon, ActivityLogIcon, 
   UploadIcon, ReloadIcon, LockClosedIcon, ClockIcon,
   CheckCircledIcon, CrossCircledIcon, DotFilledIcon,
-  PlayIcon, StopIcon, DownloadIcon, CommitIcon
+  PlayIcon, StopIcon, DownloadIcon, CommitIcon,
+  ReaderIcon
 } from '@radix-ui/react-icons'
 import { motion } from 'framer-motion'
 import { api, DeploymentHook } from '@/lib/api'
@@ -24,7 +25,7 @@ interface TaskDetailProps {
 }
 
 export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
-  const [activeTab, setActiveTab] = useState<'deployment' | 'files' | 'chat'>('deployment')
+  const [activeTab, setActiveTab] = useState<'deployment' | 'chat' | 'knowledge-base'>('deployment')
   
   // Helper function to format duration
   const formatDuration = (start: Date, end: Date) => {
@@ -65,6 +66,13 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
     queryFn: () => api.getTaskDeploymentHooks(taskId, 100), // Get more hooks
     enabled: !!task && task.deployment_status !== 'pending', // Fetch hooks if deployment has started
     refetchInterval: task && !task.deployment_completed ? 2000 : false, // Poll every 2 seconds only if not completed
+  })
+
+  // Fetch knowledge base files
+  const { data: knowledgeBaseFiles, refetch: refetchKnowledgeBase } = useQuery({
+    queryKey: ['knowledge-base-files', taskId],
+    queryFn: () => api.getKnowledgeBaseFiles(taskId),
+    enabled: !!task && activeTab === 'knowledge-base',
   })
 
   // Refetch task when deployment is completed
@@ -229,8 +237,8 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
         <div className="flex space-x-8">
           {[
             { id: 'deployment', label: 'Summary', icon: <ActivityLogIcon className="h-4 w-4" /> },
-            { id: 'files', label: 'Files', icon: <FileIcon className="h-4 w-4" /> },
             { id: 'chat', label: 'Chat', icon: <ChatBubbleIcon className="h-4 w-4" /> },
+            { id: 'knowledge-base', label: 'Knowledge Base', icon: <ReaderIcon className="h-4 w-4" /> },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -380,24 +388,6 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
           </motion.div>
         )}
 
-        {activeTab === 'files' && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-          >
-            <div className="mb-4">
-              <h3 className="text-lg font-mono font-semibold flex items-center space-x-2">
-                <UploadIcon className="h-5 w-5 text-cyan-500" />
-                <span>File Upload Zone</span>
-              </h3>
-            </div>
-            <UploadZone
-              orgName="default"
-              cwd={`${project?.name}/${task.name}/sub1`}
-            />
-          </motion.div>
-        )}
-
         {activeTab === 'chat' && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -408,6 +398,80 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
               taskName={task.name}
               subProjectId={subProjects?.sub_projects?.[0]?.id || `new-${taskId}`}
             />
+          </motion.div>
+        )}
+
+        {activeTab === 'knowledge-base' && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-6"
+          >
+            <div>
+              <h3 className="text-lg font-mono font-semibold flex items-center space-x-2 mb-4">
+                <ReaderIcon className="h-5 w-5 text-cyan-500" />
+                <span>Knowledge Base</span>
+              </h3>
+              <p className="text-sm text-muted-foreground mb-6">
+                Upload documents to the .claude folder for automatic reference by Claude when processing queries for this task.
+              </p>
+            </div>
+
+            {/* Upload Zone for Knowledge Base */}
+            <div className="bg-card rounded-lg border border-border p-6">
+              <h4 className="text-sm font-medium mb-4">Upload to Knowledge Base</h4>
+              <UploadZone
+                orgName={project?.organization_name || 'default'}
+                cwd={`${project?.name}/${task.name}-${task.id}`}
+                onUpload={async (file) => {
+                  try {
+                    const result = await api.uploadToKnowledgeBase(taskId, file)
+                    refetchKnowledgeBase()
+                    return result
+                  } catch (error) {
+                    console.error('Knowledge base upload failed:', error)
+                    throw error
+                  }
+                }}
+                acceptedFileTypes={{
+                  'text/*': ['.txt', '.md', '.mdx', '.json', '.yaml', '.yml', '.xml', '.csv'],
+                  'application/pdf': ['.pdf'],
+                  'application/json': ['.json'],
+                  'application/xml': ['.xml'],
+                  'application/x-yaml': ['.yaml', '.yml'],
+                }}
+              />
+            </div>
+
+            {/* Knowledge Base Files List */}
+            <div className="bg-card rounded-lg border border-border p-6">
+              <h4 className="text-sm font-medium mb-4">Knowledge Base Files</h4>
+              {knowledgeBaseFiles?.files && knowledgeBaseFiles.files.length > 0 ? (
+                <div className="space-y-2">
+                  {knowledgeBaseFiles.files.map((file) => (
+                    <div
+                      key={file.id}
+                      className="flex items-center justify-between p-3 rounded-lg hover:bg-muted/50 transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        <FileIcon className="h-4 w-4 text-muted-foreground" />
+                        <div>
+                          <p className="text-sm font-medium">{file.file_name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {(file.size_bytes / 1024).toFixed(1)} KB • Uploaded {new Date(file.uploaded_at).toLocaleDateString()}
+                            {file.content_type && ` • ${file.content_type}`}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground text-center py-8">
+                  No files in knowledge base yet. Upload files above to get started.
+                </p>
+              )}
+            </div>
           </motion.div>
         )}
       </div>
