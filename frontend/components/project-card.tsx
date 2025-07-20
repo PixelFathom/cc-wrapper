@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { motion } from 'framer-motion'
 import { GitHubLogoIcon, RocketIcon, CodeIcon, CheckCircledIcon, Cross2Icon } from '@radix-ui/react-icons'
 import { Project } from '@/lib/api'
+import { parseGitUrl } from '@/lib/git-url-parser'
 
 interface ProjectCardProps {
   project: Project
@@ -11,8 +12,9 @@ interface ProjectCardProps {
 }
 
 export function ProjectCard({ project, index }: ProjectCardProps) {
-  const repoPath = new URL(project.repo_url).pathname.slice(1)
-  const [repoOwner, repoName] = repoPath.split('/')
+  const gitInfo = parseGitUrl(project.repo_url)
+  const repoOwner = gitInfo?.owner || 'unknown'
+  const repoName = gitInfo?.repo || 'repository'
   const createdDate = new Date(project.created_at).toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',

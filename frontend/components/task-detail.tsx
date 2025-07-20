@@ -10,6 +10,7 @@ import {
 } from '@radix-ui/react-icons'
 import { motion } from 'framer-motion'
 import { api, DeploymentHook } from '@/lib/api'
+import { getGitHubUrl, parseGitUrl } from '@/lib/git-url-parser'
 import { UploadZone } from './upload-zone'
 import { SubProjectChat } from './sub-project-chat'
 import { Skeleton } from './ui/skeleton'
@@ -361,13 +362,16 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
                   <h3 className="text-sm font-medium mb-3">Repository</h3>
                   <div className="space-y-2">
                     <a
-                      href={project.repo_url}
+                      href={getGitHubUrl(project.repo_url)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="flex items-center gap-2 text-sm text-blue-500 hover:underline"
                     >
                       <CommitIcon className="h-4 w-4" />
-                      <span className="truncate">{project.repo_url}</span>
+                      <span className="truncate">{(() => {
+                        const gitInfo = parseGitUrl(project.repo_url)
+                        return gitInfo ? `${gitInfo.owner}/${gitInfo.repo}` : project.repo_url
+                      })()}</span>
                     </a>
                   </div>
                 </div>

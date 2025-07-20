@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { ChevronRightIcon, GitHubLogoIcon, RocketIcon, CodeIcon, ActivityLogIcon } from '@radix-ui/react-icons'
 import { motion } from 'framer-motion'
 import { api } from '@/lib/api'
+import { parseGitUrl, getGitHubUrl } from '@/lib/git-url-parser'
 import { TaskList } from './task-list'
 import { Button } from './ui/button'
 import { Skeleton } from './ui/skeleton'
@@ -47,8 +48,9 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
     )
   }
 
-  const repoPath = new URL(project.repo_url).pathname.slice(1)
-  const [repoOwner, repoName] = repoPath.split('/')
+  const gitInfo = parseGitUrl(project.repo_url)
+  const repoOwner = gitInfo?.owner || 'unknown'
+  const repoName = gitInfo?.repo || 'repository'
 
   return (
     <motion.div
@@ -166,7 +168,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
             className="mt-6 flex items-center space-x-4"
           >
             <a
-              href={project.repo_url}
+              href={getGitHubUrl(project.repo_url)}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center space-x-2 bg-card hover:bg-card/80 px-4 py-2 rounded-lg border border-border hover:border-cyan-500/50 transition-all group"

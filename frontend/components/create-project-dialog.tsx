@@ -25,7 +25,17 @@ interface CreateProjectDialogProps {
 export function CreateProjectDialog({ open, onOpenChange }: CreateProjectDialogProps) {
   const [name, setName] = useState('')
   const [repoUrl, setRepoUrl] = useState('')
+  const [urlError, setUrlError] = useState('')
   const queryClient = useQueryClient()
+
+  const validateGitUrl = (url: string): boolean => {
+    // SSH format: git@github.com:username/repository.git
+    const sshPattern = /^git@[\w.-]+:[\w.-]+\/[\w.-]+(?:\.git)?$/
+    // HTTPS format: https://github.com/username/repository.git
+    const httpsPattern = /^https?:\/\/[\w.-]+\/[\w.-]+\/[\w.-]+(?:\.git)?$/
+    
+    return sshPattern.test(url) || httpsPattern.test(url)
+  }
 
   const createMutation = useMutation({
     mutationFn: api.createProject,
@@ -34,12 +44,27 @@ export function CreateProjectDialog({ open, onOpenChange }: CreateProjectDialogP
       onOpenChange(false)
       setName('')
       setRepoUrl('')
+      setUrlError('')
     },
   })
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+    
+    if (!validateGitUrl(repoUrl)) {
+      setUrlError('Please enter a valid Git URL (HTTPS or SSH format)')
+      return
+    }
+    
+    setUrlError('')
     createMutation.mutate({ name, repo_url: repoUrl })
+  }
+
+  const handleUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setRepoUrl(e.target.value)
+    if (urlError && e.target.value) {
+      setUrlError('')
+    }
   }
 
   return (
@@ -113,13 +138,16 @@ export function CreateProjectDialog({ open, onOpenChange }: CreateProjectDialogP
               <div className="ml-6">
                 <Input
                   id="repo"
-                  type="url"
+                  type="text"
                   value={repoUrl}
-                  onChange={(e) => setRepoUrl(e.target.value)}
-                  placeholder='"https://github.com/username/repository.git"'
+                  onChange={handleUrlChange}
+                  placeholder='"https://github.com/user/repo.git" or "git@github.com:user/repo.git"'
                   required
                   className="bg-card/50 border-muted-foreground/30 focus:border-cyan-500 font-mono text-yellow-400 placeholder:text-muted-foreground/50"
                 />
+                {urlError && (
+                  <p className="text-red-400 text-xs mt-1 font-mono">{urlError}</p>
+                )}
               </div>
             </motion.div>
 
