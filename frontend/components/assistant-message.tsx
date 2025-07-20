@@ -37,30 +37,27 @@ export function AssistantMessage({
   formatHookMessage,
   isWaitingForResponse = false 
 }: AssistantMessageProps) {
+  // Always start with hooks collapsed for cleaner UI
   const [showHooks, setShowHooks] = useState(false)
   const isMobile = useMobile(768)
-
-  // Close hooks by default on mobile for better UX
-  useEffect(() => {
-    if (isMobile && showHooks && hooks.length > 3) {
-      setShowHooks(false)
-    }
-  }, [isMobile, hooks.length, showHooks])
   
   // Extract content from message
   const content = message.content?.text || ''
   const metadata = message.content?.metadata || {}
   const isProcessing = message.isProcessing || metadata.status === 'processing'
   
-  // Show content if we have it and it's not just processing text
-  const hasContent = content && content !== '' && !content.includes('Processing')
+  // Always show the full final content when available
+  const hasContent = content && content !== ''
   const hasHooks = hooks.length > 0
+  
+  // Check if this is a final complete message (not processing)
+  const isCompleteMessage = hasContent && !isProcessing
   
   return (
     <div className="space-y-3">
       {/* Main content */}
       <div className="space-y-2">
-        {hasContent ? (
+        {isCompleteMessage ? (
           <div className="whitespace-pre-wrap text-foreground leading-relaxed break-words overflow-hidden">
             {content}
           </div>
@@ -81,8 +78,8 @@ export function AssistantMessage({
         )}
       </div>
       
-      {/* Processing Steps / Hooks */}
-      {hasHooks && (
+      {/* Processing Steps / Hooks - Only show for incomplete messages or when explicitly requested */}
+      {hasHooks && (!isCompleteMessage || showHooks) && (
         <div className="space-y-2">
           <button
             onClick={() => setShowHooks(!showHooks)}

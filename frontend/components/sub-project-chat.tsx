@@ -52,7 +52,8 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
   const [showSessions, setShowSessions] = useState(false)
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [expandedHooks, setExpandedHooks] = useState<Set<string>>(new Set())
-  const [showAllHooks, setShowAllHooks] = useState(true)
+  // Collapse all hooks by default for cleaner UI
+  const [showAllHooks, setShowAllHooks] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const cwd = `${projectName}/${taskName}`

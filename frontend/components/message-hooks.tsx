@@ -16,7 +16,8 @@ interface MessageHooksProps {
 }
 
 export function MessageHooks({ messageId, isProcessing = false, showByDefault = false }: MessageHooksProps) {
-  const [isOpen, setIsOpen] = useState(showByDefault || isProcessing)
+  // Always start collapsed for cleaner UI, only show when actively processing
+  const [isOpen, setIsOpen] = useState(isProcessing && showByDefault)
 
   // Fetch hooks for this message
   const { data: hooksData, isLoading } = useQuery({
@@ -34,12 +35,15 @@ export function MessageHooks({ messageId, isProcessing = false, showByDefault = 
     (h.message_type === 'ResultMessage' && h.content_type === 'result')
   )
 
-  // Update open state when processing status changes
+  // Only auto-open when actively processing and showByDefault is true
   useEffect(() => {
-    if (isProcessing) {
+    if (isProcessing && showByDefault) {
       setIsOpen(true)
+    } else if (!isProcessing) {
+      // Auto-collapse when processing is complete
+      setIsOpen(false)
     }
-  }, [isProcessing])
+  }, [isProcessing, showByDefault])
 
   // Don't render anything if no hooks
   if (!hooks.length && !isLoading) {
