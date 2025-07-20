@@ -1,0 +1,68 @@
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Dict, Any
+from uuid import UUID
+from app.deps import get_session, get_redis_client
+from app.services.deployment_service import deployment_service
+from app.services.chat_service import chat_service
+import logging
+import redis.asyncio as redis
+
+logger = logging.getLogger(__name__)
+router = APIRouter()
+
+
+@router.post("/webhooks/deployment/{task_id}")
+async def receive_deployment_webhook(
+    task_id: UUID,
+    webhook_data: Dict[str, Any],
+    session: AsyncSession = Depends(get_session)
+):
+    """Receive deployment status webhooks from remote service"""
+    try:
+        # Log webhook receipt with limited data for large payloads
+        log_data = str(webhook_data)
+        if len(log_data) > 500:
+            logger.info(f"Received webhook for task {task_id} with large payload ({len(log_data)} chars)")
+            logger.debug(f"Webhook type: {webhook_data.get('type')}, status: {webhook_data.get('status')}")
+        else:
+            logger.info(f"Received webhook for task {task_id}: {webhook_data}")
+        
+        await deployment_service.process_webhook(session, task_id, webhook_data)
+        return {"status": "received", "task_id": task_id}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error processing webhook: {e}")
+        raise HTTPException(status_code=500, detail="Failed to process webhook")
+
+
+@router.post("/webhooks/chat/{chat_id}")
+async def receive_chat_webhook(
+    chat_id: UUID,
+    webhook_data: Dict[str, Any],
+    session: AsyncSession = Depends(get_session),
+    redis_client: redis.Redis = Depends(get_redis_client)
+):
+    """Receive chat processing webhooks from remote service"""
+    try:
+        logger.info(
+            f"🔴 Webhook endpoint called | "
+            f"chat_id={str(chat_id)[:8]}... | "
+            f"webhook_type={webhook_data.get('type')} | "
+            f"webhook_status={webhook_data.get('status')} | "
+            f"webhook_session_id={webhook_data.get('session_id')} | "
+            f"webhook_keys={list(webhook_data.keys())}"
+        )
+        # Set Redis client for real-time updates
+        chat_service.set_redis_client(redis_client)
+        await chat_service.process_webhook(session, chat_id, webhook_data)
+        return {"status": "received", "chat_id": chat_id}
+    except ValueError as e:
+        logger.error(f"❌ Webhook ValueError: {e}")
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ Webhook Exception: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Failed to process chat webhook")

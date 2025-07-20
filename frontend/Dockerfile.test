@@ -1,0 +1,27 @@
+# Dockerfile for running Playwright tests
+FROM mcr.microsoft.com/playwright:v1.40.0-focal
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies
+RUN npm ci
+
+# Copy application files
+COPY . .
+
+# Build the application
+RUN npm run build
+
+# Make test script executable
+RUN chmod +x scripts/test-docker.sh
+
+# Set environment variables
+ENV DOCKER_ENV=true
+ENV CI=true
+
+# Default command runs tests
+CMD ["./scripts/test-docker.sh", "--reporter=list"]

@@ -1,0 +1,15 @@
+{
+  "name": "cfpj",
+  "version": "1.0.0",
+  "description": "A FastAPI + PostgreSQL + Redis backend with a mobile-friendly Next.js frontend for managing projects, tasks, and collaborative chat sessions.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@playwright/test": "^1.54.1"
+  }
+}
