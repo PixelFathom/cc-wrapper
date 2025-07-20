@@ -8,6 +8,7 @@ import { UpdateIcon, CircleIcon, ChevronDownIcon, DotFilledIcon } from '@radix-u
 import { cn } from '@/lib/utils'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useMobile } from '@/lib/hooks/useMobile'
+import { MarkdownRenderer } from './markdown-renderer'
 
 interface Message {
   id: string
@@ -58,9 +59,10 @@ export function AssistantMessage({
       {/* Main content */}
       <div className="space-y-2">
         {isCompleteMessage ? (
-          <div className="whitespace-pre-wrap text-foreground leading-relaxed break-words overflow-hidden">
-            {content}
-          </div>
+          <MarkdownRenderer 
+            content={content}
+            className="text-foreground leading-relaxed break-words overflow-hidden"
+          />
         ) : isProcessing ? (
           <div className="flex items-center space-x-2 flex-wrap">
             <UpdateIcon className="h-4 w-4 text-purple-500 animate-spin flex-shrink-0" />
