@@ -290,7 +290,7 @@ async def get_chat_hooks(
 @router.get("/messages/{message_id}/hooks")
 async def get_message_hooks(
     message_id: UUID,
-    limit: int = 50,
+    limit: int = 500,
     session: AsyncSession = Depends(get_session)
 ):
     """Get hooks for a specific message (assistant or user)"""
