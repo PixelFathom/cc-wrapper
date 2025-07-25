@@ -13,7 +13,7 @@ interface MarkdownRendererProps {
 
 export function MarkdownRenderer({ content, className }: MarkdownRendererProps) {
   return (
-    <div className={cn("prose prose-invert max-w-none", className)}>
+    <div className={cn("prose prose-sm prose-invert max-w-none overflow-x-hidden", className)}>
       <ReactMarkdown
         components={{
           // Code blocks
@@ -26,7 +26,12 @@ export function MarkdownRenderer({ content, className }: MarkdownRendererProps) 
                 style={oneDark}
                 language={language}
                 PreTag="div"
-                className="rounded-md border border-border"
+                className="rounded-md border border-border !overflow-x-auto"
+                customStyle={{
+                  margin: 0,
+                  fontSize: '0.875rem',
+                  lineHeight: '1.5'
+                }}
                 {...props}
               >
                 {String(children).replace(/\n$/, '')}
@@ -42,17 +47,17 @@ export function MarkdownRenderer({ content, className }: MarkdownRendererProps) 
           },
           // Headers
           h1: ({ children }) => (
-            <h1 className="text-2xl font-bold text-foreground mt-6 mb-4 border-b border-border pb-2">
+            <h1 className="text-xl font-bold text-foreground mt-4 mb-3 border-b border-border pb-2">
               {children}
             </h1>
           ),
           h2: ({ children }) => (
-            <h2 className="text-xl font-semibold text-foreground mt-5 mb-3 border-b border-border pb-1">
+            <h2 className="text-lg font-semibold text-foreground mt-3 mb-2 border-b border-border pb-1">
               {children}
             </h2>
           ),
           h3: ({ children }) => (
-            <h3 className="text-lg font-semibold text-foreground mt-4 mb-2">
+            <h3 className="text-base font-semibold text-foreground mt-3 mb-2">
               {children}
             </h3>
           ),
@@ -73,18 +78,18 @@ export function MarkdownRenderer({ content, className }: MarkdownRendererProps) 
           ),
           // Paragraphs
           p: ({ children }) => (
-            <p className="text-foreground leading-relaxed mb-4 last:mb-0">
+            <p className="text-foreground leading-normal mb-3 last:mb-0">
               {children}
             </p>
           ),
           // Lists
           ul: ({ children }) => (
-            <ul className="list-disc list-inside space-y-1 mb-4 text-foreground pl-4">
+            <ul className="list-disc list-inside space-y-0.5 mb-3 text-foreground pl-4">
               {children}
             </ul>
           ),
           ol: ({ children }) => (
-            <ol className="list-decimal list-inside space-y-1 mb-4 text-foreground pl-4">
+            <ol className="list-decimal list-inside space-y-0.5 mb-3 text-foreground pl-4">
               {children}
             </ol>
           ),

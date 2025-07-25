@@ -195,6 +195,32 @@
   @apply bg-muted-foreground;
 }
 
+/* Custom scrollbar for markdown content */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  @apply bg-muted/20 rounded-lg;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  @apply bg-purple-500/50 rounded-lg;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  @apply bg-purple-500/70;
+}
+
+/* Firefox scrollbar */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(286 60% 67% / 0.5) hsl(var(--muted) / 0.2);
+}
+
 /* Code syntax highlighting classes */
 .syntax-keyword { color: hsl(var(--syntax-keyword)); }
 .syntax-string { color: hsl(var(--syntax-string)); }
@@ -202,6 +228,33 @@
 .syntax-variable { color: hsl(var(--syntax-variable)); }
 .syntax-comment { color: hsl(var(--syntax-comment)); }
 .syntax-number { color: hsl(var(--syntax-number)); }
+
+/* Compact prose styling for markdown */
+.prose-sm {
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.prose-sm p {
+  margin-bottom: 0.75rem;
+}
+
+.prose-sm h1,
+.prose-sm h2,
+.prose-sm h3,
+.prose-sm h4,
+.prose-sm h5,
+.prose-sm h6 {
+  margin-top: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+/* Prevent horizontal overflow globally */
+.prose-sm pre,
+.prose-sm code {
+  max-width: 100%;
+  overflow-wrap: break-word;
+}
 
 /* Selection color */
 ::selection {

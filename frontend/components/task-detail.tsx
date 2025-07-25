@@ -7,7 +7,7 @@ import {
   UploadIcon, ReloadIcon, LockClosedIcon, ClockIcon,
   CheckCircledIcon, CrossCircledIcon, DotFilledIcon,
   PlayIcon, StopIcon, DownloadIcon, CommitIcon,
-  ReaderIcon
+  ReaderIcon, UpdateIcon, LightningBoltIcon, CubeIcon
 } from '@radix-ui/react-icons'
 import { motion } from 'framer-motion'
 import { api, DeploymentHook } from '@/lib/api'
@@ -112,141 +112,207 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="container mx-auto px-6 py-8"
+      className="container mx-auto px-4 sm:px-6 py-6 sm:py-8"
     >
-      {/* Breadcrumb */}
-      <nav className="flex items-center space-x-2 text-sm font-mono mb-6">
-        <Link href="/" className="text-muted-foreground hover:text-cyan-500 transition-colors">
+      {/* Breadcrumb - Mobile Optimized */}
+      <nav className="flex items-center space-x-1 sm:space-x-2 text-xs sm:text-sm font-mono mb-4 sm:mb-6 overflow-x-auto">
+        <Link href="/" className="text-muted-foreground hover:text-cyan-500 transition-colors whitespace-nowrap">
           ~/projects
         </Link>
         <span className="text-muted-foreground">/</span>
-        <Link href={`/p/${projectId}`} className="text-muted-foreground hover:text-cyan-500 transition-colors">
+        <Link href={`/p/${projectId}`} className="text-muted-foreground hover:text-cyan-500 transition-colors whitespace-nowrap">
           {projectSlug}
         </Link>
         <span className="text-muted-foreground">/</span>
-        <span className="text-cyan-500">tasks/{taskSlug}</span>
+        <span className="text-cyan-500 whitespace-nowrap">tasks/{taskSlug}</span>
       </nav>
 
-      {/* Modern GitHub Actions-style Header */}
-      <div className="bg-card rounded-lg border border-border mb-6 overflow-hidden">
-        <div className="p-6">
-          <div className="flex items-start justify-between">
-            <div>
-              <div className="flex items-center gap-3 mb-2">
-                <h1 className="text-2xl font-semibold">{task.name}</h1>
+      {/* Modern Task Header - Mobile Friendly */}
+      <div className="relative mb-6">
+        {/* Background Gradient Effect */}
+        <div className="absolute inset-0 bg-gradient-to-r from-cyan-500/10 via-purple-500/10 to-cyan-500/10 rounded-xl md:rounded-2xl blur-xl" />
+        
+        <div className="relative bg-card/90 backdrop-blur-xl rounded-xl md:rounded-2xl border border-border/50 overflow-hidden">
+          {/* Status Bar */}
+          <div className={`h-1 ${
+            task.deployment_status === 'completed' ? 'bg-gradient-to-r from-green-400 to-green-600' :
+            task.deployment_status === 'failed' ? 'bg-gradient-to-r from-red-400 to-red-600' :
+            task.deployment_status === 'deploying' || task.deployment_status === 'initializing' ? 'bg-gradient-to-r from-yellow-400 to-orange-500 animate-pulse' :
+            'bg-gradient-to-r from-gray-400 to-gray-600'
+          }`} />
+          
+          <div className="p-4 md:p-6 lg:p-8">
+            {/* Task Title and Status - Mobile Optimized */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">
+                  {task.name}
+                </h1>
                 {task.deployment_status === 'completed' ? (
-                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-500/10 text-green-500 border border-green-500/20">
-                    <CheckCircledIcon className="h-3 w-3 mr-1" />
+                  <motion.span 
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    className="inline-flex items-center px-2.5 py-1 rounded-full text-xs sm:text-sm font-medium bg-green-500/20 text-green-400 border border-green-500/30 shadow-[0_0_15px_rgba(34,197,94,0.3)] self-start sm:self-auto"
+                  >
+                    <CheckCircledIcon className="h-3.5 w-3.5 mr-1" />
                     Success
-                  </span>
+                  </motion.span>
                 ) : task.deployment_status === 'failed' ? (
-                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-500/10 text-red-500 border border-red-500/20">
-                    <CrossCircledIcon className="h-3 w-3 mr-1" />
+                  <motion.span 
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    className="inline-flex items-center px-2.5 py-1 rounded-full text-xs sm:text-sm font-medium bg-red-500/20 text-red-400 border border-red-500/30 shadow-[0_0_15px_rgba(239,68,68,0.3)] self-start sm:self-auto"
+                  >
+                    <CrossCircledIcon className="h-3.5 w-3.5 mr-1" />
                     Failed
-                  </span>
+                  </motion.span>
                 ) : task.deployment_status === 'deploying' || task.deployment_status === 'initializing' ? (
-                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-500/10 text-yellow-500 border border-yellow-500/20">
-                    <DotFilledIcon className="h-3 w-3 mr-1 animate-pulse" />
-                    In progress
-                  </span>
+                  <motion.span 
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    className="inline-flex items-center px-2.5 py-1 rounded-full text-xs sm:text-sm font-medium bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 shadow-[0_0_15px_rgba(245,158,11,0.3)] self-start sm:self-auto"
+                  >
+                    <UpdateIcon className="h-3.5 w-3.5 mr-1 animate-spin" />
+                    In Progress
+                  </motion.span>
                 ) : (
-                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-500/10 text-gray-500 border border-gray-500/20">
-                    <ClockIcon className="h-3 w-3 mr-1" />
+                  <motion.span 
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    className="inline-flex items-center px-2.5 py-1 rounded-full text-xs sm:text-sm font-medium bg-gray-500/20 text-gray-400 border border-gray-500/30 self-start sm:self-auto"
+                  >
+                    <ClockIcon className="h-3.5 w-3.5 mr-1" />
                     Queued
-                  </span>
+                  </motion.span>
                 )}
               </div>
               
-              <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                <div className="flex items-center gap-1">
-                  <CommitIcon className="h-4 w-4" />
-                  <span className="font-mono">{task.id.slice(0, 7)}</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <ClockIcon className="h-4 w-4" />
-                  <span>
-                    Created {new Date(task.created_at).toLocaleDateString('en-US', {
-                      month: 'short',
-                      day: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit'
-                    })}
-                  </span>
-                </div>
-                {task.deployment_completed_at && (
-                  <div className="flex items-center gap-1">
-                    <CheckCircledIcon className="h-4 w-4" />
-                    <span>
-                      Completed in {formatDuration(
-                        new Date(task.deployment_started_at || task.created_at),
-                        new Date(task.deployment_completed_at)
-                      )}
-                    </span>
-                  </div>
-                )}
-              </div>
-              
-              {/* MCP Servers */}
-              {task.mcp_servers && task.mcp_servers.length > 0 && (
-                <div className="flex items-center gap-2 mt-3">
-                  <span className="text-xs text-muted-foreground">MCP Servers:</span>
-                  <div className="flex items-center gap-2">
-                    {task.mcp_servers.map((server: any) => (
-                      <span
-                        key={server.server_type}
-                        className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-500/10 text-blue-500 border border-blue-500/20"
-                      >
-                        {server.server_type}
-                        {server.access_token && <LockClosedIcon className="h-3 w-3 ml-1" />}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-            
-            {/* Actions */}
-            <div className="flex items-center gap-2">
+              {/* Retry Button - Mobile Positioned */}
               {task.deployment_status === 'failed' && (
                 <Button
                   onClick={() => api.retryTaskDeployment(taskId).then(() => refetchTask())}
                   size="sm"
-                  variant="outline"
-                  className="text-xs"
+                  className="self-start sm:self-auto bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white border-0 shadow-lg text-xs sm:text-sm"
                 >
                   <ReloadIcon className="h-3 w-3 mr-1" />
-                  Re-run
+                  Retry
                 </Button>
               )}
-              <Button
-                size="sm"
-                variant="outline"
-                className="text-xs"
-                disabled
-              >
-                <DownloadIcon className="h-3 w-3 mr-1" />
-                Download logs
-              </Button>
             </div>
+            
+            {/* Task Metadata Grid - Responsive */}
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <div className="bg-black/20 rounded-lg p-2.5 sm:p-3 border border-border/30">
+                <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-muted-foreground mb-0.5">
+                  <CommitIcon className="h-3 w-3" />
+                  <span>Task ID</span>
+                </div>
+                <span className="font-mono text-xs sm:text-sm text-cyan-400">{task.id.slice(0, 8)}</span>
+              </div>
+              
+              <div className="bg-black/20 rounded-lg p-2.5 sm:p-3 border border-border/30">
+                <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-muted-foreground mb-0.5">
+                  <ClockIcon className="h-3 w-3" />
+                  <span>Created</span>
+                </div>
+                <span className="text-xs sm:text-sm">
+                  {new Date(task.created_at).toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  })}
+                </span>
+              </div>
+              
+              {task.deployment_completed_at && (
+                <div className="bg-black/20 rounded-lg p-2.5 sm:p-3 border border-border/30">
+                  <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-muted-foreground mb-0.5">
+                    <LightningBoltIcon className="h-3 w-3" />
+                    <span>Duration</span>
+                  </div>
+                  <span className="text-xs sm:text-sm text-yellow-400">
+                    {formatDuration(
+                      new Date(task.deployment_started_at || task.created_at),
+                      new Date(task.deployment_completed_at)
+                    )}
+                  </span>
+                </div>
+              )}
+              
+              {deploymentData && (() => {
+                const totalCost = deploymentData.hooks.reduce((sum, hook) => 
+                  sum + (hook.data?.total_cost_usd || 0), 0
+                )
+                return totalCost > 0 ? (
+                  <div className="bg-black/20 rounded-lg p-2.5 sm:p-3 border border-border/30">
+                    <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-muted-foreground mb-0.5">
+                      <ActivityLogIcon className="h-3 w-3" />
+                      <span>Total Cost</span>
+                    </div>
+                    <span className="text-xs sm:text-sm text-green-400">${totalCost.toFixed(4)}</span>
+                  </div>
+                ) : null
+              })()}
+            </div>
+            
+            {/* MCP Servers - Mobile Optimized */}
+            {task.mcp_servers && task.mcp_servers.length > 0 && (
+              <div className="space-y-2">
+                <span className="text-xs sm:text-sm text-muted-foreground">MCP Servers:</span>
+                <div className="flex flex-wrap gap-2">
+                  {task.mcp_servers.map((server: any) => (
+                    <motion.span
+                      key={server.server_type}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] sm:text-xs font-medium bg-gradient-to-r from-blue-500/20 to-purple-500/20 text-blue-400 border border-blue-500/30"
+                    >
+                      <CubeIcon className="h-3 w-3 mr-1" />
+                      {server.server_type}
+                      {server.access_token && <LockClosedIcon className="h-3 w-3 ml-1 text-yellow-400" />}
+                    </motion.span>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {/* Progress Bar for Active Deployments */}
+            {(task.deployment_status === 'deploying' || task.deployment_status === 'initializing') && deploymentData && (
+              <div className="mt-4">
+                <div className="flex items-center justify-between text-[10px] sm:text-xs text-muted-foreground mb-2">
+                  <span>Deployment Progress</span>
+                  <span>{deploymentData.hooks.length} events</span>
+                </div>
+                <div className="h-1.5 sm:h-2 bg-black/30 rounded-full overflow-hidden">
+                  <motion.div 
+                    className="h-full bg-gradient-to-r from-cyan-500 to-purple-500"
+                    initial={{ width: '0%' }}
+                    animate={{ width: '60%' }}
+                    transition={{ duration: 0.5 }}
+                  />
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Modern Tab Navigation */}
-      <div className="border-b border-border mb-6">
-        <div className="flex space-x-8">
+      {/* Modern Tab Navigation - Mobile Optimized */}
+      <div className="bg-card/50 backdrop-blur-sm rounded-lg sm:rounded-xl border border-border/50 p-1 mb-6 sm:mb-8 overflow-x-auto">
+        <div className="flex space-x-1 min-w-max">
           {[
-            { id: 'deployment', label: 'Summary', icon: <ActivityLogIcon className="h-4 w-4" /> },
-            { id: 'chat', label: 'Chat', icon: <ChatBubbleIcon className="h-4 w-4" /> },
-            { id: 'knowledge-base', label: 'Knowledge Base', icon: <ReaderIcon className="h-4 w-4" /> },
+            { id: 'deployment', label: 'Summary', icon: <ActivityLogIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
+            { id: 'chat', label: 'Chat', icon: <ChatBubbleIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
+            { id: 'knowledge-base', label: 'Knowledge Base', icon: <ReaderIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
           ].map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
-              className={`flex items-center gap-2 pb-3 text-sm font-medium border-b-2 transition-all ${
+              className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-md sm:rounded-lg text-xs sm:text-sm font-medium transition-all whitespace-nowrap ${
                 activeTab === tab.id
-                  ? 'border-foreground text-foreground'
-                  : 'border-transparent text-muted-foreground hover:text-foreground'
+                  ? 'bg-gradient-to-r from-cyan-500/20 to-purple-500/20 text-foreground border border-cyan-500/30 shadow-lg'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
               }`}
             >
               {tab.icon}
@@ -285,35 +351,46 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
             
             {/* Sidebar - 1 column */}
             <div className="space-y-4">
-              {/* Run Summary */}
-              <div className="bg-card rounded-lg border border-border p-4">
-                <h3 className="text-sm font-medium mb-3">Run Summary</h3>
+              {/* Run Summary with Enhanced Design */}
+              <motion.div 
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                className="bg-gradient-to-br from-card to-card/80 rounded-xl border border-border/50 p-5 backdrop-blur-sm"
+              >
+                <h3 className="text-sm font-semibold mb-4 flex items-center gap-2">
+                  <ActivityLogIcon className="h-4 w-4 text-cyan-400" />
+                  Run Summary
+                </h3>
                 <div className="space-y-3">
-                  <div className="flex justify-between items-center text-sm">
-                    <span className="text-muted-foreground">Status</span>
-                    <span className={`font-medium ${
-                      task.deployment_status === 'completed' ? 'text-green-500' :
-                      task.deployment_status === 'failed' ? 'text-red-500' :
-                      task.deployment_status === 'deploying' ? 'text-yellow-500' :
-                      'text-gray-500'
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground">Status</span>
+                    <div className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium ${
+                      task.deployment_status === 'completed' ? 'bg-green-500/20 text-green-400' :
+                      task.deployment_status === 'failed' ? 'bg-red-500/20 text-red-400' :
+                      task.deployment_status === 'deploying' ? 'bg-yellow-500/20 text-yellow-400' :
+                      'bg-gray-500/20 text-gray-400'
                     }`}>
+                      {task.deployment_status === 'completed' && <CheckCircledIcon className="h-3 w-3" />}
+                      {task.deployment_status === 'failed' && <CrossCircledIcon className="h-3 w-3" />}
+                      {task.deployment_status === 'deploying' && <UpdateIcon className="h-3 w-3 animate-spin" />}
+                      {task.deployment_status === 'pending' && <ClockIcon className="h-3 w-3" />}
                       {task.deployment_status.charAt(0).toUpperCase() + task.deployment_status.slice(1)}
-                    </span>
+                    </div>
                   </div>
                   
                   {task.deployment_started_at && (
-                    <div className="flex justify-between items-center text-sm">
-                      <span className="text-muted-foreground">Started</span>
-                      <span className="font-mono text-xs">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-muted-foreground">Started</span>
+                      <span className="font-mono text-xs text-cyan-400">
                         {new Date(task.deployment_started_at).toLocaleTimeString()}
                       </span>
                     </div>
                   )}
                   
                   {task.deployment_completed_at && (
-                    <div className="flex justify-between items-center text-sm">
-                      <span className="text-muted-foreground">Duration</span>
-                      <span className="font-mono text-xs">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-muted-foreground">Duration</span>
+                      <span className="font-mono text-xs text-yellow-400">
                         {formatDuration(
                           new Date(task.deployment_started_at || task.created_at),
                           new Date(task.deployment_completed_at)
@@ -324,9 +401,9 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
                   
                   {deploymentData && (
                     <>
-                      <div className="flex justify-between items-center text-sm">
-                        <span className="text-muted-foreground">Total Events</span>
-                        <span className="font-mono text-xs">{deploymentData.hooks.length}</span>
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-muted-foreground">Total Events</span>
+                        <span className="font-mono text-xs text-purple-400">{deploymentData.hooks.length}</span>
                       </div>
                       
                       {/* Calculate total cost if available */}
@@ -335,9 +412,9 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
                           sum + (hook.data?.total_cost_usd || 0), 0
                         )
                         return totalCost > 0 ? (
-                          <div className="flex justify-between items-center text-sm">
-                            <span className="text-muted-foreground">Total Cost</span>
-                            <span className="font-mono text-xs text-green-500">
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-muted-foreground">Total Cost</span>
+                            <span className="font-mono text-xs text-green-400">
                               ${totalCost.toFixed(4)}
                             </span>
                           </div>
@@ -346,43 +423,59 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
                     </>
                   )}
                 </div>
-              </div>
+              </motion.div>
               
-              {/* Artifacts */}
-              <div className="bg-card rounded-lg border border-border p-4">
-                <h3 className="text-sm font-medium mb-3">Artifacts</h3>
+              {/* Artifacts with Enhanced Design */}
+              <motion.div 
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.1 }}
+                className="bg-gradient-to-br from-card to-card/80 rounded-xl border border-border/50 p-5 backdrop-blur-sm"
+              >
+                <h3 className="text-sm font-semibold mb-4 flex items-center gap-2">
+                  <FileIcon className="h-4 w-4 text-purple-400" />
+                  Artifacts
+                </h3>
                 <div className="space-y-2">
-                  <button className="w-full text-left px-3 py-2 rounded hover:bg-muted/50 transition-colors text-sm">
+                  <button className="w-full text-left px-3 py-2.5 rounded-lg bg-black/20 hover:bg-black/30 transition-all border border-border/30 group">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <FileIcon className="h-4 w-4 text-muted-foreground" />
-                        <span>deployment-logs.txt</span>
+                        <FileIcon className="h-4 w-4 text-muted-foreground group-hover:text-cyan-400 transition-colors" />
+                        <span className="text-sm">deployment-logs.txt</span>
                       </div>
-                      <DownloadIcon className="h-3 w-3 text-muted-foreground" />
+                      <DownloadIcon className="h-3 w-3 text-muted-foreground group-hover:text-cyan-400 transition-colors" />
                     </div>
                   </button>
                 </div>
-              </div>
+              </motion.div>
               
-              {/* Repository Info */}
+              {/* Repository Info with Enhanced Design */}
               {project && (
-                <div className="bg-card rounded-lg border border-border p-4">
-                  <h3 className="text-sm font-medium mb-3">Repository</h3>
+                <motion.div 
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.2 }}
+                  className="bg-gradient-to-br from-card to-card/80 rounded-xl border border-border/50 p-5 backdrop-blur-sm"
+                >
+                  <h3 className="text-sm font-semibold mb-4 flex items-center gap-2">
+                    <CommitIcon className="h-4 w-4 text-blue-400" />
+                    Repository
+                  </h3>
                   <div className="space-y-2">
                     <a
                       href={getGitHubUrl(project.repo_url)}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex items-center gap-2 text-sm text-blue-500 hover:underline"
+                      className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-black/20 hover:bg-black/30 transition-all border border-border/30 text-sm text-blue-400 hover:text-blue-300 group"
                     >
-                      <CommitIcon className="h-4 w-4" />
+                      <CommitIcon className="h-4 w-4 group-hover:rotate-12 transition-transform" />
                       <span className="truncate">{(() => {
                         const gitInfo = parseGitUrl(project.repo_url)
                         return gitInfo ? `${gitInfo.owner}/${gitInfo.repo}` : project.repo_url
                       })()}</span>
                     </a>
                   </div>
-                </div>
+                </motion.div>
               )}
             </div>
           </motion.div>

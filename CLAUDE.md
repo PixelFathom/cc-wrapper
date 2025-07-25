@@ -23,6 +23,13 @@ make backend-logs
 
 # Stop services
 make down
+make dev-down  # For development environment
+
+# Clean up containers and volumes
+make clean
+
+# Build Docker images
+make build
 
 # Database shell
 make db-shell
@@ -40,6 +47,12 @@ uvicorn app.main:app --reload
 
 # Run backend tests
 pytest
+
+# Run specific test
+pytest tests/test_projects.py
+
+# Generate new migration
+alembic revision --autogenerate -m "description"
 ```
 
 ### Frontend Development (Next.js)
@@ -48,15 +61,25 @@ cd frontend
 npm install
 npm run dev
 
+# Build for production
+npm run build
+npm start
+
 # Type checking
 npm run type-check
 
 # Linting
 npm run lint
 
-# Run tests
+# Run unit tests
 npm test
+
+# Run E2E tests with Playwright
 npm run test:e2e
+
+# Run E2E tests in different browsers
+npx playwright test --project=chromium
+npx playwright test --project="Mobile Chrome"
 ```
 
 ## Architecture Overview

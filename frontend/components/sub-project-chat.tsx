@@ -11,6 +11,7 @@ import {
 import { api, ChatHook } from '@/lib/api'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
+import { Textarea } from './ui/textarea'
 import { cn } from '@/lib/utils'
 import { AssistantMessage } from './assistant-message'
 
@@ -23,13 +24,15 @@ interface SubProjectChatProps {
 
 interface Message {
   id: string
-  role: 'user' | 'assistant' | 'hook'
+  role: 'user' | 'assistant' | 'hook' | 'auto'
   content: any
   timestamp: string
   sessionId?: string
   isProcessing?: boolean
   chatId?: string  // Server-provided chat ID
   hooks?: ChatHook[]  // Associated webhook logs
+  continuationStatus?: 'none' | 'needed' | 'in_progress' | 'completed'
+  parentMessageId?: string
 }
 
 interface WebhookLog {
@@ -54,7 +57,9 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
   const [expandedHooks, setExpandedHooks] = useState<Set<string>>(new Set())
   // Collapse all hooks by default for cleaner UI
   const [showAllHooks, setShowAllHooks] = useState(false)
+  const [autoContinuationEnabled, setAutoContinuationEnabled] = useState(true)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const cwd = `${projectName}/${taskName}`
   
@@ -218,6 +223,8 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
             sessionId: msg.session_id,
             isProcessing: msg.role === 'assistant' && 
                           msg.content?.metadata?.status === 'processing',
+            continuationStatus: msg.continuation_status,
+            parentMessageId: msg.parent_message_id,
           }))
           
           // Create a map of existing messages for quick lookup
@@ -270,9 +277,52 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
 
   // Removed EventSource - using polling instead for better control
 
+  // Auto-scroll to bottom when messages change
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    // Small delay to ensure DOM is updated before scrolling
+    scrollToBottom()
   }, [messages])
+  
+  // Also scroll when hooks are expanded/collapsed or when waiting for response changes
+  useEffect(() => {
+    scrollToBottom()
+  }, [expandedHooks, showAllHooks, isWaitingForResponse])
+  
+  // Auto-continuation logic
+  useEffect(() => {
+    if (!autoContinuationEnabled || !sessionId) return
+    
+    // Check if the last assistant message needs continuation
+    const assistantMessages = messages.filter(m => m.role === 'assistant')
+    const lastAssistant = assistantMessages[assistantMessages.length - 1]
+    
+    if (lastAssistant && 
+        lastAssistant.continuationStatus === 'needed' && 
+        !lastAssistant.isProcessing &&
+        lastAssistant.content?.text) {
+      
+      // Check if we already have an auto message for this assistant message
+      const hasAutoChild = messages.some(m => 
+        m.role === 'auto' && m.parentMessageId === lastAssistant.id
+      )
+      
+      if (!hasAutoChild) {
+        console.log('🤖 Triggering auto-continuation for message:', lastAssistant.id)
+        
+        // Trigger continuation
+        api.continueChat(lastAssistant.id)
+          .then(result => {
+            if (result.needs_continuation) {
+              console.log('✅ Auto-continuation triggered:', result)
+              // The polling will pick up the new messages
+            }
+          })
+          .catch(error => {
+            console.error('❌ Failed to trigger auto-continuation:', error)
+          })
+      }
+    }
+  }, [messages, autoContinuationEnabled, sessionId])
 
   const loadChatHistory = async (loadSessionId: string) => {
     setLoadingHistory(true)
@@ -293,6 +343,9 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
       if (historyMessages.length > 0) {
         setChatId(historyMessages[0].id)
       }
+      
+      // Scroll to bottom after loading history
+      scrollToBottom('auto')
     } catch (error) {
       console.error('Failed to load chat history:', error)
     } finally {
@@ -314,6 +367,12 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
     const userInput = input
     setInput('')
     
+    // Reset textarea height after clearing input
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto'
+      textareaRef.current.style.height = '24px' // Reset to min-height
+    }
+    
     console.log('📨 Submitting message:', {
       session_id: sessionId || 'none (first message)',
       messageCount: messages.length
@@ -324,6 +383,11 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
       prompt: userInput,
       session_id: sessionId || undefined,
     })
+    
+    // Scroll to bottom after sending message with a slight delay
+    setTimeout(() => {
+      scrollToBottom()
+    }, 100)
   }
 
   const formatTimestamp = (timestamp: string) => {
@@ -334,6 +398,20 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
       second: '2-digit',
       hour12: false 
     })
+  }
+
+  // Scroll to bottom helper function
+  const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
+    setTimeout(() => {
+      if (messagesEndRef.current) {
+        messagesEndRef.current.scrollIntoView({ behavior, block: 'end' })
+        // Also ensure the parent container scrolls to bottom as a fallback
+        const messagesContainer = messagesEndRef.current.parentElement
+        if (messagesContainer) {
+          messagesContainer.scrollTop = messagesContainer.scrollHeight
+        }
+      }
+    }, 100)
   }
 
   const toggleHookExpansion = (hookId: string) => {
@@ -369,7 +447,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
   }
 
   return (
-    <div className="flex flex-col h-[400px] sm:h-[500px] md:h-[600px] lg:h-[700px]">
+    <div className="flex flex-col h-[calc(100vh-8rem)] sm:h-[calc(100vh-10rem)] md:h-[calc(100vh-12rem)]">
       <div className="flex-1 overflow-hidden flex flex-col gradient-border-neon rounded-lg relative bg-black/30">
         {/* Terminal header */}
         <div className="flex items-center justify-between px-2 sm:px-4 py-2 border-b border-border bg-card/80 backdrop-blur-sm">
@@ -382,6 +460,31 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
             <span className="text-xs font-mono text-muted-foreground hidden sm:inline">developer-chat</span>
           </div>
           <div className="flex items-center space-x-1 sm:space-x-2">
+            {/* Auto-continuation toggle */}
+            {sessionId && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={async () => {
+                  const newState = !autoContinuationEnabled
+                  setAutoContinuationEnabled(newState)
+                  try {
+                    await api.toggleAutoContinuation(sessionId, newState)
+                  } catch (error) {
+                    console.error('Failed to toggle auto-continuation:', error)
+                    setAutoContinuationEnabled(!newState) // Revert on error
+                  }
+                }}
+                className="text-xs font-mono h-6 px-1 sm:px-2 flex items-center gap-1"
+                title={autoContinuationEnabled ? 'Auto-continuation enabled' : 'Auto-continuation disabled'}
+              >
+                <UpdateIcon className={cn(
+                  "h-3 w-3",
+                  autoContinuationEnabled ? "text-green-500" : "text-gray-500"
+                )} />
+                <span className="hidden sm:inline">Auto</span>
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="sm"
@@ -502,65 +605,95 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                 transition={{ duration: 0.2 }}
                 className="space-y-2 sm:space-y-3"
               >
-                {/* Message Header */}
-                <div className="flex items-start justify-between flex-wrap gap-1 sm:gap-0 sm:flex-nowrap">
-                  <div className="flex items-start space-x-1 sm:space-x-2 flex-shrink-0">
-                    <span className="text-xs text-muted-foreground">
-                      [{formatTimestamp(message.timestamp)}]
-                    </span>
-                    {message.role === 'user' && (
-                      <>
-                        <span className="text-green-400">➜</span>
-                        <span className="text-cyan-500">user</span>
-                      </>
-                    )}
-                    {message.role === 'assistant' && (
-                      <>
-                        <span className="text-purple-400">←</span>
-                        <span className="text-purple-400">assistant</span>
-                      </>
-                    )}
-                  </div>
-                  
-                  {/* Show hooks toggle for assistant messages */}
-                  {message.role === 'assistant' && hasHooks && (
-                    <button
-                      onClick={() => setShowAllHooks(!showAllHooks)}
-                      className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1 flex-shrink-0"
-                    >
-                      <GearIcon className="h-3 w-3" />
-                      <span className="hidden sm:inline">{showAllHooks ? 'Hide' : 'Show'} processing steps ({hooks.length})</span>
-                      <span className="sm:hidden">({hooks.length})</span>
-                    </button>
-                  )}
-                </div>
-                
-                <div className="ml-3 sm:ml-6">
-                  {/* Message Content */}
+                <div className="ml-0">
+                  {/* Message Content - Modern X-style */}
                   <div className="space-y-2 sm:space-y-3">
-                    {message.role === 'user' ? (
-                      <div className="bg-cyan-500/10 rounded-lg p-2 sm:p-3 border border-cyan-500/30">
-                        <div className="whitespace-pre-wrap text-foreground">
-                          {message.content.text || message.content}
+                    {(message.role === 'user' || message.role === 'auto') ? (
+                      <div className="flex gap-3">
+                        {/* User Avatar */}
+                        <div className={cn(
+                          "flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center",
+                          message.role === 'auto' 
+                            ? "bg-gradient-to-br from-amber-500 to-orange-600"
+                            : "bg-gradient-to-br from-cyan-500 to-blue-600"
+                        )}>
+                          <PersonIcon className="h-5 w-5 text-white" />
+                        </div>
+                        {/* User Message */}
+                        <div className="flex-1 pt-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="font-semibold text-sm">{message.role === 'auto' ? 'Auto-continuation' : 'You'}</span>
+                            <span className="text-xs text-muted-foreground">
+                              · {new Date(message.timestamp).toLocaleTimeString('en-US', { 
+                                hour: 'numeric', 
+                                minute: '2-digit',
+                                hour12: true 
+                              })}
+                            </span>
+                            {message.role === 'auto' && (
+                              <span className="text-xs bg-amber-500/20 text-amber-500 px-1.5 py-0.5 rounded-full flex items-center gap-1">
+                                <UpdateIcon className="h-3 w-3" />
+                                AI Generated
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[15px] leading-relaxed text-foreground">
+                            {message.content.text || message.content}
+                          </div>
                         </div>
                       </div>
                     ) : (
-                      <div className="bg-purple-500/10 rounded-lg p-2 sm:p-3 border border-purple-500/30">
-                        <AssistantMessage 
-                          message={message}
-                          hooks={messageHooks?.get(message.id) || []}
-                          onToggleHook={toggleHookExpansion}
-                          expandedHooks={expandedHooks}
-                          getHookIcon={getHookIcon}
-                          formatHookMessage={formatHookMessage}
-                          isWaitingForResponse={isWaitingForResponse}
-                        />
+                      <div className="flex gap-3">
+                        {/* Assistant Avatar */}
+                        <div className="flex-shrink-0 w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-600 flex items-center justify-center">
+                          <RocketIcon className="h-5 w-5 text-white" />
+                        </div>
+                        {/* Assistant Message */}
+                        <div className="flex-1 pt-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="font-semibold text-sm">Assistant</span>
+                            <span className="text-xs text-muted-foreground">
+                              · {new Date(message.timestamp).toLocaleTimeString('en-US', { 
+                                hour: 'numeric', 
+                                minute: '2-digit',
+                                hour12: true 
+                              })}
+                            </span>
+                            {message.isProcessing && (
+                              <span className="text-xs text-cyan-500 flex items-center gap-1">
+                                <UpdateIcon className="h-3 w-3 animate-spin" />
+                                Processing
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[15px] leading-relaxed">
+                            <AssistantMessage 
+                              message={message}
+                              hooks={messageHooks?.get(message.id) || []}
+                              onToggleHook={toggleHookExpansion}
+                              expandedHooks={expandedHooks}
+                              getHookIcon={getHookIcon}
+                              formatHookMessage={formatHookMessage}
+                              isWaitingForResponse={isWaitingForResponse}
+                            />
+                          </div>
+                          {/* Show hooks toggle for assistant messages */}
+                          {hasHooks && (
+                            <button
+                              onClick={() => setShowAllHooks(!showAllHooks)}
+                              className="mt-2 text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+                            >
+                              <GearIcon className="h-3 w-3" />
+                              <span>{showAllHooks ? 'Hide' : 'Show'} processing steps ({hooks.length})</span>
+                            </button>
+                          )}
+                        </div>
                       </div>
                     )}
                     
-                    {/* Webhook Logs - moved to assistant messages */}
+                    {/* Webhook Logs - modern style */}
                     {message.role === 'assistant' && hasHooks && showAllHooks && (
-                      <div className="space-y-2 ml-2 sm:ml-4 border-l-2 border-muted pl-2 sm:pl-4">
+                      <div className="ml-[52px] space-y-2 border-l-2 border-border/30 pl-4">
                         <div className="text-xs text-muted-foreground mb-2">Processing logs:</div>
                         {hooks.map((hook, hookIndex) => {
                           const isExpanded = expandedHooks.has(hook.id)
@@ -644,39 +777,107 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
               )
             })}
           </AnimatePresence>
-          <div ref={messagesEndRef} />
+          <div ref={messagesEndRef} style={{ height: '1px' }} />
         </div>
 
-        {/* Input */}
-        <form onSubmit={handleSubmit} className="border-t border-border bg-card/50 p-2 sm:p-3">
-          <div className="flex items-center space-x-1 sm:space-x-2 font-mono">
-            <span className="text-green-400">➜</span>
-            <span className="text-cyan-500">msg</span>
-            <ChevronRightIcon className="h-4 w-4 text-muted-foreground" />
-            <Input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Type message..."
-              disabled={sendMutation.isPending}
-              className="flex-1 bg-transparent border-0 focus:ring-0 font-mono placeholder:text-muted-foreground/50 text-xs sm:text-sm"
-            />
-            <Button 
-              type="submit" 
-              disabled={sendMutation.isPending || !input.trim()}
-              className="bg-cyan-500 hover:bg-cyan-600 text-black font-mono hover:glow-cyan transition-all h-8 px-2 sm:px-3 min-w-[40px] sm:min-w-[60px]"
-              size="sm"
-            >
-              {sendMutation.isPending ? (
-                <UpdateIcon className="h-4 w-4 animate-spin" />
-              ) : (
-                <>
-                  <span className="hidden sm:inline">send</span>
-                  <span className="sm:hidden">→</span>
-                </>
-              )}
-            </Button>
-          </div>
-        </form>
+        {/* Modern X-style Input Area */}
+        <div className="border-t border-border/50 bg-black/40 backdrop-blur-sm">
+          <form onSubmit={handleSubmit} className="p-3 sm:p-4">
+            <div className="relative">
+              <Textarea
+                ref={textareaRef}
+                value={input}
+                onChange={(e) => {
+                  setInput(e.target.value)
+                  // Auto-resize textarea
+                  if (textareaRef.current) {
+                    textareaRef.current.style.height = 'auto'
+                    textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px'
+                  }
+                }}
+                onKeyDown={(e) => {
+                  // Submit on Enter (without modifiers)
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    handleSubmit(e as any)
+                  }
+                }}
+                placeholder="What's happening with your code?"
+                disabled={sendMutation.isPending}
+                className="w-full bg-transparent border-0 focus:ring-0 resize-none 
+                  placeholder:text-muted-foreground/50 text-base leading-relaxed
+                  font-sans min-h-[24px] max-h-[200px] p-0 pr-12"
+                rows={1}
+                style={{ 
+                  outline: 'none',
+                  boxShadow: 'none',
+                  scrollbarWidth: 'thin'
+                }}
+              />
+              
+              {/* Character count and send button area */}
+              <div className="flex items-center justify-between mt-3">
+                <div className="flex items-center gap-3">
+                  {/* Add icons like X has for media, GIF, poll, etc - but for code context */}
+                  <button
+                    type="button"
+                    className="text-muted-foreground hover:text-cyan-500 transition-colors p-1.5 rounded-full hover:bg-cyan-500/10"
+                    title="Add code snippet"
+                  >
+                    <CodeIcon className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    className="text-muted-foreground hover:text-cyan-500 transition-colors p-1.5 rounded-full hover:bg-cyan-500/10"
+                    title="Add file reference"
+                  >
+                    <FileTextIcon className="h-4 w-4" />
+                  </button>
+                </div>
+                
+                <div className="flex items-center gap-3">
+                  {/* Character/status indicator */}
+                  {input.length > 0 && (
+                    <span className={cn(
+                      "text-xs transition-colors",
+                      input.length > 500 ? "text-orange-500" : "text-muted-foreground"
+                    )}>
+                      {input.length}
+                    </span>
+                  )}
+                  
+                  {/* Modern circular send button like X */}
+                  <Button 
+                    type="submit" 
+                    disabled={sendMutation.isPending || !input.trim()}
+                    className={cn(
+                      "rounded-full h-8 w-8 sm:h-9 sm:w-auto sm:px-4 transition-all duration-200",
+                      "font-medium text-sm",
+                      input.trim() 
+                        ? "bg-cyan-500 hover:bg-cyan-600 text-black" 
+                        : "bg-cyan-500/20 text-cyan-500/50 cursor-not-allowed"
+                    )}
+                    size="sm"
+                  >
+                    {sendMutation.isPending ? (
+                      <UpdateIcon className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <>
+                        <PaperPlaneIcon className="h-4 w-4 sm:hidden" />
+                        <span className="hidden sm:inline">Send</span>
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+              
+              {/* Hint text */}
+              <div className="mt-2 text-xs text-muted-foreground/50">
+                Press Enter to send • Shift+Enter for new line
+              </div>
+            </div>
+          </form>
+        </div>
       </div>
 
       {/* Approval modals removed - approvals are now handled globally via ApprovalNotifications component */}

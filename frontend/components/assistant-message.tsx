@@ -61,7 +61,7 @@ export function AssistantMessage({
         {isCompleteMessage ? (
           <MarkdownRenderer 
             content={content}
-            className="text-foreground leading-relaxed break-words overflow-hidden"
+            className="text-foreground leading-relaxed break-words"
           />
         ) : isProcessing ? (
           <div className="flex items-center space-x-2 flex-wrap">
@@ -150,28 +150,28 @@ export function AssistantMessage({
                       
                       {/* Expanded details */}
                       {isExpanded && hook.data && (
-                        <div className="mt-2 ml-3 sm:ml-5 space-y-2 overflow-hidden">
+                        <div className="mt-2 ml-3 sm:ml-5 space-y-2 overflow-x-hidden max-w-full">
                           {hook.data.tool_input && (
-                            <div>
+                            <div className="overflow-x-hidden">
                               <div className="text-[10px] text-white/40 mb-1">Input:</div>
                               <pre className="bg-black/30 p-1 sm:p-2 rounded text-[9px] sm:text-[10px] overflow-x-auto border border-white/10 max-w-full">
-                                <code className="text-cyan-400/80 break-words whitespace-pre-wrap">{JSON.stringify(hook.data.tool_input, null, isMobile ? 1 : 2)}</code>
+                                <code className="text-cyan-400/80 break-all whitespace-pre-wrap">{JSON.stringify(hook.data.tool_input, null, isMobile ? 1 : 2)}</code>
                               </pre>
                             </div>
                           )}
                           {hook.data.result && (
-                            <div>
+                            <div className="overflow-x-hidden">
                               <div className="text-[10px] text-white/40 mb-1">Result:</div>
                               <pre className="bg-black/30 p-1 sm:p-2 rounded text-[9px] sm:text-[10px] overflow-x-auto max-h-24 sm:max-h-40 border border-white/10 max-w-full">
-                                <code className="text-green-400/80 break-words whitespace-pre-wrap">{typeof hook.data.result === 'string' ? hook.data.result : JSON.stringify(hook.data.result, null, isMobile ? 1 : 2)}</code>
+                                <code className="text-green-400/80 break-all whitespace-pre-wrap">{typeof hook.data.result === 'string' ? hook.data.result : JSON.stringify(hook.data.result, null, isMobile ? 1 : 2)}</code>
                               </pre>
                             </div>
                           )}
                           {hook.data.error && (
-                            <div>
+                            <div className="overflow-x-hidden">
                               <div className="text-[10px] text-red-400 mb-1">Error:</div>
                               <pre className="bg-red-900/20 p-1 sm:p-2 rounded text-[9px] sm:text-[10px] overflow-x-auto border border-red-500/20 max-w-full">
-                                <code className="text-red-400 break-words whitespace-pre-wrap">{hook.data.error}</code>
+                                <code className="text-red-400 break-all whitespace-pre-wrap">{hook.data.error}</code>
                               </pre>
                             </div>
                           )}

@@ -10,6 +10,8 @@ from sqlalchemy import text
 
 from app.core.settings import get_settings
 from app.models import Chat, Task, Project, ChatHook
+from app.models.chat import ContinuationStatus
+from app.services.openai_service import openai_service, ConversationMessage
 
 logger = logging.getLogger(__name__)
 
@@ -527,6 +529,35 @@ class ChatService:
                         f"verified_webhook_session_id={latest_assistant.content.get('metadata', {}).get('webhook_session_id')}"
                     )
             
+            # Check if we need auto-continuation after completion
+            if is_completion and webhook_data.get("status") == "completed":
+                # Evaluate the conversation for auto-continuation
+                evaluation = await self.evaluate_conversation_for_continuation(
+                    db, chat_id, original_session_id
+                )
+                
+                if evaluation and evaluation.get("needs_continuation"):
+                    # Get the assistant message for sub_project_id
+                    assistant_msg = await db.get(Chat, chat_id)
+                    if assistant_msg:
+                        # Create auto-continuation message
+                        auto_message = await self.create_auto_continuation(
+                            db,
+                            assistant_msg.sub_project_id,
+                            original_session_id,
+                            evaluation["continuation_prompt"],
+                            chat_id
+                        )
+                        
+                        # Send the auto-generated message to the service
+                        logger.info(f"🤖 Sending auto-continuation to service")
+                        await self.send_query(
+                            db,
+                            auto_message.id,
+                            evaluation["continuation_prompt"],
+                            webhook_session_id  # Use the webhook session ID for continuity
+                        )
+            
             # Publish to Redis for real-time updates
             if self.redis_client:
                 import json
@@ -600,6 +631,124 @@ class ChatService:
                 f"chat_id={str(chat_id)[:8]}... | "
                 f"error={str(e)[:100]}..."
             )
+            raise
+    
+    async def evaluate_conversation_for_continuation(
+        self,
+        db: AsyncSession,
+        chat_id: UUID,
+        session_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Evaluate if a conversation needs auto-continuation"""
+        try:
+            # Get the last few messages in the conversation
+            stmt = select(Chat).where(
+                Chat.session_id == session_id,
+                Chat.role.in_(["user", "assistant", "auto"])
+            ).order_by(Chat.created_at.asc())
+            
+            result = await db.execute(stmt)
+            messages = result.scalars().all()
+            
+            if not messages:
+                return None
+            
+            # Check if auto-continuation is enabled for this session
+            last_message = messages[-1]
+            if not last_message.auto_continuation_enabled:
+                logger.info(f"Auto-continuation disabled for session {session_id}")
+                return None
+            
+            # Check if we've already done too many continuations
+            continuation_count = sum(1 for msg in messages if msg.role == "auto")
+            if continuation_count >= 5:  # Max 5 auto-continuations per conversation
+                logger.info(f"Max continuation count reached for session {session_id}")
+                return None
+            
+            # Convert to format expected by OpenAI service
+            conversation_messages = [
+                ConversationMessage(
+                    role="user" if msg.role in ["user", "auto"] else msg.role,
+                    content=msg.content.get("text", "")
+                )
+                for msg in messages
+                if msg.content.get("text")
+            ]
+            
+            # Evaluate using GPT-4 mini
+            evaluation = await openai_service.evaluate_conversation_completeness(
+                conversation_messages
+            )
+            
+            logger.info(
+                f"🤖 Conversation evaluation | "
+                f"session_id={session_id} | "
+                f"needs_continuation={evaluation.needs_continuation} | "
+                f"confidence={evaluation.confidence} | "
+                f"reasoning={evaluation.reasoning}"
+            )
+            
+            if evaluation.needs_continuation and evaluation.confidence >= 0.7:
+                # Update the last assistant message to indicate continuation needed
+                if last_message.role == "assistant":
+                    last_message.continuation_status = ContinuationStatus.NEEDED
+                    db.add(last_message)
+                    await db.commit()
+                
+                return {
+                    "needs_continuation": True,
+                    "continuation_prompt": evaluation.continuation_prompt,
+                    "reasoning": evaluation.reasoning,
+                    "continuation_count": continuation_count + 1
+                }
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error evaluating conversation: {str(e)}")
+            return None
+    
+    async def create_auto_continuation(
+        self,
+        db: AsyncSession,
+        sub_project_id: UUID,
+        session_id: str,
+        continuation_prompt: str,
+        parent_message_id: Optional[UUID] = None
+    ) -> Chat:
+        """Create an auto-generated continuation message"""
+        try:
+            # Create the auto-generated message
+            auto_message = Chat(
+                sub_project_id=sub_project_id,
+                session_id=session_id,
+                role="auto",  # Mark as auto-generated
+                content={
+                    "text": continuation_prompt,
+                    "metadata": {
+                        "auto_generated": True,
+                        "generation_reason": "conversation_incomplete"
+                    }
+                },
+                continuation_status=ContinuationStatus.IN_PROGRESS,
+                parent_message_id=parent_message_id
+            )
+            
+            db.add(auto_message)
+            await db.commit()
+            await db.refresh(auto_message)
+            
+            logger.info(
+                f"🤖 Created auto-continuation message | "
+                f"id={str(auto_message.id)[:8]}... | "
+                f"session_id={session_id} | "
+                f"prompt={continuation_prompt[:50]}..."
+            )
+            
+            return auto_message
+            
+        except Exception as e:
+            logger.error(f"Error creating auto-continuation: {str(e)}")
             raise
 
 

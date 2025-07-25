@@ -10,6 +10,7 @@ from uuid import uuid4, UUID
 
 from app.deps import get_session, get_redis_client
 from app.models import Chat, SubProject, Project, Task, ChatHook
+from app.models.chat import ContinuationStatus
 from app.schemas import QueryRequest, QueryResponse
 from app.services.cwd import parse_cwd
 from app.services.chat_service import chat_service
@@ -564,3 +565,121 @@ async def stream_session(
         event_generator(),
         media_type="text/event-stream"
     )
+
+
+@router.post("/chats/{chat_id}/continue")
+async def continue_chat(
+    chat_id: UUID,
+    session: AsyncSession = Depends(get_session)
+):
+    """Manually trigger auto-continuation evaluation for a chat"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        # Get the chat message
+        chat = await session.get(Chat, chat_id)
+        if not chat:
+            raise HTTPException(status_code=404, detail="Chat not found")
+        
+        # Evaluate if continuation is needed
+        evaluation = await chat_service.evaluate_conversation_for_continuation(
+            session, chat_id, chat.session_id
+        )
+        
+        if not evaluation or not evaluation.get("needs_continuation"):
+            return {
+                "needs_continuation": False,
+                "message": "No continuation needed"
+            }
+        
+        # Create and send the auto-continuation
+        auto_message = await chat_service.create_auto_continuation(
+            session,
+            chat.sub_project_id,
+            chat.session_id,
+            evaluation["continuation_prompt"],
+            chat_id
+        )
+        
+        # Get the webhook session ID from the most recent assistant message
+        result = await session.execute(
+            select(Chat)
+            .where(Chat.sub_project_id == chat.sub_project_id)
+            .where(Chat.session_id == chat.session_id)
+            .where(Chat.role == "assistant")
+            .order_by(Chat.created_at.desc())
+            .limit(1)
+        )
+        latest_assistant = result.scalar_one_or_none()
+        
+        webhook_session_id = None
+        if latest_assistant and latest_assistant.content:
+            metadata = latest_assistant.content.get("metadata", {})
+            webhook_session_id = metadata.get("webhook_session_id")
+        
+        # Send the continuation query
+        await chat_service.send_query(
+            session,
+            auto_message.id,
+            evaluation["continuation_prompt"],
+            webhook_session_id or chat.session_id
+        )
+        
+        return {
+            "needs_continuation": True,
+            "auto_message_id": str(auto_message.id),
+            "continuation_prompt": evaluation["continuation_prompt"],
+            "reasoning": evaluation["reasoning"]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in continue_chat: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to continue chat: {str(e)}"
+        )
+
+
+@router.post("/chats/toggle-auto-continuation")
+async def toggle_auto_continuation(
+    request: dict,
+    session: AsyncSession = Depends(get_session)
+):
+    """Toggle auto-continuation for a session"""
+    session_id = request.get("session_id")
+    enabled = request.get("enabled", True)
+    
+    if not session_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="session_id is required"
+        )
+    
+    try:
+        # Update all messages in the session
+        result = await session.execute(
+            select(Chat)
+            .where(Chat.session_id == session_id)
+        )
+        chats = result.scalars().all()
+        
+        for chat in chats:
+            chat.auto_continuation_enabled = enabled
+            session.add(chat)
+        
+        await session.commit()
+        
+        return {
+            "session_id": session_id,
+            "auto_continuation_enabled": enabled,
+            "updated_count": len(chats)
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to toggle auto-continuation: {str(e)}"
+        )

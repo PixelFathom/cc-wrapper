@@ -62,9 +62,11 @@ export interface Chat {
   id: string
   sub_project_id: string
   session_id: string
-  role: 'user' | 'assistant' | 'hook'
+  role: 'user' | 'assistant' | 'hook' | 'auto'
   content: any
   created_at: string
+  continuation_status?: 'none' | 'needed' | 'in_progress' | 'completed'
+  parent_message_id?: string
 }
 
 export interface ChatHook {
@@ -360,6 +362,36 @@ Object.assign(api, {
     const queryString = queryParams.toString()
     const response = await fetch(`${API_BASE_URL}/api/approvals/pending${queryString ? `?${queryString}` : ''}`)
     if (!response.ok) throw new Error('Failed to get MCP approvals')
+    return response.json()
+  },
+  
+  // Continue chat with auto-generated message
+  continueChat: async (chatId: string): Promise<{
+    needs_continuation: boolean
+    auto_message_id?: string
+    continuation_prompt?: string
+    reasoning?: string
+  }> => {
+    const response = await fetch(`${API_BASE_URL}/api/chats/${chatId}/continue`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    })
+    if (!response.ok) throw new Error('Failed to continue chat')
+    return response.json()
+  },
+  
+  // Toggle auto-continuation for a session
+  toggleAutoContinuation: async (sessionId: string, enabled: boolean): Promise<{
+    session_id: string
+    auto_continuation_enabled: boolean
+    updated_count: number
+  }> => {
+    const response = await fetch(`${API_BASE_URL}/api/chats/toggle-auto-continuation`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId, enabled })
+    })
+    if (!response.ok) throw new Error('Failed to toggle auto-continuation')
     return response.json()
   },
 })

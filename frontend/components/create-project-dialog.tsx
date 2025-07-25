@@ -88,9 +88,9 @@ export function CreateProjectDialog({ open, onOpenChange }: CreateProjectDialogP
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[600px] terminal-bg border-cyan-500/50">
+      <DialogContent className="sm:max-w-[600px] max-h-[90vh] terminal-bg border-cyan-500/50 flex flex-col p-0">
         {/* Terminal header */}
-        <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 py-2 border-b border-border bg-card/50">
+        <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-card/50 flex-shrink-0">
           <div className="flex items-center space-x-2">
             <div className="flex items-center space-x-1.5">
               <div className="w-2.5 h-2.5 rounded-full bg-red-500"></div>
@@ -101,24 +101,26 @@ export function CreateProjectDialog({ open, onOpenChange }: CreateProjectDialogP
           </div>
         </div>
         
-        <form onSubmit={handleSubmit} className="mt-8">
-          <DialogHeader>
-            <DialogTitle className="text-2xl font-mono flex items-center space-x-2">
-              <RocketIcon className="h-6 w-6 text-cyan-500" />
-              <span>Initialize New Repository</span>
-            </DialogTitle>
-            <DialogDescription className="font-mono text-sm text-muted-foreground">
-              # Configure your new project repository
-            </DialogDescription>
-            <div className="mt-3 p-3 bg-amber-500/10 border border-amber-500/30 rounded-md">
-              <p className="text-xs font-mono text-amber-500 flex items-center">
-                <span className="mr-2">⚠️</span>
-                Only PixelFathom organization repositories are accepted
-              </p>
-            </div>
-          </DialogHeader>
-          
-          <div className="space-y-6 py-6 font-mono">
+        {/* Scrollable content */}
+        <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/10">
+          <form onSubmit={handleSubmit} className="p-4 sm:p-6">
+            <DialogHeader>
+              <DialogTitle className="text-2xl font-mono flex items-center space-x-2">
+                <RocketIcon className="h-6 w-6 text-cyan-500" />
+                <span>Initialize New Repository</span>
+              </DialogTitle>
+              <DialogDescription className="font-mono text-sm text-muted-foreground">
+                # Configure your new project repository
+              </DialogDescription>
+              <div className="mt-3 p-3 bg-amber-500/10 border border-amber-500/30 rounded-md">
+                <p className="text-xs font-mono text-amber-500 flex items-center">
+                  <span className="mr-2">⚠️</span>
+                  Only PixelFathom organization repositories are accepted
+                </p>
+              </div>
+            </DialogHeader>
+            
+            <div className="space-y-6 py-6 font-mono">
             {/* Info Box */}
             <motion.div
               initial={{ opacity: 0, y: -10 }}
@@ -228,8 +230,12 @@ export function CreateProjectDialog({ open, onOpenChange }: CreateProjectDialogP
                 )}
               </motion.div>
             )}
-          </div>
-          
+            </div>
+          </form>
+        </div>
+        
+        {/* Fixed footer outside scrollable area */}
+        <div className="border-t border-border bg-card/50 p-4 sm:p-6 flex-shrink-0">
           <DialogFooter className="gap-3">
             <Button
               type="button"
@@ -241,6 +247,7 @@ export function CreateProjectDialog({ open, onOpenChange }: CreateProjectDialogP
             </Button>
             <Button 
               type="submit" 
+              form="create-project-form"
               disabled={createMutation.isPending}
               className="bg-cyan-500 hover:bg-cyan-600 text-black font-mono hover:glow-cyan transition-all"
             >
@@ -257,7 +264,7 @@ export function CreateProjectDialog({ open, onOpenChange }: CreateProjectDialogP
               )}
             </Button>
           </DialogFooter>
-        </form>
+        </div>
       </DialogContent>
     </Dialog>
   )

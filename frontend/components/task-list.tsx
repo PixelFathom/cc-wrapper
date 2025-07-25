@@ -141,8 +141,8 @@ export function TaskList({ projectId }: TaskListProps) {
               <Link href={`/p/${projectId}/t/${task.id}`}>
                 <div className="gradient-border-neon rounded-lg overflow-hidden hover:glow-cyan transition-all duration-300 group cursor-pointer">
                   <div className="bg-card/50 p-4 font-mono">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
                         <div className="flex items-center space-x-3 mb-2">
                           <CircleIcon className="h-4 w-4 text-yellow-400" />
                           <span className="text-sm">
@@ -156,8 +156,8 @@ export function TaskList({ projectId }: TaskListProps) {
                             })}
                           </span>
                         </div>
-                        <div className="ml-7">
-                          <h3 className="text-base text-foreground group-hover:text-cyan-500 transition-colors">
+                        <div className="ml-7 flex-1 min-w-0">
+                          <h3 className="text-base text-foreground group-hover:text-cyan-500 transition-colors truncate">
                             {task.name}
                           </h3>
                           <div className="flex items-center space-x-4 mt-2 text-xs text-muted-foreground">
@@ -172,7 +172,7 @@ export function TaskList({ projectId }: TaskListProps) {
                           </div>
                         </div>
                       </div>
-                      <ArrowRightIcon className="h-4 w-4 text-muted-foreground group-hover:text-cyan-500 transition-all transform group-hover:translate-x-1 mt-1" />
+                      <ArrowRightIcon className="h-4 w-4 text-muted-foreground group-hover:text-cyan-500 transition-all transform group-hover:translate-x-1 mt-1 flex-shrink-0" />
                     </div>
                   </div>
                 </div>
