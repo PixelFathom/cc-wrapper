@@ -103,7 +103,7 @@ export function CreateProjectDialog({ open, onOpenChange }: CreateProjectDialogP
         
         {/* Scrollable content */}
         <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/10">
-          <form onSubmit={handleSubmit} className="p-4 sm:p-6">
+          <form id="create-project-form" onSubmit={handleSubmit} className="p-4 sm:p-6">
             <DialogHeader>
               <DialogTitle className="text-2xl font-mono flex items-center space-x-2">
                 <RocketIcon className="h-6 w-6 text-cyan-500" />
