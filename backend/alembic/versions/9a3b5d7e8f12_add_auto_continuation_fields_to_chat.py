@@ -19,7 +19,7 @@ depends_on = None
 
 def upgrade() -> None:
     # Add new columns to the chats table
-    op.add_column('chats', sa.Column('continuation_status', sqlmodel.sql.sqltypes.AutoString(), nullable=False, server_default='NONE'))
+    op.add_column('chats', sa.Column('continuation_status', sa.String(), nullable=False, server_default='NONE'))
     op.add_column('chats', sa.Column('continuation_count', sa.Integer(), nullable=False, server_default='0'))
     op.add_column('chats', sa.Column('auto_continuation_enabled', sa.Boolean(), nullable=False, server_default='true'))
     op.add_column('chats', sa.Column('parent_message_id', sqlmodel.sql.sqltypes.GUID(), nullable=True))

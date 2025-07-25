@@ -10,7 +10,7 @@ from sqlalchemy import text
 
 from app.core.settings import get_settings
 from app.models import Chat, Task, Project, ChatHook
-from app.models.chat import ContinuationStatus
+from app.models.chat import CONTINUATION_STATUS_NONE, CONTINUATION_STATUS_NEEDED, CONTINUATION_STATUS_IN_PROGRESS, CONTINUATION_STATUS_COMPLETED
 from app.services.openai_service import openai_service, ConversationMessage
 
 logger = logging.getLogger(__name__)
@@ -691,7 +691,7 @@ class ChatService:
             if evaluation.needs_continuation and evaluation.confidence >= 0.7:
                 # Update the last assistant message to indicate continuation needed
                 if last_message.role == "assistant":
-                    last_message.continuation_status = ContinuationStatus.NEEDED
+                    last_message.continuation_status = CONTINUATION_STATUS_NEEDED
                     db.add(last_message)
                     await db.commit()
                 
@@ -730,7 +730,7 @@ class ChatService:
                         "generation_reason": "conversation_incomplete"
                     }
                 },
-                continuation_status=ContinuationStatus.IN_PROGRESS,
+                continuation_status=CONTINUATION_STATUS_IN_PROGRESS,
                 parent_message_id=parent_message_id
             )
             

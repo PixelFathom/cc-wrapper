@@ -15,11 +15,11 @@ class ChatRole(str, Enum):
     AUTO = "auto"  # For auto-generated continuation messages
 
 
-class ContinuationStatus(str, Enum):
-    NONE = "none"
-    NEEDED = "needed"
-    IN_PROGRESS = "in_progress"
-    COMPLETED = "completed"
+# Constants for continuation status values
+CONTINUATION_STATUS_NONE = "NONE"
+CONTINUATION_STATUS_NEEDED = "NEEDED"
+CONTINUATION_STATUS_IN_PROGRESS = "IN_PROGRESS"
+CONTINUATION_STATUS_COMPLETED = "COMPLETED"
 
 
 class Chat(BaseModel, table=True):
@@ -31,7 +31,7 @@ class Chat(BaseModel, table=True):
     content: Dict[str, Any] = Field(sa_column=Column(JSON))
     
     # Auto-continuation fields
-    continuation_status: ContinuationStatus = Field(default=ContinuationStatus.NONE)
+    continuation_status: str = Field(default=CONTINUATION_STATUS_NONE)
     continuation_count: int = Field(default=0)
     auto_continuation_enabled: bool = Field(default=True)
     parent_message_id: Optional[UUID] = Field(default=None, foreign_key="chats.id")
