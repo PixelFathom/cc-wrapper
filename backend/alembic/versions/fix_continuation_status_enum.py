@@ -18,7 +18,7 @@ depends_on = None
 
 def upgrade() -> None:
     # First, create a new enum type with correct values
-    continuationstatus_enum = postgresql.ENUM('none', 'needed', 'in_progress', 'completed', name='continuationstatus_v2')
+    continuationstatus_enum = postgresql.ENUM('NONE', 'NEEDED', 'IN_PROGRESS', 'COMPLETED', name='continuationstatus_v2')
     continuationstatus_enum.create(op.get_bind())
     
     # Change the column to use the new enum
@@ -33,7 +33,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     # Create old enum type
-    old_enum = postgresql.ENUM('NONE', 'NEEDED', 'IN_PROGRESS', 'COMPLETED', name='continuationstatus_old')
+    old_enum = postgresql.ENUM('none', 'needed', 'in_progress', 'completed', name='continuationstatus_old')
     old_enum.create(op.get_bind())
     
     # Change the column back
