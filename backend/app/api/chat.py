@@ -10,7 +10,6 @@ from uuid import uuid4, UUID
 
 from app.deps import get_session, get_redis_client
 from app.models import Chat, SubProject, Project, Task, ChatHook
-from app.models.chat import ContinuationStatus
 from app.schemas import QueryRequest, QueryResponse
 from app.services.cwd import parse_cwd
 from app.services.chat_service import chat_service
