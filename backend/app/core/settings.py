@@ -23,9 +23,6 @@ class Settings(BaseSettings):
     external_api_url: str = "http://host.docker.internal:8001/api"
     projects_dir: str = "/projects"
     
-    # OpenAI Configuration
-    openai_api_key: str = "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"
-    
     @property
     def database_url(self) -> str:
         return f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"

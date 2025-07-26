@@ -11,7 +11,6 @@ from sqlalchemy import text
 from app.core.settings import get_settings
 from app.models import Chat, Task, Project, ChatHook
 from app.models.chat import CONTINUATION_STATUS_NONE, CONTINUATION_STATUS_NEEDED, CONTINUATION_STATUS_IN_PROGRESS, CONTINUATION_STATUS_COMPLETED
-from app.services.openai_service import openai_service, ConversationMessage
 
 logger = logging.getLogger(__name__)
 
@@ -700,7 +699,7 @@ class ChatService:
         chat_id: UUID,
         session_id: str
     ) -> Optional[Dict[str, Any]]:
-        """Evaluate if a conversation needs auto-continuation"""
+        """Evaluate if a conversation needs auto-continuation using simple heuristics"""
         try:
             # Get the chat to find sub_project_id
             chat = await db.get(Chat, chat_id)
@@ -724,46 +723,43 @@ class ChatService:
             # Get continuation count for tracking
             continuation_count = sum(1 for msg in messages if msg.role == "auto")
             
-            # Always process, but log if we're at high continuation count
-            if continuation_count >= 5:
-                logger.warning(f"High continuation count ({continuation_count}) for session {session_id}, but continuing anyway")
+            # Limit continuation attempts
+            if continuation_count >= 3:
+                logger.warning(f"Max continuation count reached ({continuation_count}) for session {session_id}")
+                return None
             
-            # Convert to format expected by OpenAI service
-            conversation_messages = [
-                ConversationMessage(
-                    role="user" if msg.role in ["user", "auto"] else msg.role,
-                    content=msg.content.get("text", "")
-                )
-                for msg in messages
-                if msg.content.get("text")
-            ]
+            # Get the last assistant message
+            last_assistant_message = None
+            for msg in reversed(messages):
+                if msg.role == "assistant":
+                    last_assistant_message = msg
+                    break
             
-            # Evaluate using GPT-4 mini
-            evaluation = await openai_service.evaluate_conversation_completeness(
-                conversation_messages
-            )
+            if not last_assistant_message:
+                return None
+            
+            # Simple heuristic-based evaluation
+            content = last_assistant_message.content.get("text", "") if last_assistant_message.content else ""
+            needs_continuation = self._evaluate_message_completeness(content)
             
             logger.info(
-                f"🤖 Conversation evaluation | "
+                f"🤖 Conversation evaluation (heuristic) | "
                 f"session_id={session_id} | "
-                f"needs_continuation={evaluation.needs_continuation} | "
-                f"confidence={evaluation.confidence} | "
-                f"reasoning={evaluation.reasoning}"
+                f"needs_continuation={needs_continuation} | "
+                f"message_length={len(content)} | "
+                f"continuation_count={continuation_count}"
             )
             
-            # Always return evaluation result without confidence threshold
-            if evaluation.needs_continuation:
+            if needs_continuation:
                 # Update the last assistant message to indicate continuation needed
-                last_message = messages[-1]
-                if last_message.role == "assistant":
-                    last_message.continuation_status = CONTINUATION_STATUS_NEEDED
-                    db.add(last_message)
-                    await db.commit()
+                last_assistant_message.continuation_status = CONTINUATION_STATUS_NEEDED
+                db.add(last_assistant_message)
+                await db.commit()
                 
                 return {
                     "needs_continuation": True,
-                    "continuation_prompt": evaluation.continuation_prompt or "Please continue with the previous response.",
-                    "reasoning": evaluation.reasoning,
+                    "continuation_prompt": "Please continue with the previous response.",
+                    "reasoning": "Message appears incomplete based on heuristic analysis",
                     "continuation_count": continuation_count + 1
                 }
             
@@ -772,6 +768,52 @@ class ChatService:
         except Exception as e:
             logger.error(f"Error evaluating conversation: {str(e)}")
             return None
+    
+    def _evaluate_message_completeness(self, content: str) -> bool:
+        """Simple heuristic to determine if a message appears incomplete"""
+        if not content or len(content.strip()) < 10:
+            return False
+        
+        content = content.strip().lower()
+        
+        # Check for explicit continuation indicators
+        continuation_phrases = [
+            "would you like me to continue",
+            "should i continue", 
+            "let me continue",
+            "i'll continue",
+            "continue with",
+            "more details",
+            "additional information",
+            "shall i proceed",
+            "would you like more",
+            "let me know if you want me to continue",
+            "would you like me to explain more",
+            "do you want me to continue"
+        ]
+        
+        for phrase in continuation_phrases:
+            if phrase in content:
+                return True
+        
+        # Check for incomplete code blocks or structures
+        incomplete_indicators = [
+            content.count("```") % 2 == 1,  # Unclosed code blocks
+            content.endswith("..."),
+            content.endswith(".."),
+            content.endswith("and"),
+            content.endswith("or"),
+            content.endswith(","),
+            content.endswith("but"),
+            content.endswith("however"),
+            content.endswith("also"),
+            content.endswith("additionally"),
+            "to be continued" in content,
+            "more on this" in content,
+            "next steps" in content and len(content) < 500
+        ]
+        
+        return any(incomplete_indicators)
     
     async def create_auto_continuation(
         self,
