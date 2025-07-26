@@ -58,6 +58,14 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
   // Collapse all hooks by default for cleaner UI
   const [showAllHooks, setShowAllHooks] = useState(false)
   const [autoContinuationEnabled, setAutoContinuationEnabled] = useState(true)
+  const [bypassModeEnabled, setBypassModeEnabled] = useState(() => {
+    // Load bypass mode preference from localStorage
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('bypassModeEnabled')
+      return saved !== null ? saved === 'true' : true // Default to true if not set
+    }
+    return true
+  })
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -84,6 +92,13 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
     })
   }, [projectName, taskName, subProjectId, initialSessionId, sessionId])
   
+  // Save bypass mode preference to localStorage whenever it changes
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('bypassModeEnabled', bypassModeEnabled.toString())
+    }
+  }, [bypassModeEnabled])
+  
   // Load initial session messages if provided
   useEffect(() => {
     if (initialSessionId && !messages.length) {
@@ -91,6 +106,19 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
       loadChatHistory(initialSessionId)
     }
   }, [initialSessionId])
+  
+  // Load bypass mode preference from session metadata
+  useEffect(() => {
+    if (messages.length > 0) {
+      // Find the last assistant message to get bypass mode preference
+      const assistantMessages = messages.filter(m => m.role === 'assistant' && m.content?.metadata)
+      const lastAssistantMessage = assistantMessages[assistantMessages.length - 1]
+      
+      if (lastAssistantMessage && lastAssistantMessage.content?.metadata?.bypass_mode_enabled !== undefined) {
+        setBypassModeEnabled(lastAssistantMessage.content.metadata.bypass_mode_enabled)
+      }
+    }
+  }, [messages])
   
   // Fetch sessions for this sub-project (only if it's not a new chat)
   const { data: sessionsData } = useQuery({
@@ -115,6 +143,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
         ...data,
         org_name: 'default',
         cwd,
+        bypass_mode: bypassModeEnabled,
       })
       
       console.log('📥 Query response:', {
@@ -582,8 +611,52 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
               <div className="w-2.5 h-2.5 rounded-full bg-green-500"></div>
             </div>
             <span className="text-xs font-mono text-muted-foreground hidden sm:inline">developer-chat</span>
+            {/* Bypass Mode Indicator */}
+            <div className={cn(
+              "flex items-center gap-1 ml-2 px-2 py-0.5 rounded-full border",
+              bypassModeEnabled 
+                ? "bg-amber-500/20 border-amber-500/30" 
+                : "bg-gray-500/20 border-gray-500/30"
+            )}>
+              <GearIcon className={cn(
+                "h-3 w-3",
+                bypassModeEnabled ? "text-amber-500" : "text-gray-500"
+              )} />
+              <span className={cn(
+                "text-[10px] font-mono",
+                bypassModeEnabled ? "text-amber-500" : "text-gray-500"
+              )}>
+                Bypass {bypassModeEnabled ? "ON" : "OFF"}
+              </span>
+            </div>
           </div>
           <div className="flex items-center space-x-1 sm:space-x-2">
+            {/* Bypass Mode toggle - Always visible */}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={async () => {
+                const newState = !bypassModeEnabled
+                setBypassModeEnabled(newState)
+                // Only call API if we have an active session
+                if (sessionId) {
+                  try {
+                    await api.toggleBypassMode(sessionId, newState)
+                  } catch (error) {
+                    console.error('Failed to toggle bypass mode:', error)
+                    setBypassModeEnabled(!newState) // Revert on error
+                  }
+                }
+              }}
+              className="text-xs font-mono h-6 px-1 sm:px-2 flex items-center gap-1"
+              title={bypassModeEnabled ? 'Bypass mode enabled' : 'Bypass mode disabled'}
+            >
+              <GearIcon className={cn(
+                "h-3 w-3",
+                bypassModeEnabled ? "text-amber-500" : "text-gray-500"
+              )} />
+              <span className="hidden sm:inline">Bypass</span>
+            </Button>
             {/* Auto-continuation toggle */}
             {sessionId && (
               <Button
@@ -707,6 +780,70 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                 Ask questions about your project, request code changes, or get help with debugging.
                 All processing steps and tool usage will be shown in real-time.
               </div>
+              
+              {/* Bypass Mode Selection for New Conversations */}
+              <div className="mt-6 p-4 bg-card/50 rounded-lg border border-border/50 max-w-sm mx-auto">
+                <div className="text-sm font-medium mb-3 text-foreground">Choose Approval Mode:</div>
+                <div className="flex flex-col gap-2">
+                  <button
+                    onClick={() => setBypassModeEnabled(false)}
+                    className={cn(
+                      "p-3 rounded-md border transition-all text-left",
+                      !bypassModeEnabled 
+                        ? "border-cyan-500 bg-cyan-500/10 text-cyan-500" 
+                        : "border-border hover:border-cyan-500/50 hover:bg-muted/50"
+                    )}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className={cn(
+                        "w-4 h-4 rounded-full border-2",
+                        !bypassModeEnabled ? "border-cyan-500 bg-cyan-500" : "border-gray-500"
+                      )}>
+                        {!bypassModeEnabled && (
+                          <div className="w-2 h-2 bg-white rounded-full m-0.5" />
+                        )}
+                      </div>
+                      <div>
+                        <div className="font-medium text-sm">Approval Required</div>
+                        <div className="text-xs text-muted-foreground">
+                          Review and approve each tool use before execution
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                  
+                  <button
+                    onClick={() => setBypassModeEnabled(true)}
+                    className={cn(
+                      "p-3 rounded-md border transition-all text-left",
+                      bypassModeEnabled 
+                        ? "border-amber-500 bg-amber-500/10 text-amber-500" 
+                        : "border-border hover:border-amber-500/50 hover:bg-muted/50"
+                    )}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className={cn(
+                        "w-4 h-4 rounded-full border-2",
+                        bypassModeEnabled ? "border-amber-500 bg-amber-500" : "border-gray-500"
+                      )}>
+                        {bypassModeEnabled && (
+                          <div className="w-2 h-2 bg-white rounded-full m-0.5" />
+                        )}
+                      </div>
+                      <div>
+                        <div className="font-medium text-sm">Bypass Mode</div>
+                        <div className="text-xs text-muted-foreground">
+                          Execute tools automatically without approval
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                </div>
+                <div className="mt-3 text-xs text-muted-foreground">
+                  You can change this anytime using the Bypass button above
+                </div>
+              </div>
+              
               {sessionId && (
                 <div className="mt-4 text-xs text-muted-foreground/70">
                   Session: {sessionId.slice(0, 8)}
