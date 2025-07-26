@@ -49,23 +49,23 @@ async def test_bypass_mode_parameter_handling():
         call_args = mock_client.post.call_args[1]['json']
         assert call_args['options']['permission_mode'] == "bypassPermissions"
         
-        # Test Case 2: bypass_mode = False (should send "askPermission")
+        # Test Case 2: bypass_mode = False (should send "interactive")
         await chat_service.send_query(mock_db, chat_id, "test prompt", bypass_mode=False)
         
         call_args = mock_client.post.call_args[1]['json']
-        assert call_args['options']['permission_mode'] == "askPermission"
+        assert call_args['options']['permission_mode'] == "interactive"
         
-        # Test Case 3: bypass_mode = None (should send "askPermission" - default)
+        # Test Case 3: bypass_mode = None (should send "interactive" - default)
         await chat_service.send_query(mock_db, chat_id, "test prompt", bypass_mode=None)
         
         call_args = mock_client.post.call_args[1]['json']
-        assert call_args['options']['permission_mode'] == "askPermission"
+        assert call_args['options']['permission_mode'] == "interactive"
         
-        # Test Case 4: bypass_mode not provided (should send "askPermission" - default)
+        # Test Case 4: bypass_mode not provided (should send "interactive" - default)
         await chat_service.send_query(mock_db, chat_id, "test prompt")
         
         call_args = mock_client.post.call_args[1]['json']
-        assert call_args['options']['permission_mode'] == "askPermission"
+        assert call_args['options']['permission_mode'] == "interactive"
 
 
 def test_permission_mode_logic():
@@ -74,14 +74,14 @@ def test_permission_mode_logic():
     # Test different values of bypass_mode
     test_cases = [
         (True, "bypassPermissions"),
-        (False, "askPermission"),
-        (None, "askPermission"),
+        (False, "interactive"),
+        (None, "interactive"),
         (1, "bypassPermissions"),  # Truthy value
-        (0, "askPermission"),      # Falsy value
-        ("", "askPermission"),     # Falsy value
+        (0, "interactive"),        # Falsy value
+        ("", "interactive"),       # Falsy value
         ("yes", "bypassPermissions"),  # Truthy value
     ]
     
     for bypass_mode, expected in test_cases:
-        result = "bypassPermissions" if bypass_mode is True else "askPermission"
+        result = "bypassPermissions" if bypass_mode is True else "interactive"
         assert result == expected, f"Failed for bypass_mode={bypass_mode}: expected {expected}, got {result}"

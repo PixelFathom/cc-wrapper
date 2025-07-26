@@ -87,7 +87,7 @@ class ChatService:
                 "project_path": project_path,
                 "conversation_id": str(chat_id),
                 "options": {
-                    "permission_mode": "bypassPermissions" if bypass_mode is True else "askPermission"
+                    "permission_mode": "bypassPermissions" if bypass_mode is True else "interactive"
                 }
             }
             
