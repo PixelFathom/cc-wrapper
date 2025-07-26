@@ -33,7 +33,8 @@ class ChatService:
         db: AsyncSession, 
         chat_id: UUID, 
         prompt: str, 
-        session_id: Optional[str] = None
+        session_id: Optional[str] = None,
+        bypass_mode: Optional[bool] = None
     ) -> Dict[str, Any]:
         """Send a query to the remote service"""
         start_time = time.time()
@@ -42,12 +43,14 @@ class ChatService:
             f"🔵 send_query called | "
             f"chat_id={str(chat_id)[:8]}... | "
             f"session_id={session_id} | "
+            f"bypass_mode={bypass_mode} | "
             f"prompt_length={len(prompt)}"
         )
         logger.info(
             f"🔵 send_query called | "
             f"chat_id={str(chat_id)[:8]}... | "
             f"session_id={session_id} | "
+            f"bypass_mode={bypass_mode} | "
             f"prompt_length={len(prompt)}"
         )
         
@@ -82,7 +85,10 @@ class ChatService:
                 "webhook_url": webhook_url,
                 "organization_name": self.org_name,
                 "project_path": project_path,
-                "conversation_id": str(chat_id)
+                "conversation_id": str(chat_id),
+                "options": {
+                    "permission_mode": "bypassPermissions" if bypass_mode is True else "askPermission"
+                }
             }
             
             # Only include session_id if it's provided (for subsequent messages)
@@ -97,7 +103,8 @@ class ChatService:
                 f"📤 Sending to remote service | "
                 f"endpoint={self.query_url} | "
                 f"payload_keys={list(payload.keys())} | "
-                f"has_session_id={'session_id' in payload}"
+                f"has_session_id={'session_id' in payload} | "
+                f"permission_mode={payload.get('options', {}).get('permission_mode', 'default')}"
             )
             
             # Log the request initiation with key details
@@ -395,15 +402,16 @@ class ChatService:
                         "status": webhook_data.get("status")
                     })
                     
-                    # If we have a new session_id from ResultMessage, update the assistant message session_id too
+                    # IMPORTANT: Do NOT update the session_id to maintain UI continuity
+                    # Store the webhook session ID in metadata instead
                     if next_session_id:
                         logger.info(
-                            f"🔄 ASSISTANT SESSION UPDATE | "
+                            f"📌 Storing webhook session_id in metadata (not updating message session_id) | "
                             f"assistant_id={str(existing_assistant.id)[:8]}... | "
-                            f"old_session_id={existing_assistant.session_id} | "
-                            f"new_session_id={next_session_id}"
+                            f"ui_session_id={existing_assistant.session_id} | "
+                            f"webhook_session_id={next_session_id}"
                         )
-                        existing_assistant.session_id = next_session_id
+                        current_metadata["next_session_id"] = next_session_id
                     
                     # Create new content dict and force SQLAlchemy to detect the change
                     from sqlalchemy.orm.attributes import flag_modified
@@ -445,10 +453,11 @@ class ChatService:
                             "status": webhook_data.get("status")
                         })
                         
-                        # If we have a new session_id from ResultMessage, update the assistant message session_id too
+                        # IMPORTANT: Do NOT update the session_id to maintain UI continuity
+                        # Store the webhook session ID in metadata instead
                         if next_session_id:
-                            logger.info(f"🔄 Updating duplicate assistant message session_id from {existing_assistant.session_id} to {next_session_id}")
-                            existing_assistant.session_id = next_session_id
+                            logger.info(f"📌 Storing webhook session_id in metadata for duplicate message (not updating message session_id)")
+                            current_metadata["next_session_id"] = next_session_id
                         
                         existing_assistant.content = {
                             "text": response_text,
@@ -457,11 +466,21 @@ class ChatService:
                         db.add(existing_assistant)
                     else:
                         # Create new assistant message only if we really need to
-                        # Use the new session_id if available, otherwise use original
-                        session_id_for_assistant = next_session_id if next_session_id else original_session_id
+                        # For continuation responses, use the original UI session_id
+                        # Check if the user chat is an auto-continuation message
+                        is_continuation_response = False
+                        if chat.role == "auto" or (chat.content and chat.content.get("metadata", {}).get("auto_generated")):
+                            is_continuation_response = True
+                            logger.info(f"🤖 This is a response to an auto-continuation message")
+                        
+                        # Use original session_id for continuation responses to maintain UI continuity
+                        session_id_for_assistant = original_session_id
+                        
                         print(f"➕ Creating new assistant message for session {session_id_for_assistant}")
                         print(f"   Task ID: {task_id}")
                         print(f"   Response text: {response_text[:50]}...")
+                        print(f"   Is continuation response: {is_continuation_response}")
+                        
                         assistant_chat = Chat(
                             sub_project_id=chat.sub_project_id,
                             session_id=session_id_for_assistant,
@@ -472,7 +491,8 @@ class ChatService:
                                     "task_id": webhook_data.get("task_id"),
                                     "conversation_id": webhook_data.get("conversation_id"),
                                     "webhook_session_id": webhook_session_id,
-                                    "status": webhook_data.get("status")
+                                    "status": webhook_data.get("status"),
+                                    "next_session_id": next_session_id  # Store for future reference
                                 }
                             }
                         )
@@ -535,24 +555,11 @@ class ChatService:
                         f"✅ Successfully stored webhook_session_id in assistant message | "
                         f"verified_webhook_session_id={latest_assistant.content.get('metadata', {}).get('webhook_session_id')}"
                     )
-            # Check if the last message in this conversation was a bot (assistant) message
-            last_message_stmt = (
-                select(Chat)
-                .where(
-                    Chat.sub_project_id == chat.sub_project_id,
-                )
-                .order_by(Chat.created_at.desc())
-                .limit(1)
-            )
-            last_message_result = await db.execute(last_message_stmt)
-            last_message = last_message_result.scalar_one_or_none()
-            check = True
-            if not last_message or last_message.role == "auto":
-                check = False
+            # Check if auto-continuation should be triggered
             if (is_completion and 
                     not webhook_data.get("is_error") and 
                     webhook_data.get("status") == "completed" and 
-                    webhook_data.get("result") and check):
+                    webhook_data.get("result")):
                 # Find the assistant message that was just created/updated
                 task_id = webhook_data.get("task_id")
                 assistant_chat = None
@@ -575,34 +582,39 @@ class ChatService:
                     )
                     
                     if evaluation and evaluation.get("needs_continuation"):
-                        # Get the session_id to use for continuation
-                        # Priority: next_session_id from ResultMessage > webhook_session_id > original session_id
-                        continuation_session_id = next_session_id or webhook_session_id or assistant_chat.session_id
+                        # For webhook session_id: use next_session_id or webhook_session_id
+                        # This is what we pass to the remote service
+                        webhook_continuation_session_id = next_session_id or webhook_session_id or assistant_chat.session_id
                         
                         logger.info(
                             f"🔄 Auto-continuation session resolution | "
                             f"next_session_id={next_session_id} | "
                             f"webhook_session_id={webhook_session_id} | "
                             f"assistant_session_id={assistant_chat.session_id} | "
-                            f"using={continuation_session_id}"
+                            f"original_session_id={original_session_id} | "
+                            f"webhook_continuation_session_id={webhook_continuation_session_id}"
                         )
                         
-                        # Create auto-continuation message with the correct session_id
+                        # Create auto-continuation message
+                        # Pass both UI and webhook session IDs
                         auto_message = await self.create_auto_continuation(
                             db,
                             assistant_chat.sub_project_id,
-                            continuation_session_id,
+                            webhook_continuation_session_id,  # This will be stored in metadata
                             evaluation["continuation_prompt"],
-                            assistant_chat.id
+                            assistant_chat.id,
+                            ui_session_id=original_session_id  # Explicitly pass the original UI session ID
                         )
                         
                         # Send the auto-generated message to the service
-                        logger.info(f"🤖 Sending auto-continuation to service | session_id={continuation_session_id}")
+                        # Use the webhook session ID from the auto message's metadata
+                        auto_webhook_session_id = auto_message.content.get("metadata", {}).get("webhook_session_id", webhook_continuation_session_id)
+                        logger.info(f"🤖 Sending auto-continuation to service | ui_session_id={auto_message.session_id} | webhook_session_id={auto_webhook_session_id}")
                         await self.send_query(
                             db,
                             auto_message.id,
                             evaluation["continuation_prompt"],
-                            continuation_session_id  # Use the correct session ID for continuity
+                            auto_webhook_session_id  # Use webhook session ID for remote service
                         )
                 else:
                     logger.warning(f"⚠️ Could not find assistant message for auto-continuation evaluation")
@@ -696,10 +708,10 @@ class ChatService:
                 logger.error(f"Chat not found: {chat_id}")
                 return None
             
-            # Get the last few messages in the conversation
+            # Get all messages in the conversation for this sub_project
+            # This ensures we get the full context regardless of session_id changes
             stmt = select(Chat).where(
                 Chat.sub_project_id == chat.sub_project_id,
-                Chat.session_id == session_id,
                 Chat.role.in_(["user", "assistant", "auto"])
             ).order_by(Chat.created_at.asc())
             
@@ -767,20 +779,63 @@ class ChatService:
         sub_project_id: UUID,
         session_id: str,
         continuation_prompt: str,
-        parent_message_id: Optional[UUID] = None
+        parent_message_id: Optional[UUID] = None,
+        ui_session_id: Optional[str] = None
     ) -> Chat:
         """Create an auto-generated continuation message"""
         try:
-            # Create the auto-generated message
+            # Determine the UI session_id to use
+            final_ui_session_id = ui_session_id  # Use explicitly passed UI session ID if available
+            
+            if not final_ui_session_id and parent_message_id:
+                # Get the parent message to find the UI session_id
+                parent_chat = await db.get(Chat, parent_message_id)
+                if parent_chat:
+                    # Find the original UI session by looking for the first user message
+                    stmt = select(Chat).where(
+                        Chat.sub_project_id == parent_chat.sub_project_id,
+                        Chat.role == "user"
+                    ).order_by(Chat.created_at.asc()).limit(1)
+                    
+                    result = await db.execute(stmt)
+                    first_user_chat = result.scalar_one_or_none()
+                    
+                    if first_user_chat:
+                        final_ui_session_id = first_user_chat.session_id
+                        logger.info(
+                            f"🔍 Found original UI session from first user message | "
+                            f"original_ui_session_id={final_ui_session_id} | "
+                            f"parent_session_id={parent_chat.session_id} | "
+                            f"webhook_session_id={session_id}"
+                        )
+                    else:
+                        # Fallback to parent's session_id if no user message found
+                        final_ui_session_id = parent_chat.session_id
+                        logger.info(
+                            f"🔍 Using parent session_id as UI session | "
+                            f"parent_session_id={parent_chat.session_id} | "
+                            f"webhook_session_id={session_id}"
+                        )
+            
+            # If still no UI session_id, use the provided session_id
+            if not final_ui_session_id:
+                final_ui_session_id = session_id
+                logger.info(
+                    f"⚠️ No UI session found, using provided session_id | "
+                    f"session_id={session_id}"
+                )
+            
+            # Create the auto-generated message with UI session_id
             auto_message = Chat(
                 sub_project_id=sub_project_id,
-                session_id=session_id,
+                session_id=final_ui_session_id,  # Always use UI session_id for continuity
                 role="auto",  # Mark as auto-generated
                 content={
                     "text": continuation_prompt,
                     "metadata": {
                         "auto_generated": True,
-                        "generation_reason": "conversation_incomplete"
+                        "generation_reason": "conversation_incomplete",
+                        "webhook_session_id": session_id  # Store webhook session_id for remote service
                     }
                 },
                 continuation_status=CONTINUATION_STATUS_IN_PROGRESS,
@@ -791,10 +846,20 @@ class ChatService:
             await db.commit()
             await db.refresh(auto_message)
             
+            # Add debug information to metadata for troubleshooting
+            auto_message.content["metadata"]["debug_info"] = {
+                "ui_session_id_source": "explicit" if ui_session_id else ("first_user_msg" if final_ui_session_id != session_id else "fallback"),
+                "original_session_id": session_id,
+                "final_ui_session_id": final_ui_session_id,
+                "parent_message_id": str(parent_message_id) if parent_message_id else None
+            }
+            
             logger.info(
                 f"🤖 Created auto-continuation message | "
                 f"id={str(auto_message.id)[:8]}... | "
-                f"session_id={session_id} | "
+                f"ui_session_id={final_ui_session_id} | "
+                f"webhook_session_id={session_id} | "
+                f"ui_source={'explicit' if ui_session_id else 'derived'} | "
                 f"prompt={continuation_prompt[:50]}..."
             )
             
