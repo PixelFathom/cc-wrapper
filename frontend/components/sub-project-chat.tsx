@@ -452,14 +452,50 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
       textareaRef.current.style.height = '24px' // Reset to min-height
     }
     
-    // Simple session ID management: use current sessionId for continuity
-    // The backend will return the session ID in the first message, and we'll reuse it
-    let sessionIdToUse = sessionId
+    // Session ID resolution with priority: next_session_id > webhook_session_id > current session_id
+    const resolveSessionId = () => {
+      const assistantMessages = messages.filter(m => m.role === 'assistant' && m.content?.metadata)
+      const lastAssistantMessage = assistantMessages[assistantMessages.length - 1]
+      
+      if (lastAssistantMessage && lastAssistantMessage.content?.metadata) {
+        const metadata = lastAssistantMessage.content.metadata
+        const nextSessionId = metadata.next_session_id
+        const webhookSessionId = metadata.webhook_session_id
+        
+        if (nextSessionId) {
+          console.log('📌 Using next_session_id from last assistant message:', nextSessionId)
+          // Update the UI session ID if it's different
+          if (nextSessionId !== sessionId) {
+            setSessionId(nextSessionId)
+          }
+          return nextSessionId
+        }
+        
+        if (webhookSessionId) {
+          console.log('🎯 Using webhook_session_id from last assistant message:', webhookSessionId)
+          // Update the UI session ID if it's different  
+          if (webhookSessionId !== sessionId) {
+            setSessionId(webhookSessionId)
+          }
+          return webhookSessionId
+        }
+      }
+      
+      if (sessionId) {
+        console.log('🔄 Using current session_id:', sessionId)
+        return sessionId
+      }
+      
+      console.log('🆕 No session_id available (first message)')
+      return undefined
+    }
+    
+    let sessionIdToUse = resolveSessionId()
     
     console.log('📨 Submitting message:', {
       session_id: sessionIdToUse || 'none (first message)',
       messageCount: messages.length,
-      hasLastAssistant: !!lastAssistantMessage
+      hasLastAssistant: !!messages.find(m => m.role === 'assistant')
     })
     
     // Add temporary user message for immediate feedback
