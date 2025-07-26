@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { 
   PaperPlaneIcon, PersonIcon, RocketIcon, UpdateIcon, ChevronRightIcon,
   CodeIcon, GearIcon, CheckCircledIcon, CrossCircledIcon, ClockIcon,
-  FileTextIcon, CubeIcon, ChevronDownIcon, DotFilledIcon
+  FileTextIcon, CubeIcon, ChevronDownIcon, DotFilledIcon, CopyIcon
 } from '@radix-ui/react-icons'
 import { api, ChatHook } from '@/lib/api'
 import { Button } from './ui/button'
@@ -58,6 +58,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
   // Collapse all hooks by default for cleaner UI
   const [showAllHooks, setShowAllHooks] = useState(false)
   const [autoContinuationEnabled, setAutoContinuationEnabled] = useState(true)
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -136,6 +137,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
       })
       
       // Only update sessionId if this was the first message
+      // Note: We already updated sessionId in handleSubmit if needed, so this is just for the first message
       if (!sessionId && data.session_id) {
         setSessionId(data.session_id)
       }
@@ -227,8 +229,11 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
             parentMessageId: msg.parent_message_id,
           }))
           
+          // Filter out temporary messages first
+          const nonTempMessages = prevMessages.filter(m => !m.id.startsWith('temp-'))
+          
           // Create a map of existing messages for quick lookup
-          const existingMap = new Map(prevMessages.map(m => [m.id, m]))
+          const existingMap = new Map(nonTempMessages.map(m => [m.id, m]))
           const updatedMap = new Map(existingMap)
           
           // Update or add messages
@@ -238,13 +243,15 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
             // Always update if content changed or if it's a new message
             if (!existing || 
                 JSON.stringify(existing.content) !== JSON.stringify(newMsg.content) ||
-                existing.isProcessing !== newMsg.isProcessing) {
+                existing.isProcessing !== newMsg.isProcessing ||
+                existing.continuationStatus !== newMsg.continuationStatus) {
               
               console.log(`🔄 ${existing ? 'Updating' : 'Adding'} message ${newMsg.id.slice(0, 8)}...`, {
                 role: newMsg.role,
                 wasProcessing: existing?.isProcessing,
                 isProcessing: newMsg.isProcessing,
-                hasText: !!newMsg.content?.text
+                hasText: !!newMsg.content?.text,
+                continuationStatus: newMsg.continuationStatus
               })
               
               updatedMap.set(newMsg.id, newMsg)
@@ -255,14 +262,6 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
           const finalMessages = Array.from(updatedMap.values())
             .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
           
-          // Check if all messages now have a different session_id (webhook updated them)
-          const newSessionId = finalMessages[0]?.sessionId
-          if (newSessionId && newSessionId !== sessionId && finalMessages.every(msg => msg.sessionId === newSessionId)) {
-            console.log('🔄 SESSION ID CHANGE DETECTED - all messages moved to new session | ' +
-              `current=${sessionId} → new=${newSessionId}`)
-            setSessionId(newSessionId)
-          }
-          
           console.log('✅ Updated UI with', finalMessages.length, 'messages')
           return finalMessages
         })
@@ -272,7 +271,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
     } else if (sessionMessages === null) {
       console.log('📭 Session messages is null, keeping current state')
     }
-  }, [sessionMessages, sessionId])
+  }, [sessionMessages])
   
 
   // Removed EventSource - using polling instead for better control
@@ -309,16 +308,67 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
       if (!hasAutoChild) {
         console.log('🤖 Triggering auto-continuation for message:', lastAssistant.id)
         
+        // Get the session ID to use for continuation
+        // Priority: next_session_id (from ResultMessage) > webhook_session_id > current session_id
+        const metadata = lastAssistant.content?.metadata || {}
+        const nextSessionId = metadata.next_session_id
+        const webhookSessionId = metadata.webhook_session_id
+        const sessionIdToUse = nextSessionId || webhookSessionId || sessionId
+        
+        console.log('🔄 Auto-continuation session resolution:', {
+          nextSessionId,
+          webhookSessionId,
+          currentSessionId: sessionId,
+          using: sessionIdToUse
+        })
+        
+        // Add a temporary auto message to show processing state immediately
+        // Use the current UI session ID for display consistency
+        const tempAutoMessage: Message = {
+          id: `temp-auto-${Date.now()}`,
+          role: 'auto',
+          content: { 
+            text: 'Continue',
+            metadata: {
+              webhook_session_id: sessionIdToUse  // Store the webhook session ID in metadata
+            }
+          },
+          timestamp: new Date().toISOString(),
+          sessionId: sessionId,  // Use UI session ID for display
+          parentMessageId: lastAssistant.id
+        }
+        
+        // Add temporary auto message
+        setMessages(prev => [...prev, tempAutoMessage])
+        
+        // Add a temporary processing assistant message
+        const tempAssistantMessage: Message = {
+          id: `temp-assistant-${Date.now()}`,
+          role: 'assistant',
+          content: { text: '', metadata: { status: 'processing' } },
+          timestamp: new Date().toISOString(),
+          sessionId: sessionId,  // Use UI session ID for display
+          isProcessing: true,
+          parentMessageId: tempAutoMessage.id
+        }
+        
+        setMessages(prev => [...prev, tempAssistantMessage])
+        
         // Trigger continuation
         api.continueChat(lastAssistant.id)
           .then(result => {
             if (result.needs_continuation) {
               console.log('✅ Auto-continuation triggered:', result)
-              // The polling will pick up the new messages
+              // The polling will pick up the new messages and replace our temp messages
+            } else {
+              // Remove temporary messages if continuation not needed
+              setMessages(prev => prev.filter(m => !m.id.startsWith('temp-')))
             }
           })
           .catch(error => {
             console.error('❌ Failed to trigger auto-continuation:', error)
+            // Remove temporary messages on error
+            setMessages(prev => prev.filter(m => !m.id.startsWith('temp-')))
           })
       }
     }
@@ -373,15 +423,65 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
       textareaRef.current.style.height = '24px' // Reset to min-height
     }
     
+    // For user-initiated messages, we need to use the session ID from the last assistant message
+    // This ensures proper conversation continuity
+    let sessionIdToUse = sessionId
+    
+    // Find the last assistant message to get the correct session ID for the next message
+    const assistantMessages = messages.filter(m => m.role === 'assistant' && m.content?.text)
+    const lastAssistantMessage = assistantMessages[assistantMessages.length - 1]
+    
+    if (lastAssistantMessage && lastAssistantMessage.content?.metadata) {
+      const metadata = lastAssistantMessage.content.metadata
+      // Use next_session_id if available (from ResultMessage), otherwise use webhook_session_id
+      const nextSessionId = metadata.next_session_id || metadata.webhook_session_id
+      
+      if (nextSessionId && nextSessionId !== sessionIdToUse) {
+        console.log('📌 Using session ID from last assistant message:', {
+          currentSessionId: sessionIdToUse,
+          nextSessionId: nextSessionId,
+          source: metadata.next_session_id ? 'next_session_id' : 'webhook_session_id'
+        })
+        sessionIdToUse = nextSessionId
+        
+        // Also update the UI session ID state to stay in sync
+        setSessionId(nextSessionId)
+      }
+    }
+    
     console.log('📨 Submitting message:', {
-      session_id: sessionId || 'none (first message)',
-      messageCount: messages.length
+      session_id: sessionIdToUse || 'none (first message)',
+      messageCount: messages.length,
+      hasLastAssistant: !!lastAssistantMessage
     })
+    
+    // Add temporary user message for immediate feedback
+    const tempUserMessage: Message = {
+      id: `temp-user-${Date.now()}`,
+      role: 'user',
+      content: { text: userInput },
+      timestamp: new Date().toISOString(),
+      sessionId: sessionIdToUse || 'temp',
+    }
+    
+    setMessages(prev => [...prev, tempUserMessage])
+    
+    // Add temporary processing assistant message
+    const tempAssistantMessage: Message = {
+      id: `temp-assistant-${Date.now()}`,
+      role: 'assistant',
+      content: { text: '', metadata: { status: 'processing' } },
+      timestamp: new Date().toISOString(),
+      sessionId: sessionIdToUse || 'temp',
+      isProcessing: true,
+    }
+    
+    setMessages(prev => [...prev, tempAssistantMessage])
     
     // Send mutation with current sessionId (null for first message)
     sendMutation.mutate({
       prompt: userInput,
-      session_id: sessionId || undefined,
+      session_id: sessionIdToUse || undefined,
     })
     
     // Scroll to bottom after sending message with a slight delay
@@ -427,15 +527,21 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
   const getHookIcon = (hook: ChatHook) => {
     if (hook.tool_name) {
       const toolName = hook.tool_name.toLowerCase()
-      if (toolName.includes('bash') || toolName.includes('shell')) return <CodeIcon className="h-3 w-3" />
-      if (toolName.includes('read') || toolName.includes('write')) return <FileTextIcon className="h-3 w-3" />
-      if (toolName.includes('search') || toolName.includes('grep')) return <CubeIcon className="h-3 w-3" />
-      return <GearIcon className="h-3 w-3" />
+      const baseClass = "h-3 w-3"
+      const colorClass = hook.status === 'processing' ? "text-purple-400" : 
+                        hook.status === 'completed' ? "text-green-400" : 
+                        hook.status === 'error' || hook.status === 'failed' ? "text-red-400" : 
+                        "text-gray-400"
+      
+      if (toolName.includes('bash') || toolName.includes('shell')) return <CodeIcon className={`${baseClass} ${colorClass}`} />
+      if (toolName.includes('read') || toolName.includes('write')) return <FileTextIcon className={`${baseClass} ${colorClass}`} />
+      if (toolName.includes('search') || toolName.includes('grep')) return <CubeIcon className={`${baseClass} ${colorClass}`} />
+      return <GearIcon className={`${baseClass} ${colorClass}`} />
     }
     
     if (hook.status === 'completed') return <CheckCircledIcon className="h-3 w-3 text-green-500" />
     if (hook.status === 'error' || hook.status === 'failed') return <CrossCircledIcon className="h-3 w-3 text-red-500" />
-    if (hook.status === 'processing') return <UpdateIcon className="h-3 w-3 text-yellow-500 animate-spin" />
+    if (hook.status === 'processing') return <UpdateIcon className="h-3 w-3 text-purple-400 animate-spin" />
     return <DotFilledIcon className="h-3 w-3 text-gray-500" />
   }
 
@@ -444,6 +550,24 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
     if (hook.tool_name) return `Using tool: ${hook.tool_name}`
     if (hook.data?.result) return hook.data.result.substring(0, 100) + '...'
     return hook.status || 'Processing'
+  }
+
+  const copyMessageContent = async (message: Message) => {
+    try {
+      const textContent = message.role === 'assistant' 
+        ? (message.content?.text || '')
+        : (message.content?.text || message.content || '')
+      
+      await navigator.clipboard.writeText(textContent)
+      setCopiedMessageId(message.id)
+      
+      // Reset copied state after 2 seconds
+      setTimeout(() => {
+        setCopiedMessageId(null)
+      }, 2000)
+    } catch (error) {
+      console.error('Failed to copy message:', error)
+    }
   }
 
   return (
@@ -617,7 +741,11 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                             ? "bg-gradient-to-br from-amber-500 to-orange-600"
                             : "bg-gradient-to-br from-cyan-500 to-blue-600"
                         )}>
-                          <PersonIcon className="h-5 w-5 text-white" />
+                          {message.role === 'auto' ? (
+                            <UpdateIcon className="h-5 w-5 text-white" />
+                          ) : (
+                            <PersonIcon className="h-5 w-5 text-white" />
+                          )}
                         </div>
                         {/* User Message */}
                         <div className="flex-1 pt-1">
@@ -631,14 +759,44 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                               })}
                             </span>
                             {message.role === 'auto' && (
-                              <span className="text-xs bg-amber-500/20 text-amber-500 px-1.5 py-0.5 rounded-full flex items-center gap-1">
-                                <UpdateIcon className="h-3 w-3" />
+                              <motion.span 
+                                initial={{ opacity: 0, scale: 0.8 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                className="text-xs bg-amber-500/20 text-amber-500 px-1.5 py-0.5 rounded-full flex items-center gap-1"
+                              >
+                                <UpdateIcon className="h-3 w-3 animate-pulse" />
                                 AI Generated
-                              </span>
+                              </motion.span>
                             )}
                           </div>
                           <div className="text-[15px] leading-relaxed text-foreground">
                             {message.content.text || message.content}
+                          </div>
+                          {/* Copy button */}
+                          <div className="mt-2">
+                            <button
+                              onClick={() => copyMessageContent(message)}
+                              className={cn(
+                                "inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs",
+                                "transition-all duration-200",
+                                "border border-transparent",
+                                copiedMessageId === message.id
+                                  ? "bg-green-500/20 text-green-500 border-green-500/30"
+                                  : "hover:bg-muted/50 text-muted-foreground hover:text-foreground hover:border-border/50"
+                              )}
+                            >
+                              {copiedMessageId === message.id ? (
+                                <>
+                                  <CheckCircledIcon className="h-3 w-3" />
+                                  <span>Copied!</span>
+                                </>
+                              ) : (
+                                <>
+                                  <CopyIcon className="h-3 w-3" />
+                                  <span>Copy</span>
+                                </>
+                              )}
+                            </button>
                           </div>
                         </div>
                       </div>
@@ -664,6 +822,17 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                                 <UpdateIcon className="h-3 w-3 animate-spin" />
                                 Processing
                               </span>
+                            )}
+                            {/* Show if this is a response to an auto-continuation */}
+                            {message.parentMessageId && messages.find(m => m.id === message.parentMessageId)?.role === 'auto' && (
+                              <motion.span 
+                                initial={{ opacity: 0, scale: 0.8 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                className="text-xs bg-amber-500/20 text-amber-500 px-1.5 py-0.5 rounded-full flex items-center gap-1"
+                              >
+                                <UpdateIcon className="h-3 w-3" />
+                                Auto-generated response
+                              </motion.span>
                             )}
                           </div>
                           <div className="text-[15px] leading-relaxed">
