@@ -677,16 +677,6 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                               isWaitingForResponse={isWaitingForResponse}
                             />
                           </div>
-                          {/* Show hooks toggle for assistant messages */}
-                          {hasHooks && (
-                            <button
-                              onClick={() => setShowAllHooks(!showAllHooks)}
-                              className="mt-2 text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
-                            >
-                              <GearIcon className="h-3 w-3" />
-                              <span>{showAllHooks ? 'Hide' : 'Show'} processing steps ({hooks.length})</span>
-                            </button>
-                          )}
                         </div>
                       </div>
                     )}

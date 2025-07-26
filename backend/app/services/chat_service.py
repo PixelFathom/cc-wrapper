@@ -529,34 +529,49 @@ class ChatService:
                         f"verified_webhook_session_id={latest_assistant.content.get('metadata', {}).get('webhook_session_id')}"
                     )
             
-            # Check if we need auto-continuation after completion
-            if is_completion and webhook_data.get("status") == "completed":
-                # Evaluate the conversation for auto-continuation
-                evaluation = await self.evaluate_conversation_for_continuation(
-                    db, chat_id, original_session_id
-                )
+            # Always check for auto-continuation when we get a result message
+            if webhook_data.get("message_type") == "ResultMessage" or (is_completion and webhook_data.get("status") == "completed"):
+                # Find the assistant message that was just created/updated
+                task_id = webhook_data.get("task_id")
+                assistant_chat = None
                 
-                if evaluation and evaluation.get("needs_continuation"):
-                    # Get the assistant message for sub_project_id
-                    assistant_msg = await db.get(Chat, chat_id)
-                    if assistant_msg:
+                if task_id:
+                    # Look for assistant message with this task_id
+                    stmt = select(Chat).where(
+                        Chat.sub_project_id == chat.sub_project_id,
+                        Chat.role == "assistant",
+                        Chat.content.op('->')('metadata').op('->>')('task_id') == task_id
+                    ).order_by(Chat.created_at.desc()).limit(1)
+                    
+                    result = await db.execute(stmt)
+                    assistant_chat = result.scalar_one_or_none()
+                
+                if assistant_chat:
+                    # Evaluate the conversation for auto-continuation
+                    evaluation = await self.evaluate_conversation_for_continuation(
+                        db, assistant_chat.id, assistant_chat.session_id
+                    )
+                    
+                    if evaluation and evaluation.get("needs_continuation"):
                         # Create auto-continuation message
                         auto_message = await self.create_auto_continuation(
                             db,
-                            assistant_msg.sub_project_id,
-                            original_session_id,
+                            assistant_chat.sub_project_id,
+                            assistant_chat.session_id,
                             evaluation["continuation_prompt"],
-                            chat_id
+                            assistant_chat.id
                         )
                         
                         # Send the auto-generated message to the service
-                        logger.info(f"🤖 Sending auto-continuation to service")
+                        logger.info(f"🤖 Sending auto-continuation to service | webhook_session_id={webhook_session_id}")
                         await self.send_query(
                             db,
                             auto_message.id,
                             evaluation["continuation_prompt"],
                             webhook_session_id  # Use the webhook session ID for continuity
                         )
+                else:
+                    logger.warning(f"⚠️ Could not find assistant message for auto-continuation evaluation")
             
             # Publish to Redis for real-time updates
             if self.redis_client:
@@ -641,8 +656,15 @@ class ChatService:
     ) -> Optional[Dict[str, Any]]:
         """Evaluate if a conversation needs auto-continuation"""
         try:
+            # Get the chat to find sub_project_id
+            chat = await db.get(Chat, chat_id)
+            if not chat:
+                logger.error(f"Chat not found: {chat_id}")
+                return None
+            
             # Get the last few messages in the conversation
             stmt = select(Chat).where(
+                Chat.sub_project_id == chat.sub_project_id,
                 Chat.session_id == session_id,
                 Chat.role.in_(["user", "assistant", "auto"])
             ).order_by(Chat.created_at.asc())
@@ -653,17 +675,12 @@ class ChatService:
             if not messages:
                 return None
             
-            # Check if auto-continuation is enabled for this session
-            last_message = messages[-1]
-            if not last_message.auto_continuation_enabled:
-                logger.info(f"Auto-continuation disabled for session {session_id}")
-                return None
-            
-            # Check if we've already done too many continuations
+            # Get continuation count for tracking
             continuation_count = sum(1 for msg in messages if msg.role == "auto")
-            if continuation_count >= 5:  # Max 5 auto-continuations per conversation
-                logger.info(f"Max continuation count reached for session {session_id}")
-                return None
+            
+            # Always process, but log if we're at high continuation count
+            if continuation_count >= 5:
+                logger.warning(f"High continuation count ({continuation_count}) for session {session_id}, but continuing anyway")
             
             # Convert to format expected by OpenAI service
             conversation_messages = [
@@ -688,8 +705,10 @@ class ChatService:
                 f"reasoning={evaluation.reasoning}"
             )
             
-            if evaluation.needs_continuation and evaluation.confidence >= 0.7:
+            # Always return evaluation result without confidence threshold
+            if evaluation.needs_continuation:
                 # Update the last assistant message to indicate continuation needed
+                last_message = messages[-1]
                 if last_message.role == "assistant":
                     last_message.continuation_status = CONTINUATION_STATUS_NEEDED
                     db.add(last_message)
@@ -697,7 +716,7 @@ class ChatService:
                 
                 return {
                     "needs_continuation": True,
-                    "continuation_prompt": evaluation.continuation_prompt,
+                    "continuation_prompt": evaluation.continuation_prompt or "Please continue with the previous response.",
                     "reasoning": evaluation.reasoning,
                     "continuation_count": continuation_count + 1
                 }

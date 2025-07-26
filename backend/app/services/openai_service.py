@@ -27,7 +27,7 @@ class OpenAIService:
         self.client = AsyncOpenAI(
             api_key=settings.openai_api_key
         )
-        self.model = "gpt-4o-mini"  # Using GPT-4 mini as requested
+        self.model = "gpt-4.1-mini"  # Using GPT-4 mini as requested
         
     async def evaluate_conversation_completeness(
         self, 
@@ -76,10 +76,11 @@ Return your evaluation as a JSON object."""
                 ],
                 response_format={"type": "json_object"},
                 temperature=0.3,  # Lower temperature for more consistent evaluation
-                max_tokens=500
             )
             
             result = response.choices[0].message.content
+            logger.info(result)
+            logger.info("response from openai")
             if result:
                 import json
                 evaluation_data = json.loads(result)
