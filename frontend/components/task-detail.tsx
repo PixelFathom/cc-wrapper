@@ -65,7 +65,7 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
     queryKey: ['deployment-hooks', taskId],
     queryFn: () => api.getTaskDeploymentHooks(taskId, 100), // Get more hooks
     enabled: !!task && task.deployment_status !== 'pending', // Fetch hooks if deployment has started
-    refetchInterval: task && !task.deployment_completed ? 2000 : false, // Poll every 2 seconds only if not completed
+    refetchInterval: task && !task.deployment_completed ? 3000 : false, // Poll every 3 seconds only if not completed
   })
 
   // Fetch knowledge base files

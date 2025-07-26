@@ -31,7 +31,7 @@ export function ApprovalNotifications() {
         return []
       }
     },
-    refetchInterval: 2000, // Poll every 2 seconds
+    refetchInterval: 3000, // Poll every 3 seconds for better performance
   })
 
   const approvalCount = allApprovals.length
@@ -237,7 +237,7 @@ export function ApprovalNotifications() {
               {approvalCount > 0 && (
                 <div className="px-4 py-3 bg-gray-800 border-t border-gray-700">
                   <div className="flex items-center justify-between text-xs text-gray-400">
-                    <span>Live updates every 2s</span>
+                    <span>Live updates every 3s</span>
                     <span>ESC to close</span>
                   </div>
                 </div>

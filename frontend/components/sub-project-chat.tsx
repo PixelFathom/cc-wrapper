@@ -125,7 +125,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
     queryKey: ['sub-project-sessions', subProjectId],
     queryFn: () => api.getSubProjectSessions(subProjectId),
     enabled: !!subProjectId && !isNewChat, // Skip for new chats
-    refetchInterval: 10000, // Refresh every 10 seconds
+    refetchInterval: 15000, // Refresh every 15 seconds
   })
 
   useEffect(() => {
@@ -201,7 +201,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
       }
     },
     enabled: !!sessionId,
-    refetchInterval: isWaitingForResponse ? 1000 : 2000, // Poll every 1s when waiting, 2s otherwise
+    refetchInterval: isWaitingForResponse ? 3000 : 5000, // Poll every 3s when waiting, 5s otherwise
     // Important: Keep the data fresh
     staleTime: 0,
     gcTime: 5 * 60 * 1000, // Keep in cache for 5 minutes
@@ -232,7 +232,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
       return hooksMap
     },
     enabled: messages.length > 0,
-    refetchInterval: isWaitingForResponse ? 1000 : 2000,
+    refetchInterval: isWaitingForResponse ? 3000 : 5000,
     staleTime: 0,
     gcTime: 5 * 60 * 1000,
   })
@@ -441,7 +441,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!input.trim()) return
+    if (!input.trim() || isWaitingForResponse) return
 
     const userInput = input
     setInput('')
@@ -452,31 +452,9 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
       textareaRef.current.style.height = '24px' // Reset to min-height
     }
     
-    // For user-initiated messages, we need to use the session ID from the last assistant message
-    // This ensures proper conversation continuity
+    // Simple session ID management: use current sessionId for continuity
+    // The backend will return the session ID in the first message, and we'll reuse it
     let sessionIdToUse = sessionId
-    
-    // Find the last assistant message to get the correct session ID for the next message
-    const assistantMessages = messages.filter(m => m.role === 'assistant' && m.content?.text)
-    const lastAssistantMessage = assistantMessages[assistantMessages.length - 1]
-    
-    if (lastAssistantMessage && lastAssistantMessage.content?.metadata) {
-      const metadata = lastAssistantMessage.content.metadata
-      // Use next_session_id if available (from ResultMessage), otherwise use webhook_session_id
-      const nextSessionId = metadata.next_session_id || metadata.webhook_session_id
-      
-      if (nextSessionId && nextSessionId !== sessionIdToUse) {
-        console.log('📌 Using session ID from last assistant message:', {
-          currentSessionId: sessionIdToUse,
-          nextSessionId: nextSessionId,
-          source: metadata.next_session_id ? 'next_session_id' : 'webhook_session_id'
-        })
-        sessionIdToUse = nextSessionId
-        
-        // Also update the UI session ID state to stay in sync
-        setSessionId(nextSessionId)
-      }
-    }
     
     console.log('📨 Submitting message:', {
       session_id: sessionIdToUse || 'none (first message)',
@@ -1077,7 +1055,10 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
         </div>
 
         {/* Modern X-style Input Area */}
-        <div className="border-t border-border/50 bg-black/40 backdrop-blur-sm">
+        <div className={cn(
+          "border-t border-border/50 bg-black/40 backdrop-blur-sm transition-all duration-200",
+          isWaitingForResponse && "opacity-75 bg-black/60"
+        )}>
           <form onSubmit={handleSubmit} className="p-3 sm:p-4">
             <div className="relative">
               <Textarea
@@ -1093,13 +1074,13 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                 }}
                 onKeyDown={(e) => {
                   // Submit on Enter (without modifiers)
-                  if (e.key === 'Enter' && !e.shiftKey) {
+                  if (e.key === 'Enter' && !e.shiftKey && !isWaitingForResponse) {
                     e.preventDefault()
                     handleSubmit(e as any)
                   }
                 }}
-                placeholder="What's happening with your code?"
-                disabled={sendMutation.isPending}
+                placeholder={isWaitingForResponse ? "Waiting for response..." : "What's happening with your code?"}
+                disabled={sendMutation.isPending || isWaitingForResponse}
                 className="w-full bg-transparent border-0 focus:ring-0 resize-none 
                   placeholder:text-muted-foreground/50 text-base leading-relaxed
                   font-sans min-h-[24px] max-h-[200px] p-0 pr-12"
@@ -1145,17 +1126,17 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                   {/* Modern circular send button like X */}
                   <Button 
                     type="submit" 
-                    disabled={sendMutation.isPending || !input.trim()}
+                    disabled={sendMutation.isPending || !input.trim() || isWaitingForResponse}
                     className={cn(
                       "rounded-full h-8 w-8 sm:h-9 sm:w-auto sm:px-4 transition-all duration-200",
                       "font-medium text-sm",
-                      input.trim() 
+                      input.trim() && !isWaitingForResponse
                         ? "bg-cyan-500 hover:bg-cyan-600 text-black" 
                         : "bg-cyan-500/20 text-cyan-500/50 cursor-not-allowed"
                     )}
                     size="sm"
                   >
-                    {sendMutation.isPending ? (
+                    {sendMutation.isPending || isWaitingForResponse ? (
                       <UpdateIcon className="h-4 w-4 animate-spin" />
                     ) : (
                       <>
@@ -1167,9 +1148,16 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                 </div>
               </div>
               
-              {/* Hint text */}
+              {/* Hint text / Status indicator */}
               <div className="mt-2 text-xs text-muted-foreground/50">
-                Press Enter to send • Shift+Enter for new line
+                {isWaitingForResponse ? (
+                  <div className="flex items-center gap-2 text-cyan-500">
+                    <UpdateIcon className="h-3 w-3 animate-spin" />
+                    Processing your message... Please wait before sending another.
+                  </div>
+                ) : (
+                  <div>Press Enter to send • Shift+Enter for new line</div>
+                )}
               </div>
             </div>
           </form>

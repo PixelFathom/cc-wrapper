@@ -46,7 +46,7 @@ export function ApprovalCenter() {
         return []
       }
     },
-    refetchInterval: 2000,
+    refetchInterval: 5000, // Poll every 5 seconds for better performance
     staleTime: 0,
   })
 

@@ -24,7 +24,7 @@ export function MessageHooks({ messageId, isProcessing = false, showByDefault = 
     queryKey: ['message-hooks', messageId],
     queryFn: () => api.getMessageHooks(messageId),
     enabled: !!messageId,
-    refetchInterval: isProcessing ? 2000 : false, // Poll only when processing
+    refetchInterval: isProcessing ? 3000 : false, // Poll every 3 seconds only when processing
   })
 
   const hooks = hooksData?.hooks || []
