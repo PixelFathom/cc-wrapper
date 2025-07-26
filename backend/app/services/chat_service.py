@@ -723,8 +723,8 @@ class ChatService:
             # Get continuation count for tracking
             continuation_count = sum(1 for msg in messages if msg.role == "auto")
             
-            # Limit continuation attempts
-            if continuation_count >= 3:
+            # Limit continuation attempts (increased from 3 to 5)
+            if continuation_count >= 5:
                 logger.warning(f"Max continuation count reached ({continuation_count}) for session {session_id}")
                 return None
             
@@ -742,12 +742,15 @@ class ChatService:
             content = last_assistant_message.content.get("text", "") if last_assistant_message.content else ""
             needs_continuation = self._evaluate_message_completeness(content)
             
+            # Enhanced logging for debugging
+            content_preview = content[:200] + "..." if len(content) > 200 else content
             logger.info(
                 f"🤖 Conversation evaluation (heuristic) | "
                 f"session_id={session_id} | "
                 f"needs_continuation={needs_continuation} | "
                 f"message_length={len(content)} | "
-                f"continuation_count={continuation_count}"
+                f"continuation_count={continuation_count} | "
+                f"content_preview='{content_preview}'"
             )
             
             if needs_continuation:
@@ -763,6 +766,21 @@ class ChatService:
                     "continuation_count": continuation_count + 1
                 }
             
+            # Check for fallback conditions - short messages might need continuation too
+            if len(content) < 100 and continuation_count == 0:
+                logger.info(f"🔄 Considering fallback continuation for short message: {len(content)} chars")
+                # For very short responses, allow one continuation attempt
+                last_assistant_message.continuation_status = CONTINUATION_STATUS_NEEDED
+                db.add(last_assistant_message)
+                await db.commit()
+                
+                return {
+                    "needs_continuation": True,
+                    "continuation_prompt": "Could you provide more details or expand on your response?",
+                    "reasoning": "Short response that might benefit from expansion",
+                    "continuation_count": continuation_count + 1
+                }
+            
             return None
             
         except Exception as e:
@@ -770,50 +788,110 @@ class ChatService:
             return None
     
     def _evaluate_message_completeness(self, content: str) -> bool:
-        """Simple heuristic to determine if a message appears incomplete"""
+        """Enhanced heuristic to determine if a message appears incomplete"""
         if not content or len(content.strip()) < 10:
             return False
         
-        content = content.strip().lower()
+        original_content = content.strip()
+        content_lower = original_content.lower()
         
-        # Check for explicit continuation indicators
-        continuation_phrases = [
+        # Strong indicators for continuation (explicit requests)
+        explicit_continuation_phrases = [
             "would you like me to continue",
             "should i continue", 
             "let me continue",
             "i'll continue",
-            "continue with",
-            "more details",
-            "additional information",
             "shall i proceed",
             "would you like more",
             "let me know if you want me to continue",
             "would you like me to explain more",
-            "do you want me to continue"
+            "do you want me to continue",
+            "more on this",
+            "continue with",
+            "let me know if you need",
+            "would you like me to",
+            "should i provide more",
+            "need more details",
+            "want me to continue"
         ]
         
-        for phrase in continuation_phrases:
-            if phrase in content:
+        for phrase in explicit_continuation_phrases:
+            if phrase in content_lower:
                 return True
         
-        # Check for incomplete code blocks or structures
-        incomplete_indicators = [
-            content.count("```") % 2 == 1,  # Unclosed code blocks
-            content.endswith("..."),
-            content.endswith(".."),
-            content.endswith("and"),
-            content.endswith("or"),
-            content.endswith(","),
-            content.endswith("but"),
-            content.endswith("however"),
-            content.endswith("also"),
-            content.endswith("additionally"),
-            "to be continued" in content,
-            "more on this" in content,
-            "next steps" in content and len(content) < 500
+        # Check for incomplete code blocks
+        if original_content.count("```") % 2 == 1:  # Unclosed code blocks
+            return True
+            
+        # Check for incomplete sentences or structures
+        incomplete_endings = [
+            "...", "..", "and", "or", ",", "but", "however", "also", 
+            "additionally", "furthermore", "moreover", "therefore", 
+            "thus", "hence", "consequently", "meanwhile", "then",
+            "next", "so", "yet", "still", "now", "here", "there"
         ]
         
-        return any(incomplete_indicators)
+        for ending in incomplete_endings:
+            if content_lower.endswith(ending):
+                return True
+        
+        # Check for common incomplete patterns
+        incomplete_patterns = [
+            "to be continued",
+            "more details",
+            "additional information", 
+            "next steps",
+            "let me know",
+            "please let me know",
+            "feel free to ask",
+            "if you need",
+            "would you like",
+            "in the next",
+            "coming up",
+            "i'll show you",
+            "let's continue",
+            "moving forward",
+            "going forward"
+        ]
+        
+        for pattern in incomplete_patterns:
+            if pattern in content_lower:
+                return True
+        
+        # Check for lists or enumerations that might be incomplete
+        lines = original_content.split('\n')
+        if len(lines) > 1:
+            last_line = lines[-1].strip()
+            # Check if it ends with a numbered/bulleted list item
+            if last_line and (
+                last_line[-1].isdigit() or 
+                last_line.endswith('.') or 
+                last_line.startswith('•') or 
+                last_line.startswith('-') or
+                last_line.startswith('*')
+            ):
+                return True
+        
+        # Check for incomplete code or technical explanations
+        technical_incomplete_indicators = [
+            "here's how",
+            "here's what",
+            "let me show",
+            "for example",
+            "such as",
+            "including",
+            "like this",
+            "as follows",
+            "you can also",
+            "another way",
+            "alternatively"
+        ]
+        
+        for indicator in technical_incomplete_indicators:
+            if indicator in content_lower and len(original_content) < 300:
+                return True
+        
+        return False
     
     async def create_auto_continuation(
         self,
