@@ -329,7 +329,6 @@ class ChatService:
                 print(f"🔍 Looking for assistant message | sub_project_id={str(chat.sub_project_id)[:8]}... | session_id={original_session_id}")
                 
                 # First, let's see all assistant messages in this session
-                from sqlmodel import select
                 all_stmt = select(Chat).where(
                     Chat.sub_project_id == chat.sub_project_id,
                     Chat.session_id == original_session_id,
@@ -528,9 +527,24 @@ class ChatService:
                         f"✅ Successfully stored webhook_session_id in assistant message | "
                         f"verified_webhook_session_id={latest_assistant.content.get('metadata', {}).get('webhook_session_id')}"
                     )
-            
-            # Always check for auto-continuation when we get a result message
-            if webhook_data.get("message_type") == "ResultMessage" or (is_completion and webhook_data.get("status") == "completed"):
+            # Check if the last message in this conversation was a bot (assistant) message
+            last_message_stmt = (
+                select(Chat)
+                .where(
+                    Chat.sub_project_id == chat.sub_project_id,
+                )
+                .order_by(Chat.created_at.desc())
+                .limit(1)
+            )
+            last_message_result = await db.execute(last_message_stmt)
+            last_message = last_message_result.scalar_one_or_none()
+            check = True
+            if not last_message or last_message.role == "auto":
+                check = False
+            if (is_completion and 
+                    not webhook_data.get("is_error") and 
+                    webhook_data.get("status") == "completed" and 
+                    webhook_data.get("result") and check):
                 # Find the assistant message that was just created/updated
                 task_id = webhook_data.get("task_id")
                 assistant_chat = None

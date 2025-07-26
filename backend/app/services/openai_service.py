@@ -49,7 +49,7 @@ Your task is to determine if the assistant's last response appears incomplete or
 
 Analyze the conversation and return a JSON response with:
 1. needs_continuation: boolean - true if the response seems incomplete or could benefit from more information
-2. continuation_prompt: string - a follow-up question to ask the assistant (only if needs_continuation is true)
+2. continuation_prompt: string - a follow-up message to ask the assistant to continue the conversation (only if needs_continuation is true)
 3. confidence: float - how confident you are in your assessment (0.0 to 1.0)
 4. reasoning: string - brief explanation of your decision
 
