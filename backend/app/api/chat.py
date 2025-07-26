@@ -412,18 +412,82 @@ async def get_session_chats(
     limit: int = 100,
     session: AsyncSession = Depends(get_session)
 ):
-    """Get all chat messages for a specific session only"""
+    """Get all chat messages for a conversation thread, handling session ID evolution"""
     import logging
     logger = logging.getLogger(__name__)
     
     try:
-        # Get messages with this exact session_id only
+        # FIXED: For conversation continuity, we need to find ALL related messages
+        # First, find the sub_project_id for this session
+        result = await session.execute(
+            select(Chat.sub_project_id)
+            .where(Chat.session_id == session_id)
+            .limit(1)
+        )
+        sub_project_row = result.first()
+        
+        if not sub_project_row:
+            # Session not found, return empty
+            return {
+                "session_id": session_id,
+                "messages": []
+            }
+        
+        sub_project_id = sub_project_row[0]
+        
+        # Get ALL messages for this sub_project to find conversation thread
+        # We'll group them by conversation continuity rather than exact session_id
         result = await session.execute(
             select(Chat)
-            .where(Chat.session_id == session_id)
+            .where(Chat.sub_project_id == sub_project_id)
             .order_by(Chat.created_at)
         )
-        chats = list(result.scalars().all())
+        all_chats = list(result.scalars().all())
+        
+        # Find the conversation thread that includes our target session_id
+        conversation_messages = []
+        target_session_found = False
+        
+        # Look for the session in question and include all messages in its conversation thread
+        for chat in all_chats:
+            # Check if this message should be included in the conversation
+            if chat.session_id == session_id:
+                target_session_found = True
+                conversation_messages.append(chat)
+            elif target_session_found:
+                # Check if this message continues the conversation (same sub_project, close in time)
+                last_msg = conversation_messages[-1] if conversation_messages else None
+                if last_msg and (chat.created_at - last_msg.created_at).total_seconds() < 300:  # 5 minutes
+                    conversation_messages.append(chat)
+                    # Update session tracking to include webhook session evolution
+                    if chat.role == 'assistant' and chat.content.get('metadata', {}).get('webhook_session_id'):
+                        # This assistant message provides the next session ID for continuity
+                        continue
+                else:
+                    # Gap too large, probably a new conversation
+                    break
+            elif not target_session_found:
+                # Before target session - include if it's part of the conversation thread
+                # Check if any message has webhook metadata pointing to our target session
+                if (chat.role == 'assistant' and 
+                    chat.content.get('metadata', {}).get('next_session_id') == session_id):
+                    conversation_messages.append(chat)
+                elif (chat.role == 'assistant' and 
+                      chat.content.get('metadata', {}).get('webhook_session_id') == session_id):
+                    conversation_messages.append(chat)
+                elif conversation_messages:  # Already collecting messages
+                    conversation_messages.append(chat)
+        
+        # If we haven't found any conversation thread, fall back to exact session match
+        if not conversation_messages:
+            result = await session.execute(
+                select(Chat)
+                .where(Chat.session_id == session_id)
+                .order_by(Chat.created_at)
+            )
+            conversation_messages = list(result.scalars().all())
+        
+        chats = conversation_messages
         
         # Apply limit if needed
         if limit and len(chats) > limit:
@@ -469,34 +533,60 @@ async def get_sub_project_sessions(
     sub_project_id: UUID,
     session: AsyncSession = Depends(get_session)
 ):
-    """Get all chat sessions for a sub-project"""
+    """Get all conversation threads for a sub-project (fixed for conversation continuity)"""
     try:
-        # Get unique session IDs for this sub-project
+        # FIXED: Instead of counting every session_id as separate, group by conversation threads
+        # Get all messages for this sub-project
         result = await session.execute(
-            select(Chat.session_id)
+            select(Chat)
             .where(Chat.sub_project_id == sub_project_id)
-            .distinct()
-            .order_by(Chat.session_id)
+            .order_by(Chat.created_at)
         )
-        session_ids = [row[0] for row in result.all() if row[0]]
+        all_chats = list(result.scalars().all())
         
-        # Get first and last message for each session
-        sessions = []
-        for session_id in session_ids:
-            result = await session.execute(
-                select(Chat)
-                .where(Chat.session_id == session_id)
-                .order_by(Chat.created_at)
-            )
-            chats = result.scalars().all()
+        if not all_chats:
+            return {"sessions": []}
+        
+        # Group messages into conversation threads
+        conversation_threads = []
+        current_thread = []
+        last_message_time = None
+        
+        for chat in all_chats:
+            # Start a new thread if there's a significant time gap (> 5 minutes)
+            # or if this is the first message
+            if (last_message_time is None or 
+                (chat.created_at - last_message_time).total_seconds() > 300):
+                
+                # Save previous thread if it exists
+                if current_thread:
+                    conversation_threads.append(current_thread)
+                
+                # Start new thread
+                current_thread = [chat]
+            else:
+                # Continue current thread
+                current_thread.append(chat)
             
-            if chats:
+            last_message_time = chat.created_at
+        
+        # Don't forget the last thread
+        if current_thread:
+            conversation_threads.append(current_thread)
+        
+        # Convert threads to session format
+        sessions = []
+        for i, thread in enumerate(conversation_threads):
+            if thread:
+                # Use the first session_id in the thread as the representative ID
+                primary_session_id = thread[0].session_id
+                
                 sessions.append({
-                    "session_id": session_id,
-                    "message_count": len(chats),
-                    "first_message": chats[0].content.get("text", "")[:100] + "..." if len(chats[0].content.get("text", "")) > 100 else chats[0].content.get("text", ""),
-                    "last_message_at": chats[-1].created_at.isoformat(),
-                    "created_at": chats[0].created_at.isoformat()
+                    "session_id": primary_session_id,
+                    "message_count": len(thread),
+                    "first_message": thread[0].content.get("text", "")[:100] + "..." if len(thread[0].content.get("text", "")) > 100 else thread[0].content.get("text", ""),
+                    "last_message_at": thread[-1].created_at.isoformat(),
+                    "created_at": thread[0].created_at.isoformat()
                 })
         
         # Sort sessions by created_at in descending order (newest first)
