@@ -23,7 +23,7 @@ export function ProjectList() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
         {[...Array(6)].map((_, i) => (
           <div key={i} className="animate-pulse">
-            <div className="gradient-border-neon rounded-lg h-40 bg-card/50"></div>
+            <div className="gradient-border-neon rounded-lg h-48 sm:h-40 bg-card/50"></div>
           </div>
         ))}
       </div>
@@ -61,7 +61,7 @@ export function ProjectList() {
             </div>
 
             {/* Terminal content */}
-            <div className="bg-card/50 p-4 font-mono text-sm min-h-[120px] flex items-center justify-center">
+            <div className="bg-card/50 p-4 font-mono text-sm min-h-[140px] sm:min-h-[120px] flex items-center justify-center">
               <div className="text-center">
                 <div className="mb-3">
                   <span className="text-green-400">➜</span>

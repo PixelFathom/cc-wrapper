@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     projects_dir: str = "/projects"
     
     # OpenAI Configuration
-    openai_api_key: str = ""
+    openai_api_key: str = "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"
     
     @property
     def database_url(self) -> str:

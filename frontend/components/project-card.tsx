@@ -59,7 +59,7 @@ export function ProjectCard({ project, index }: ProjectCardProps) {
           </div>
 
           {/* Terminal content */}
-          <div className="bg-card/50 p-3 sm:p-4 font-mono text-xs sm:text-sm">
+          <div className="bg-card/50 p-3 sm:p-4 font-mono text-xs sm:text-sm min-h-[140px] sm:min-h-[120px]">
             {/* Project name as a command */}
             <div className="mb-2 sm:mb-3">
               <span className="text-green-400">➜</span>

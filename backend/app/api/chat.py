@@ -6,6 +6,7 @@ import redis.asyncio as redis
 from typing import Optional, List, Dict, Any
 import json
 import asyncio
+import logging
 from uuid import uuid4, UUID
 
 from app.deps import get_session, get_redis_client
@@ -122,57 +123,23 @@ async def handle_query(
     
     # Use the new chat service with remote integration
     try:
-        # Check if we should use a webhook session_id from previous messages
+        # For new user-initiated messages, we should NOT reuse session IDs from previous messages
+        # This was causing all messages to attach to the same conversation
+        # Only auto-continuation should reuse session IDs
         session_id_to_use = request.session_id
         
-        if request.session_id:
-            # Look for the most recent assistant message with a webhook_session_id
-            result = await session.execute(
-                select(Chat)
-                .where(Chat.sub_project_id == sub_project_id)
-                .where(Chat.session_id == request.session_id)
-                .where(Chat.role == "assistant")
-                .order_by(Chat.created_at.desc())
-                .limit(1)
-            )
-            latest_assistant = result.scalar_one_or_none()
-            
-            if latest_assistant and latest_assistant.content:
-                metadata = latest_assistant.content.get("metadata", {})
-                webhook_session_id = metadata.get("webhook_session_id")
-                
-                logger.info(
-                    f"🔍 Found assistant message | "
-                    f"assistant_id={str(latest_assistant.id)[:8]}... | "
-                    f"metadata_keys={list(metadata.keys())} | "
-                    f"webhook_session_id={webhook_session_id} | "
-                    f"status={metadata.get('status')}"
-                )
-                
-                if webhook_session_id:
-                    logger.info(
-                        f"✅ Using webhook session_id from previous response | "
-                        f"ui_session_id={request.session_id} | "
-                        f"webhook_session_id={webhook_session_id} | "
-                        f"SWITCHING SESSION"
-                    )
-                    session_id_to_use = webhook_session_id
-                else:
-                    logger.info(
-                        f"⚠️ No webhook session_id found in metadata | "
-                        f"using request session_id={request.session_id} | "
-                        f"metadata={metadata}"
-                    )
-            else:
-                logger.info(f"🔄 No previous assistant message found, using request session_id: {request.session_id}")
-        else:
-            logger.info("🔄 First message - no session_id provided")
+        logger.info(
+            f"🔄 Using request session_id for user message | "
+            f"session_id={session_id_to_use} | "
+            f"is_first_message={not request.session_id}"
+        )
         
         result = await chat_service.send_query(
             session, 
             chat.id, 
             request.prompt, 
-            session_id_to_use  # Use webhook session_id if available
+            session_id_to_use,  # Use webhook session_id if available
+            request.bypass_mode
         )
         
         # Get the session_id and task_id from the remote service response
@@ -445,19 +412,22 @@ async def get_session_chats(
     limit: int = 100,
     session: AsyncSession = Depends(get_session)
 ):
-    """Get all chat messages for a specific session, including related sessions"""
+    """Get all chat messages for a specific session only"""
     import logging
     logger = logging.getLogger(__name__)
     
     try:
-        # Simple approach: just get chats for this exact session_id
+        # Get messages with this exact session_id only
         result = await session.execute(
             select(Chat)
             .where(Chat.session_id == session_id)
             .order_by(Chat.created_at)
-            .limit(limit)
         )
         chats = list(result.scalars().all())
+        
+        # Apply limit if needed
+        if limit and len(chats) > limit:
+            chats = chats[-limit:]  # Get the most recent messages
         
         logger.info(f"📊 SESSION CHATS | session_id={session_id} | found={len(chats)} messages")
         
@@ -470,7 +440,9 @@ async def get_session_chats(
                     "content": chat.content,
                     "created_at": chat.created_at.isoformat(),
                     "sub_project_id": str(chat.sub_project_id),
-                    "session_id": chat.session_id
+                    "session_id": chat.session_id,
+                    "continuation_status": getattr(chat, 'continuation_status', None),
+                    "parent_message_id": str(chat.parent_message_id) if chat.parent_message_id else None
                 }
                 for chat in chats
             ]
@@ -564,4 +536,237 @@ async def stream_session(
         event_generator(),
         media_type="text/event-stream"
     )
+
+
+@router.post("/chats/{chat_id}/continue")
+async def continue_chat(
+    chat_id: UUID,
+    session: AsyncSession = Depends(get_session)
+):
+    """Manually trigger continuation for a chat message"""
+    logger = logging.getLogger(__name__)
+    
+    try:
+        # Get the chat message
+        chat = await session.get(Chat, chat_id)
+        if not chat:
+            raise HTTPException(status_code=404, detail="Chat not found")
+        
+        if chat.role != "assistant":
+            raise HTTPException(
+                status_code=400, 
+                detail="Can only continue from assistant messages"
+            )
+        
+        # Import continuation constants
+        from app.models.chat import CONTINUATION_STATUS_IN_PROGRESS, CONTINUATION_STATUS_NEEDED, CONTINUATION_STATUS_COMPLETED
+        
+        # Check if continuation is already in progress
+        if chat.continuation_status == CONTINUATION_STATUS_IN_PROGRESS:
+            return {
+                "needs_continuation": False,
+                "reason": "Continuation already in progress"
+            }
+        
+        # Get the session_id to use for continuation
+        # Priority: next_session_id (from ResultMessage) > webhook_session_id > current session_id
+        metadata = chat.content.get("metadata", {})
+        next_session_id = metadata.get("next_session_id")
+        webhook_session_id = metadata.get("webhook_session_id")
+        session_id_to_use = next_session_id or webhook_session_id or chat.session_id
+        
+        logger.info(
+            f"🔄 Manual continuation requested | "
+            f"chat_id={str(chat_id)[:8]}... | "
+            f"session_id={session_id_to_use} | "
+            f"webhook_session_id={webhook_session_id}"
+        )
+        
+        # Evaluate if continuation is needed
+        evaluation = await chat_service.evaluate_conversation_for_continuation(
+            session, chat_id, session_id_to_use
+        )
+        
+        if not evaluation or not evaluation.get("needs_continuation"):
+            # Update continuation status to completed
+            chat.continuation_status = CONTINUATION_STATUS_COMPLETED
+            session.add(chat)
+            await session.commit()
+            
+            return {
+                "needs_continuation": False,
+                "reason": "Conversation appears complete"
+            }
+        
+        # Update the chat to indicate continuation is needed
+        chat.continuation_status = CONTINUATION_STATUS_NEEDED
+        session.add(chat)
+        await session.commit()
+        
+        # Create auto-continuation message
+        # Pass webhook session ID but the function will use UI session ID
+        auto_message = await chat_service.create_auto_continuation(
+            session,
+            chat.sub_project_id,
+            session_id_to_use,  # This will be stored in metadata
+            evaluation["continuation_prompt"],
+            chat_id,
+            ui_session_id=chat.session_id  # Explicitly pass the UI session ID from the assistant message
+        )
+        
+        # Send the continuation query
+        # Use the webhook session ID from the auto message's metadata
+        auto_webhook_session_id = auto_message.content.get("metadata", {}).get("webhook_session_id", session_id_to_use)
+        await chat_service.send_query(
+            session,
+            auto_message.id,
+            evaluation["continuation_prompt"],
+            auto_webhook_session_id  # Use webhook session ID for remote service
+        )
+        
+        return {
+            "needs_continuation": True,
+            "auto_message_id": str(auto_message.id),
+            "continuation_prompt": evaluation["continuation_prompt"],
+            "reasoning": evaluation.get("reasoning")
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to continue chat: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to continue chat: {str(e)}"
+        )
+
+
+@router.post("/chats/toggle-auto-continuation")
+async def toggle_auto_continuation(
+    request: dict,
+    session: AsyncSession = Depends(get_session)
+):
+    """Toggle auto-continuation for a session"""
+    logger = logging.getLogger(__name__)
+    
+    session_id = request.get("session_id")
+    enabled = request.get("enabled", True)
+    
+    if not session_id:
+        raise HTTPException(
+            status_code=400,
+            detail="session_id is required"
+        )
+    
+    try:
+        # Update all chats in the session with auto-continuation preference
+        # Store in metadata for persistence
+        stmt = select(Chat).where(
+            Chat.session_id == session_id,
+            Chat.role == "assistant"
+        )
+        
+        result = await session.execute(stmt)
+        chats = result.scalars().all()
+        
+        updated_count = 0
+        for chat in chats:
+            content = chat.content.copy()
+            metadata = content.get("metadata", {})
+            metadata["auto_continuation_enabled"] = enabled
+            content["metadata"] = metadata
+            
+            # Force SQLAlchemy to detect the change
+            from sqlalchemy.orm.attributes import flag_modified
+            chat.content = content
+            flag_modified(chat, "content")
+            session.add(chat)
+            updated_count += 1
+        
+        await session.commit()
+        
+        logger.info(
+            f"🔧 Auto-continuation toggled | "
+            f"session_id={session_id} | "
+            f"enabled={enabled} | "
+            f"updated_count={updated_count}"
+        )
+        
+        return {
+            "session_id": session_id,
+            "auto_continuation_enabled": enabled,
+            "updated_count": updated_count
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to toggle auto-continuation: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to toggle auto-continuation: {str(e)}"
+        )
+
+
+@router.post("/chats/toggle-bypass-mode")
+async def toggle_bypass_mode(
+    request: dict,
+    session: AsyncSession = Depends(get_session)
+):
+    """Toggle bypass mode for a session"""
+    logger = logging.getLogger(__name__)
+    
+    session_id = request.get("session_id")
+    enabled = request.get("enabled", True)
+    
+    if not session_id:
+        raise HTTPException(
+            status_code=400,
+            detail="session_id is required"
+        )
+    
+    try:
+        # Update all chats in the session with bypass mode preference
+        # Store in metadata for persistence
+        stmt = select(Chat).where(
+            Chat.session_id == session_id,
+            Chat.role == "assistant"
+        )
+        
+        result = await session.execute(stmt)
+        chats = result.scalars().all()
+        
+        updated_count = 0
+        for chat in chats:
+            content = chat.content.copy()
+            metadata = content.get("metadata", {})
+            metadata["bypass_mode_enabled"] = enabled
+            content["metadata"] = metadata
+            
+            # Force SQLAlchemy to detect the change
+            from sqlalchemy.orm.attributes import flag_modified
+            chat.content = content
+            flag_modified(chat, "content")
+            session.add(chat)
+            updated_count += 1
+        
+        await session.commit()
+        
+        logger.info(
+            f"🔧 Bypass mode toggled | "
+            f"session_id={session_id} | "
+            f"enabled={enabled} | "
+            f"updated_count={updated_count}"
+        )
+        
+        return {
+            "session_id": session_id,
+            "bypass_mode_enabled": enabled,
+            "updated_count": updated_count
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to toggle bypass mode: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to toggle bypass mode: {str(e)}"
+        )
 

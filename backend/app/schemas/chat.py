@@ -30,6 +30,7 @@ class QueryRequest(BaseModel):
     org_name: str
     cwd: str
     webhook_url: Optional[str] = None
+    bypass_mode: Optional[bool] = None
 
 
 class QueryResponse(BaseModel):
