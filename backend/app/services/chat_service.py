@@ -2,7 +2,7 @@ import httpx
 import logging
 from typing import Dict, Any, Optional, List
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, timezone
 import time
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
@@ -289,6 +289,14 @@ class ChatService:
             # Initialize next_session_id
             next_session_id = None
             
+            # Extract session_id from ResultMessage if available
+            if webhook_data.get("message_type") == "ResultMessage" and webhook_data.get("session_id"):
+                next_session_id = webhook_data.get("session_id")
+                logger.info(
+                    f"📌 Extracted next_session_id from ResultMessage | "
+                    f"next_session_id={next_session_id}"
+                )
+            
             if is_completion:
                 result_text = webhook_data.get("result", "")
                 error_text = webhook_data.get("error", "")
@@ -567,22 +575,34 @@ class ChatService:
                     )
                     
                     if evaluation and evaluation.get("needs_continuation"):
-                        # Create auto-continuation message
+                        # Get the session_id to use for continuation
+                        # Priority: next_session_id from ResultMessage > webhook_session_id > original session_id
+                        continuation_session_id = next_session_id or webhook_session_id or assistant_chat.session_id
+                        
+                        logger.info(
+                            f"🔄 Auto-continuation session resolution | "
+                            f"next_session_id={next_session_id} | "
+                            f"webhook_session_id={webhook_session_id} | "
+                            f"assistant_session_id={assistant_chat.session_id} | "
+                            f"using={continuation_session_id}"
+                        )
+                        
+                        # Create auto-continuation message with the correct session_id
                         auto_message = await self.create_auto_continuation(
                             db,
                             assistant_chat.sub_project_id,
-                            assistant_chat.session_id,
+                            continuation_session_id,
                             evaluation["continuation_prompt"],
                             assistant_chat.id
                         )
                         
                         # Send the auto-generated message to the service
-                        logger.info(f"🤖 Sending auto-continuation to service | webhook_session_id={webhook_session_id}")
+                        logger.info(f"🤖 Sending auto-continuation to service | session_id={continuation_session_id}")
                         await self.send_query(
                             db,
                             auto_message.id,
                             evaluation["continuation_prompt"],
-                            webhook_session_id  # Use the webhook session ID for continuity
+                            continuation_session_id  # Use the correct session ID for continuity
                         )
                 else:
                     logger.warning(f"⚠️ Could not find assistant message for auto-continuation evaluation")
@@ -595,7 +615,7 @@ class ChatService:
                     json.dumps({
                         "type": "webhook",
                         "data": webhook_data,
-                        "timestamp": datetime.utcnow().isoformat()
+                        "timestamp": datetime.now(timezone.utc).isoformat()
                     })
                 )
             
