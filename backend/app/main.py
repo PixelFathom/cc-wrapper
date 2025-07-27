@@ -41,9 +41,8 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "https://localhost:3000", 
-        "https://tanmay-local.chatwoot.dev",
-        "http://tanmay-local.chatwoot.dev",
-        "https://bfrrbt-ip-49-43-243-126.tunnelmole.net",
+        "https://code.thegetshitdone.ai",
+        "https://api-code.thegetshitdone.ai",
         "https://code.tanmaydeepsharma.com",
         "https://code-api.tanmaydeepsharma.com",
     ],
