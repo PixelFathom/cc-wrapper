@@ -403,7 +403,7 @@ async def get_task_vscode_link(
         async with aiohttp.ClientSession() as client:
             payload = {
                 "org_name": settings.org_name,
-                "project_name": project.name
+                "project_name": f"{project.name}/{task.name}-{task.id}"
             }
             if file_path:
                 payload["file_path"] = file_path
