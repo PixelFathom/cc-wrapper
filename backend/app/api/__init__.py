@@ -1,3 +1,3 @@
-from . import projects, tasks, chat, files, approvals
+from . import projects, tasks, chat, files, approvals, auto_continuation
 
-__all__ = ["projects", "tasks", "chat", "files", "approvals"]
+__all__ = ["projects", "tasks", "chat", "files", "approvals", "auto_continuation"]

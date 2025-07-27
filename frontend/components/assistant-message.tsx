@@ -41,14 +41,17 @@ export function AssistantMessage({
   // Extract content from message
   const content = message.content?.text || ''
   const metadata = message.content?.metadata || {}
-  const isProcessing = message.isProcessing || metadata.status === 'processing'
+  
+  // More robust processing detection - check if we have actual content
+  const hasActualContent = content && content !== '' && content !== 'Processing your request...'
+  const isProcessing = (message.isProcessing || metadata.status === 'processing') && !hasActualContent
   
   // Always show the full final content when available
   const hasContent = content && content !== ''
   const hasHooks = hooks.length > 0
   
   // Check if this is a final complete message (not processing)
-  const isCompleteMessage = hasContent && !isProcessing
+  const isCompleteMessage = hasActualContent && !isProcessing
   
   // Show hooks by default when processing, hide when complete
   const [showHooks, setShowHooks] = useState(isProcessing && hasHooks)

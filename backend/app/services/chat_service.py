@@ -9,6 +9,7 @@ from sqlmodel import select
 from sqlalchemy import text
 
 from app.core.settings import get_settings
+from app.core.auto_continuation_config import get_auto_continuation_config
 from app.models import Chat, Task, Project, ChatHook
 from app.models.chat import CONTINUATION_STATUS_NONE, CONTINUATION_STATUS_NEEDED, CONTINUATION_STATUS_IN_PROGRESS, CONTINUATION_STATUS_COMPLETED
 
@@ -37,21 +38,6 @@ class ChatService:
     ) -> Dict[str, Any]:
         """Send a query to the remote service"""
         start_time = time.time()
-        
-        print(
-            f"🔵 send_query called | "
-            f"chat_id={str(chat_id)[:8]}... | "
-            f"session_id={session_id} | "
-            f"bypass_mode={bypass_mode} | "
-            f"prompt_length={len(prompt)}"
-        )
-        logger.info(
-            f"🔵 send_query called | "
-            f"chat_id={str(chat_id)[:8]}... | "
-            f"session_id={session_id} | "
-            f"bypass_mode={bypass_mode} | "
-            f"prompt_length={len(prompt)}"
-        )
         
         try:
             # Get chat and related task/project info
@@ -96,25 +82,7 @@ class ChatService:
                 logger.info(f"📌 Including session_id in payload: {session_id}")
             else:
                 logger.info("📌 No session_id provided, first message in conversation")
-            
-            # Log the complete payload
-            logger.info(
-                f"📤 Sending to remote service | "
-                f"endpoint={self.query_url} | "
-                f"payload_keys={list(payload.keys())} | "
-                f"has_session_id={'session_id' in payload} | "
-                f"permission_mode={payload.get('options', {}).get('permission_mode', 'default')}"
-            )
-            
-            # Log the request initiation with key details
-            logger.info(
-                f"🚀 Chat query initiated | "
-                f"chat_id={str(chat_id)[:8]}... | "
-                f"project={project.name} | "
-                f"task={task.name} | "
-                f"endpoint={self.query_url} | "
-                f"webhook={webhook_url}"
-            )
+
             
             # Make request to remote service
             async with httpx.AsyncClient(timeout=30.0) as client:
@@ -216,7 +184,7 @@ class ChatService:
             
             # Use the original session_id from the chat, not from webhook
             original_session_id = chat.session_id
-            webhook_session_id = webhook_data.get("session_id", str(chat_id))
+            webhook_session_id = chat.session_id
             webhook_type = webhook_data.get("type", "processing")
             status = webhook_data.get("status", "received")
             
@@ -398,7 +366,7 @@ class ChatService:
                         "task_id": webhook_data.get("task_id"),
                         "conversation_id": webhook_data.get("conversation_id"),
                         "webhook_session_id": webhook_session_id,
-                        "status": webhook_data.get("status")
+                        "status": "completed"  # Always set to completed when updating with final content
                     })
                     
                     # IMPORTANT: Do NOT update the session_id to maintain UI continuity
@@ -449,7 +417,7 @@ class ChatService:
                             "task_id": webhook_data.get("task_id"),
                             "conversation_id": webhook_data.get("conversation_id"),
                             "webhook_session_id": webhook_session_id,
-                            "status": webhook_data.get("status")
+                            "status": "completed"  # Always set to completed when updating with final content
                         })
                         
                         # IMPORTANT: Do NOT update the session_id to maintain UI continuity
@@ -490,7 +458,7 @@ class ChatService:
                                     "task_id": webhook_data.get("task_id"),
                                     "conversation_id": webhook_data.get("conversation_id"),
                                     "webhook_session_id": webhook_session_id,
-                                    "status": webhook_data.get("status"),
+                                    "status": "completed",  # Always set to completed for new assistant messages with final content
                                     "next_session_id": next_session_id  # Store for future reference
                                 }
                             }
@@ -554,70 +522,7 @@ class ChatService:
                         f"✅ Successfully stored webhook_session_id in assistant message | "
                         f"verified_webhook_session_id={latest_assistant.content.get('metadata', {}).get('webhook_session_id')}"
                     )
-            # Check if auto-continuation should be triggered
-            if (is_completion and 
-                    not webhook_data.get("is_error") and 
-                    webhook_data.get("status") == "completed" and 
-                    webhook_data.get("result")):
-                # Find the assistant message that was just created/updated
-                task_id = webhook_data.get("task_id")
-                assistant_chat = None
-                
-                if task_id:
-                    # Look for assistant message with this task_id
-                    stmt = select(Chat).where(
-                        Chat.sub_project_id == chat.sub_project_id,
-                        Chat.role == "assistant",
-                        Chat.content.op('->')('metadata').op('->>')('task_id') == task_id
-                    ).order_by(Chat.created_at.desc()).limit(1)
-                    
-                    result = await db.execute(stmt)
-                    assistant_chat = result.scalar_one_or_none()
-                
-                if assistant_chat:
-                    # Evaluate the conversation for auto-continuation
-                    evaluation = await self.evaluate_conversation_for_continuation(
-                        db, assistant_chat.id, assistant_chat.session_id
-                    )
-                    
-                    if evaluation and evaluation.get("needs_continuation"):
-                        # For webhook session_id: use next_session_id or webhook_session_id
-                        # This is what we pass to the remote service
-                        webhook_continuation_session_id = next_session_id or webhook_session_id or assistant_chat.session_id
-                        
-                        logger.info(
-                            f"🔄 Auto-continuation session resolution | "
-                            f"next_session_id={next_session_id} | "
-                            f"webhook_session_id={webhook_session_id} | "
-                            f"assistant_session_id={assistant_chat.session_id} | "
-                            f"original_session_id={original_session_id} | "
-                            f"webhook_continuation_session_id={webhook_continuation_session_id}"
-                        )
-                        
-                        # Create auto-continuation message
-                        # Pass both UI and webhook session IDs
-                        auto_message = await self.create_auto_continuation(
-                            db,
-                            assistant_chat.sub_project_id,
-                            webhook_continuation_session_id,  # This will be stored in metadata
-                            evaluation["continuation_prompt"],
-                            assistant_chat.id,
-                            ui_session_id=original_session_id  # Explicitly pass the original UI session ID
-                        )
-                        
-                        # Send the auto-generated message to the service
-                        # Use the webhook session ID from the auto message's metadata
-                        auto_webhook_session_id = auto_message.content.get("metadata", {}).get("webhook_session_id", webhook_continuation_session_id)
-                        logger.info(f"🤖 Sending auto-continuation to service | ui_session_id={auto_message.session_id} | webhook_session_id={auto_webhook_session_id}")
-                        await self.send_query(
-                            db,
-                            auto_message.id,
-                            evaluation["continuation_prompt"],
-                            auto_webhook_session_id  # Use webhook session ID for remote service
-                        )
-                else:
-                    logger.warning(f"⚠️ Could not find assistant message for auto-continuation evaluation")
-            
+ 
             # Publish to Redis for real-time updates
             if self.redis_client:
                 import json

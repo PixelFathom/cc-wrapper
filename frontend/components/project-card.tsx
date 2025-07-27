@@ -33,6 +33,7 @@ export function ProjectCard({ project, index }: ProjectCardProps) {
       transition={{ duration: 0.5, delay: index * 0.1 }}
       whileHover={{ y: -2 }}
       className="group h-full"
+      data-testid="project-card"
     >
       <Link href={`/p/${project.id}`}>
         <div className="relative h-full gradient-border-neon rounded-lg overflow-hidden hover:glow-cyan transition-all duration-300">

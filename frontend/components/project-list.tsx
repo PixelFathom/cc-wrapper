@@ -44,6 +44,7 @@ export function ProjectList() {
           transition={{ duration: 0.5, delay: (projects?.length || 0) * 0.1 }}
           onClick={() => setCreateDialogOpen(true)}
           className="group cursor-pointer h-full"
+          data-testid="create-project-button"
         >
           <div className="relative h-full gradient-border-neon rounded-lg overflow-hidden hover:glow-purple transition-all duration-300 border-dashed">
             {/* Terminal header */}

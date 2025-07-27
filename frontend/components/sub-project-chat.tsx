@@ -269,6 +269,13 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
           newMessages.forEach(newMsg => {
             const existing = existingMap.get(newMsg.id)
             
+            // CONVERSATION CONTINUITY: Ensure all messages use the current UI session ID for display
+            // This prevents any messages from appearing in wrong sessions due to backend session evolution
+            if (sessionId && newMsg.sessionId !== sessionId) {
+              console.log(`🔧 Correcting message session ID for UI consistency | ${newMsg.id.slice(0, 8)}... | ${newMsg.sessionId} → ${sessionId}`)
+              newMsg.sessionId = sessionId
+            }
+            
             // Always update if content changed or if it's a new message
             if (!existing || 
                 JSON.stringify(existing.content) !== JSON.stringify(newMsg.content) ||
@@ -280,7 +287,8 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                 wasProcessing: existing?.isProcessing,
                 isProcessing: newMsg.isProcessing,
                 hasText: !!newMsg.content?.text,
-                continuationStatus: newMsg.continuationStatus
+                continuationStatus: newMsg.continuationStatus,
+                sessionId: newMsg.sessionId
               })
               
               updatedMap.set(newMsg.id, newMsg)
@@ -452,37 +460,15 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
       textareaRef.current.style.height = '24px' // Reset to min-height
     }
     
-    // Session ID resolution with priority: next_session_id > webhook_session_id > current session_id
+    // FIXED: Session ID resolution for conversation continuity
+    // The key insight: for new messages in existing conversations, we should ALWAYS use 
+    // the current UI session ID to maintain conversation continuity in the UI.
+    // The backend will handle webhook session ID mapping internally.
     const resolveSessionId = () => {
-      const assistantMessages = messages.filter(m => m.role === 'assistant' && m.content?.metadata)
-      const lastAssistantMessage = assistantMessages[assistantMessages.length - 1]
-      
-      if (lastAssistantMessage && lastAssistantMessage.content?.metadata) {
-        const metadata = lastAssistantMessage.content.metadata
-        const nextSessionId = metadata.next_session_id
-        const webhookSessionId = metadata.webhook_session_id
-        
-        if (nextSessionId) {
-          console.log('📌 Using next_session_id from last assistant message:', nextSessionId)
-          // Update the UI session ID if it's different
-          if (nextSessionId !== sessionId) {
-            setSessionId(nextSessionId)
-          }
-          return nextSessionId
-        }
-        
-        if (webhookSessionId) {
-          console.log('🎯 Using webhook_session_id from last assistant message:', webhookSessionId)
-          // Update the UI session ID if it's different  
-          if (webhookSessionId !== sessionId) {
-            setSessionId(webhookSessionId)
-          }
-          return webhookSessionId
-        }
-      }
-      
+      // If we have an active session, always use it for new messages
+      // This ensures conversation continuity in the UI
       if (sessionId) {
-        console.log('🔄 Using current session_id:', sessionId)
+        console.log('✅ Using current UI session_id for conversation continuity:', sessionId)
         return sessionId
       }
       

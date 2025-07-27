@@ -123,22 +123,57 @@ async def handle_query(
     
     # Use the new chat service with remote integration
     try:
-        # For new user-initiated messages, we should NOT reuse session IDs from previous messages
-        # This was causing all messages to attach to the same conversation
-        # Only auto-continuation should reuse session IDs
-        session_id_to_use = request.session_id
+        # CONVERSATION CONTINUITY FIX: Maintain stable UI session ID throughout entire conversation
+        # Core principle: UI session ID never changes, webhook session IDs are tracked in metadata
+        ui_session_id = request.session_id  # This will remain constant for the conversation
+        webhook_session_id_to_use = None
+        
+        # If session_id provided, this is a continuation - find the correct webhook session ID
+        if ui_session_id:
+            logger.info(f"📌 Continuing conversation with stable UI session_id: {ui_session_id}")
+            
+            # Find the last assistant message in this UI session to get the latest webhook session ID
+            # We need to check both webhook_session_id and next_session_id in metadata
+            stmt = select(Chat).where(
+                Chat.sub_project_id == sub_project_id,
+                Chat.session_id == ui_session_id,
+                Chat.role == "assistant"
+            ).order_by(Chat.created_at.desc()).limit(1)
+            
+            result = await session.execute(stmt)
+            last_assistant = result.scalar_one_or_none()
+            
+            if last_assistant and last_assistant.content.get("metadata"):
+                metadata = last_assistant.content["metadata"]
+                # Priority: next_session_id (from completed conversation) > webhook_session_id
+                webhook_session_id_to_use = metadata.get("next_session_id") or metadata.get("webhook_session_id")
+                
+                if webhook_session_id_to_use:
+                    logger.info(f"🔗 Found webhook session ID for continuation: {webhook_session_id_to_use}")
+                else:
+                    # Fallback: use UI session ID if no webhook session ID found
+                    webhook_session_id_to_use = ui_session_id
+                    logger.info(f"⚠️ No webhook session ID in metadata, using UI session ID as fallback")
+            else:
+                # No previous assistant message found, use UI session ID
+                webhook_session_id_to_use = ui_session_id
+                logger.info(f"⚠️ No previous assistant message found, using UI session ID: {ui_session_id}")
+        else:
+            logger.info("🆕 No session_id provided - first message in conversation")
         
         logger.info(
-            f"🔄 Using request session_id for user message | "
-            f"session_id={session_id_to_use} | "
-            f"is_first_message={not request.session_id}"
+            f"🔄 Session resolution for remote service | "
+            f"ui_session_id={ui_session_id} | "
+            f"webhook_session_id={webhook_session_id_to_use} | "
+            f"is_first_message={not ui_session_id}"
         )
         
+        # Use webhook session ID for remote service, UI session ID for database
         result = await chat_service.send_query(
             session, 
             chat.id, 
             request.prompt, 
-            session_id_to_use,  # Use webhook session_id if available
+            webhook_session_id_to_use,  # Use webhook session_id for remote service
             request.bypass_mode
         )
         
@@ -147,33 +182,44 @@ async def handle_query(
         task_id = result.get("task_id")
         
         if not response_session_id:
-            # If remote service didn't return session_id, use the one from request or generate new
-            response_session_id = request.session_id or temp_session_id
+            # If remote service didn't return session_id, use the UI session or generate new
+            response_session_id = ui_session_id or temp_session_id
         
         logger.info(
             f"🔄 SESSION ID FLOW | "
-            f"request={request.session_id} → "
-            f"response={response_session_id} | "
+            f"ui_session_id={ui_session_id} → "
+            f"response_session_id={response_session_id} | "
             f"task_id={task_id}"
         )
         
-        # Update the user chat with the correct session_id if it's different
-        if chat.session_id != response_session_id:
-            logger.info(f"📝 Updating chat session_id from {chat.session_id} to {response_session_id}")
-            chat.session_id = response_session_id
+        # CONVERSATION CONTINUITY FIX: Always use stable UI session ID for conversation continuity
+        # Rule: If this is a continuation (ui_session_id exists), keep using it
+        # If this is first message, use response_session_id from external service as the UI session ID
+        final_ui_session_id = ui_session_id or response_session_id
+        
+        # Update user chat record to use the stable UI session ID
+        if chat.session_id != final_ui_session_id:
+            logger.info(
+                f"📝 Updating user chat session_id for UI continuity | "
+                f"from {chat.session_id} to {final_ui_session_id} | "
+                f"response_session_id={response_session_id} | "
+                f"webhook_session_id={webhook_session_id_to_use}"
+            )
+            chat.session_id = final_ui_session_id
             session.add(chat)
             await session.commit()
         
-        # Create assistant response chat record with same session_id and task_id
+        # Create assistant response chat record with stable UI session_id for continuity
         assistant_chat = Chat(
             sub_project_id=sub_project_id,
-            session_id=response_session_id,
+            session_id=final_ui_session_id,  # Use stable UI session_id for conversation continuity
             role="assistant",
             content={
                 "text": result.get("assistant_response", "Processing your request..."),
                 "metadata": {
                     "task_id": task_id,
-                    "initial_response": True
+                    "initial_response": True,
+                    "webhook_session_id": response_session_id  # Store webhook session_id for future reference
                 }
             }
         )
@@ -182,7 +228,7 @@ async def handle_query(
         await session.refresh(assistant_chat)
         
         response_data = {
-            "session_id": response_session_id,
+            "session_id": final_ui_session_id,  # Return stable UI session_id for frontend continuity
             "assistant_response": result.get("assistant_response", "Processing your request..."),
             "chat_id": str(chat.id),
             "assistant_chat_id": str(assistant_chat.id)
@@ -412,82 +458,65 @@ async def get_session_chats(
     limit: int = 100,
     session: AsyncSession = Depends(get_session)
 ):
-    """Get all chat messages for a conversation thread, handling session ID evolution"""
+    """Get all chat messages for a conversation thread - FIXED for conversation continuity"""
     import logging
     logger = logging.getLogger(__name__)
     
     try:
-        # FIXED: For conversation continuity, we need to find ALL related messages
-        # First, find the sub_project_id for this session
-        result = await session.execute(
-            select(Chat.sub_project_id)
-            .where(Chat.session_id == session_id)
-            .limit(1)
-        )
-        sub_project_row = result.first()
+        # CRITICAL FIX: Only return messages that belong to the specific session
+        # The original code was causing conversation mixing by including all sub_project messages
         
-        if not sub_project_row:
-            # Session not found, return empty
-            return {
-                "session_id": session_id,
-                "messages": []
-            }
+        logger.info(f"🔍 Getting session chats for session_id: {session_id}")
         
-        sub_project_id = sub_project_row[0]
-        
-        # Get ALL messages for this sub_project to find conversation thread
-        # We'll group them by conversation continuity rather than exact session_id
+        # Get messages that belong strictly to this session_id
         result = await session.execute(
             select(Chat)
-            .where(Chat.sub_project_id == sub_project_id)
+            .where(Chat.session_id == session_id)
             .order_by(Chat.created_at)
         )
-        all_chats = list(result.scalars().all())
+        chats = list(result.scalars().all())
         
-        # Find the conversation thread that includes our target session_id
-        conversation_messages = []
-        target_session_found = False
+        logger.info(f"📊 Found {len(chats)} messages for session {session_id}")
         
-        # Look for the session in question and include all messages in its conversation thread
-        for chat in all_chats:
-            # Check if this message should be included in the conversation
-            if chat.session_id == session_id:
-                target_session_found = True
-                conversation_messages.append(chat)
-            elif target_session_found:
-                # Check if this message continues the conversation (same sub_project, close in time)
-                last_msg = conversation_messages[-1] if conversation_messages else None
-                if last_msg and (chat.created_at - last_msg.created_at).total_seconds() < 300:  # 5 minutes
-                    conversation_messages.append(chat)
-                    # Update session tracking to include webhook session evolution
-                    if chat.role == 'assistant' and chat.content.get('metadata', {}).get('webhook_session_id'):
-                        # This assistant message provides the next session ID for continuity
-                        continue
-                else:
-                    # Gap too large, probably a new conversation
-                    break
-            elif not target_session_found:
-                # Before target session - include if it's part of the conversation thread
-                # Check if any message has webhook metadata pointing to our target session
-                if (chat.role == 'assistant' and 
-                    chat.content.get('metadata', {}).get('next_session_id') == session_id):
-                    conversation_messages.append(chat)
-                elif (chat.role == 'assistant' and 
-                      chat.content.get('metadata', {}).get('webhook_session_id') == session_id):
-                    conversation_messages.append(chat)
-                elif conversation_messages:  # Already collecting messages
-                    conversation_messages.append(chat)
+        # SECURITY CHECK: Verify all messages belong to the same sub_project
+        if chats:
+            sub_project_ids = set(chat.sub_project_id for chat in chats)
+            if len(sub_project_ids) > 1:
+                logger.warning(f"⚠️ Session {session_id} spans multiple sub_projects: {sub_project_ids}")
+                # Filter to the most common sub_project_id to prevent leakage
+                from collections import Counter
+                most_common_sub_project = Counter(chat.sub_project_id for chat in chats).most_common(1)[0][0]
+                chats = [chat for chat in chats if chat.sub_project_id == most_common_sub_project]
+                logger.info(f"🔧 Filtered to {len(chats)} messages from primary sub_project")
         
-        # If we haven't found any conversation thread, fall back to exact session match
-        if not conversation_messages:
-            result = await session.execute(
-                select(Chat)
-                .where(Chat.session_id == session_id)
-                .order_by(Chat.created_at)
-            )
-            conversation_messages = list(result.scalars().all())
-        
-        chats = conversation_messages
+        # For auto-continuation support, we can look for linked messages through metadata
+        # But ONLY if they have explicit references in metadata (next_session_id, etc.)
+        if chats:
+            # Check if any assistant message has continuation metadata
+            for chat in chats:
+                if chat.role == 'assistant':
+                    metadata = chat.content.get('metadata', {})
+                    next_session_id = metadata.get('next_session_id')
+                    
+                    # If there's a next_session_id, include those messages too
+                    if next_session_id and next_session_id != session_id:
+                        logger.info(f"🔗 Following continuation chain: {session_id} -> {next_session_id}")
+                        
+                        # Get continuation messages
+                        continuation_result = await session.execute(
+                            select(Chat)
+                            .where(Chat.session_id == next_session_id)
+                            .where(Chat.sub_project_id == chat.sub_project_id)  # Same sub_project only
+                            .order_by(Chat.created_at)
+                        )
+                        continuation_chats = list(continuation_result.scalars().all())
+                        
+                        # Add continuation messages to the conversation
+                        chats.extend(continuation_chats)
+                        logger.info(f"➕ Added {len(continuation_chats)} continuation messages")
+                        
+                        # Re-sort by creation time
+                        chats.sort(key=lambda x: x.created_at)
         
         # Apply limit if needed
         if limit and len(chats) > limit:
@@ -533,70 +562,75 @@ async def get_sub_project_sessions(
     sub_project_id: UUID,
     session: AsyncSession = Depends(get_session)
 ):
-    """Get all conversation threads for a sub-project (fixed for conversation continuity)"""
+    """Get all conversation sessions for a sub-project - FIXED for conversation continuity"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
     try:
-        # FIXED: Instead of counting every session_id as separate, group by conversation threads
-        # Get all messages for this sub-project
-        result = await session.execute(
-            select(Chat)
-            .where(Chat.sub_project_id == sub_project_id)
-            .order_by(Chat.created_at)
-        )
-        all_chats = list(result.scalars().all())
+        # CRITICAL FIX: Group by actual session_id instead of time-based heuristics
+        # This prevents different conversations from being grouped together
         
-        if not all_chats:
+        logger.info(f"🔍 Getting sessions for sub_project: {str(sub_project_id)[:8]}...")
+        
+        # Get all unique session_ids for this sub_project
+        result = await session.execute(
+            select(Chat.session_id, Chat.created_at)
+            .where(Chat.sub_project_id == sub_project_id)
+            .distinct(Chat.session_id)
+            .order_by(Chat.session_id, Chat.created_at)
+        )
+        unique_sessions = result.all()
+        
+        if not unique_sessions:
+            logger.info("📭 No sessions found")
             return {"sessions": []}
         
-        # Group messages into conversation threads
-        conversation_threads = []
-        current_thread = []
-        last_message_time = None
+        logger.info(f"📊 Found {len(unique_sessions)} unique sessions")
         
-        for chat in all_chats:
-            # Start a new thread if there's a significant time gap (> 5 minutes)
-            # or if this is the first message
-            if (last_message_time is None or 
-                (chat.created_at - last_message_time).total_seconds() > 300):
-                
-                # Save previous thread if it exists
-                if current_thread:
-                    conversation_threads.append(current_thread)
-                
-                # Start new thread
-                current_thread = [chat]
-            else:
-                # Continue current thread
-                current_thread.append(chat)
-            
-            last_message_time = chat.created_at
-        
-        # Don't forget the last thread
-        if current_thread:
-            conversation_threads.append(current_thread)
-        
-        # Convert threads to session format
+        # Get session details
         sessions = []
-        for i, thread in enumerate(conversation_threads):
-            if thread:
-                # Use the first session_id in the thread as the representative ID
-                primary_session_id = thread[0].session_id
+        for session_id, _ in unique_sessions:
+            # Get all messages for this session
+            result = await session.execute(
+                select(Chat)
+                .where(Chat.sub_project_id == sub_project_id)
+                .where(Chat.session_id == session_id)
+                .order_by(Chat.created_at)
+            )
+            session_chats = list(result.scalars().all())
+            
+            if session_chats:
+                # Find the first user message for the session summary
+                first_user_message = None
+                for chat in session_chats:
+                    if chat.role in ["user", "auto"] and chat.content.get("text"):
+                        first_user_message = chat
+                        break
+                
+                first_message_text = ""
+                if first_user_message:
+                    text = first_user_message.content.get("text", "")
+                    first_message_text = text[:100] + "..." if len(text) > 100 else text
                 
                 sessions.append({
-                    "session_id": primary_session_id,
-                    "message_count": len(thread),
-                    "first_message": thread[0].content.get("text", "")[:100] + "..." if len(thread[0].content.get("text", "")) > 100 else thread[0].content.get("text", ""),
-                    "last_message_at": thread[-1].created_at.isoformat(),
-                    "created_at": thread[0].created_at.isoformat()
+                    "session_id": session_id,
+                    "message_count": len(session_chats),
+                    "first_message": first_message_text,
+                    "last_message_at": session_chats[-1].created_at.isoformat(),
+                    "created_at": session_chats[0].created_at.isoformat()
                 })
         
         # Sort sessions by created_at in descending order (newest first)
         sessions.sort(key=lambda x: x["created_at"], reverse=True)
+        
+        logger.info(f"✅ Returning {len(sessions)} properly separated sessions")
         
         return {
             "sub_project_id": str(sub_project_id),
             "sessions": sessions
         }
     except Exception as e:
+        logger.error(f"❌ Failed to get sessions: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=f"Failed to get sessions: {str(e)}"
