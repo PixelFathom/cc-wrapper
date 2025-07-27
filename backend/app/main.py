@@ -7,7 +7,6 @@ import logging
 from app.core.settings import get_settings
 from app.core.redis import close_redis
 from app.deps import engine
-<<<<<<< HEAD
 from app.api import projects, tasks, chat, files, approvals, auto_continuation, auth
 from app.api.v1 import webhooks, mcp_approvals
 
