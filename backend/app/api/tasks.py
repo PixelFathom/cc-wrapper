@@ -374,3 +374,55 @@ async def list_task_knowledge_base_files(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to list knowledge base files: {str(e)}"
         )
+
+
+@router.get("/tasks/{task_id}/vscode-link")
+async def get_task_vscode_link(
+    task_id: UUID,
+    file_path: Optional[str] = None,
+    session: AsyncSession = Depends(get_session)
+):
+    """Get VS Code tunnel link for the task"""
+    # Get task and project details
+    task = await session.get(Task, task_id)
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task not found"
+        )
+    
+    project = await session.get(Project, task.project_id)
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found"
+        )
+    
+    # Call the external VS Code API
+    try:
+        async with aiohttp.ClientSession() as client:
+            payload = {
+                "org_name": settings.org_name,
+                "project_name": project.name
+            }
+            if file_path:
+                payload["file_path"] = file_path
+                
+            async with client.post(
+                f"{settings.external_api_url}/vscode/generate-link",
+                json=payload
+            ) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    return result
+                else:
+                    error_detail = await response.text()
+                    raise HTTPException(
+                        status_code=response.status,
+                        detail=f"VS Code API error: {error_detail}"
+                    )
+    except aiohttp.ClientError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Failed to generate VS Code link: {str(e)}"
+        )

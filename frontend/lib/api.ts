@@ -285,6 +285,12 @@ class ApiClient {
     })
   }
 
+  // VS Code
+  getTaskVSCodeLink = async (taskId: string, filePath?: string): Promise<{ tunnel_link: string; tunnel_name: string }> => {
+    const queryParams = filePath ? `?file_path=${encodeURIComponent(filePath)}` : ''
+    return this.request(`/tasks/${taskId}/vscode-link${queryParams}`)
+  }
+
   // Knowledge Base
   uploadToKnowledgeBase = async (taskId: string, file: File, filePath?: string): Promise<{
     id: string
