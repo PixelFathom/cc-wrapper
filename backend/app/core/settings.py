@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+import secrets
 
 
 class Settings(BaseSettings):
@@ -25,6 +26,11 @@ class Settings(BaseSettings):
     
     # OpenAI Configuration
     openai_api_key: str = ""
+    
+    # JWT Configuration
+    secret_key: str = secrets.token_urlsafe(32)
+    access_token_expire_minutes: int = 30
+    refresh_token_expire_days: int = 7
     
     @property
     def database_url(self) -> str:

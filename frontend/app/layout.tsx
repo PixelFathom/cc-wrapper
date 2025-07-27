@@ -4,6 +4,7 @@ import './globals.css'
 import { Providers } from '@/components/providers'
 import { Navigation } from '@/components/navigation'
 import { ApprovalCenter } from '@/components/approval-center'
+import { AuthLoading } from '@/components/auth-loading'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -21,11 +22,13 @@ export default function RootLayout({
     <html lang="en" className="dark scroll-smooth">
       <body className={`${inter.className} min-h-screen`}>
         <Providers>
-          <Navigation />
-          <main className="pt-20 pb-10">
-            {children}
-          </main>
-          <ApprovalCenter />
+          <AuthLoading>
+            <Navigation />
+            <main className="pt-20 pb-10">
+              {children}
+            </main>
+            <ApprovalCenter />
+          </AuthLoading>
         </Providers>
       </body>
     </html>
