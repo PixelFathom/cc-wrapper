@@ -1,5 +1,31 @@
 *.pyc
 __pycache__/
 .env
+.env.*
 node_modules/
 .claude/
+*.pyc
+__pycache__/
+
+# Test artifacts and reports
+test-results/
+playwright-report/
+coverage/
+.nyc_output/
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+.DS_Store
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build artifacts
+dist/
+build/
+.next/

@@ -1,13 +1,14 @@
-.PHONY: help build up down logs clean dev
+.PHONY: help build up down logs clean dev create-admin
 
 help:
 	@echo "Available commands:"
-	@echo "  make build  - Build Docker images"
-	@echo "  make up     - Start production containers"
-	@echo "  make down   - Stop containers"
-	@echo "  make logs   - View container logs"
-	@echo "  make clean  - Clean up volumes and containers"
-	@echo "  make dev    - Start development environment"
+	@echo "  make build       - Build Docker images"
+	@echo "  make up          - Start production containers"
+	@echo "  make down        - Stop containers"
+	@echo "  make logs        - View container logs"
+	@echo "  make clean       - Clean up volumes and containers"
+	@echo "  make dev         - Start development environment"
+	@echo "  make create-admin - Create admin user (username: admin, password: admin)"
 
 build:
 	docker-compose build
@@ -42,3 +43,9 @@ db-shell:
 
 redis-cli:
 	docker-compose exec cache redis-cli
+
+create-admin:
+	@echo "Creating admin user..."
+	docker-compose -f docker-compose.dev.yaml exec backend python scripts/create_admin.py
+	@echo ""
+	@echo "Admin user setup complete!"

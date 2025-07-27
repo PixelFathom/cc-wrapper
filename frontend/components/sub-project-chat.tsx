@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { 
   PaperPlaneIcon, PersonIcon, RocketIcon, UpdateIcon, ChevronRightIcon,
   CodeIcon, GearIcon, CheckCircledIcon, CrossCircledIcon, ClockIcon,
-  FileTextIcon, CubeIcon, ChevronDownIcon, DotFilledIcon
+  FileTextIcon, CubeIcon, ChevronDownIcon, DotFilledIcon, CopyIcon
 } from '@radix-ui/react-icons'
 import { api, ChatHook } from '@/lib/api'
 import { Button } from './ui/button'
@@ -58,6 +58,15 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
   // Collapse all hooks by default for cleaner UI
   const [showAllHooks, setShowAllHooks] = useState(false)
   const [autoContinuationEnabled, setAutoContinuationEnabled] = useState(true)
+  const [bypassModeEnabled, setBypassModeEnabled] = useState(() => {
+    // Load bypass mode preference from localStorage
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('bypassModeEnabled')
+      return saved !== null ? saved === 'true' : true // Default to true if not set
+    }
+    return true
+  })
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -83,6 +92,13 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
     })
   }, [projectName, taskName, subProjectId, initialSessionId, sessionId])
   
+  // Save bypass mode preference to localStorage whenever it changes
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('bypassModeEnabled', bypassModeEnabled.toString())
+    }
+  }, [bypassModeEnabled])
+  
   // Load initial session messages if provided
   useEffect(() => {
     if (initialSessionId && !messages.length) {
@@ -91,12 +107,25 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
     }
   }, [initialSessionId])
   
+  // Load bypass mode preference from session metadata
+  useEffect(() => {
+    if (messages.length > 0) {
+      // Find the last assistant message to get bypass mode preference
+      const assistantMessages = messages.filter(m => m.role === 'assistant' && m.content?.metadata)
+      const lastAssistantMessage = assistantMessages[assistantMessages.length - 1]
+      
+      if (lastAssistantMessage && lastAssistantMessage.content?.metadata?.bypass_mode_enabled !== undefined) {
+        setBypassModeEnabled(lastAssistantMessage.content.metadata.bypass_mode_enabled)
+      }
+    }
+  }, [messages])
+  
   // Fetch sessions for this sub-project (only if it's not a new chat)
   const { data: sessionsData } = useQuery({
     queryKey: ['sub-project-sessions', subProjectId],
     queryFn: () => api.getSubProjectSessions(subProjectId),
     enabled: !!subProjectId && !isNewChat, // Skip for new chats
-    refetchInterval: 10000, // Refresh every 10 seconds
+    refetchInterval: 15000, // Refresh every 15 seconds
   })
 
   useEffect(() => {
@@ -114,6 +143,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
         ...data,
         org_name: 'default',
         cwd,
+        bypass_mode: bypassModeEnabled,
       })
       
       console.log('📥 Query response:', {
@@ -129,15 +159,33 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
       return response
     },
     onSuccess: (data) => {
+      // CRITICAL FIX: Preserve conversation session ID continuity
+      // Capture the current sessionId before any updates to detect if this is truly a first message
+      const wasFirstMessage = !sessionId
+      
       console.log('✅ Query sent successfully:', {
         session_id: data.session_id,
         chat_id: data.chat_id,
-        was_first_message: !sessionId
+        was_first_message: wasFirstMessage,
+        current_session_id: sessionId,
+        response_session_id: data.session_id
       })
       
-      // Only update sessionId if this was the first message
-      if (!sessionId && data.session_id) {
+      // CRITICAL: Only update sessionId for the very first message of a conversation
+      // Never change session ID for continuing conversations to maintain UI continuity
+      if (wasFirstMessage && data.session_id) {
+        console.log('🆕 Setting session ID for first message:', data.session_id)
         setSessionId(data.session_id)
+      } else if (!wasFirstMessage) {
+        console.log('🔒 Preserving existing session ID for conversation continuity:', sessionId)
+        // Verify that the backend returned the same session_id for continuing conversations
+        if (data.session_id !== sessionId) {
+          console.warn(
+            '⚠️ Session ID mismatch detected! This should not happen for continuing conversations.',
+            'Frontend session:', sessionId,
+            'Backend returned:', data.session_id
+          )
+        }
       }
       
       if (data.chat_id) {
@@ -170,7 +218,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
       }
     },
     enabled: !!sessionId,
-    refetchInterval: isWaitingForResponse ? 1000 : 2000, // Poll every 1s when waiting, 2s otherwise
+    refetchInterval: isWaitingForResponse ? 3000 : 5000, // Poll every 3s when waiting, 5s otherwise
     // Important: Keep the data fresh
     staleTime: 0,
     gcTime: 5 * 60 * 1000, // Keep in cache for 5 minutes
@@ -201,7 +249,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
       return hooksMap
     },
     enabled: messages.length > 0,
-    refetchInterval: isWaitingForResponse ? 1000 : 2000,
+    refetchInterval: isWaitingForResponse ? 3000 : 5000,
     staleTime: 0,
     gcTime: 5 * 60 * 1000,
   })
@@ -227,24 +275,37 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
             parentMessageId: msg.parent_message_id,
           }))
           
+          // Filter out temporary messages first
+          const nonTempMessages = prevMessages.filter(m => !m.id.startsWith('temp-'))
+          
           // Create a map of existing messages for quick lookup
-          const existingMap = new Map(prevMessages.map(m => [m.id, m]))
+          const existingMap = new Map(nonTempMessages.map(m => [m.id, m]))
           const updatedMap = new Map(existingMap)
           
           // Update or add messages
           newMessages.forEach(newMsg => {
             const existing = existingMap.get(newMsg.id)
             
+            // CONVERSATION CONTINUITY: Ensure all messages use the current UI session ID for display
+            // This prevents any messages from appearing in wrong sessions due to backend session evolution
+            if (sessionId && newMsg.sessionId !== sessionId) {
+              console.log(`🔧 Correcting message session ID for UI consistency | ${newMsg.id.slice(0, 8)}... | ${newMsg.sessionId} → ${sessionId}`)
+              newMsg.sessionId = sessionId
+            }
+            
             // Always update if content changed or if it's a new message
             if (!existing || 
                 JSON.stringify(existing.content) !== JSON.stringify(newMsg.content) ||
-                existing.isProcessing !== newMsg.isProcessing) {
+                existing.isProcessing !== newMsg.isProcessing ||
+                existing.continuationStatus !== newMsg.continuationStatus) {
               
               console.log(`🔄 ${existing ? 'Updating' : 'Adding'} message ${newMsg.id.slice(0, 8)}...`, {
                 role: newMsg.role,
                 wasProcessing: existing?.isProcessing,
                 isProcessing: newMsg.isProcessing,
-                hasText: !!newMsg.content?.text
+                hasText: !!newMsg.content?.text,
+                continuationStatus: newMsg.continuationStatus,
+                sessionId: newMsg.sessionId
               })
               
               updatedMap.set(newMsg.id, newMsg)
@@ -255,14 +316,6 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
           const finalMessages = Array.from(updatedMap.values())
             .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
           
-          // Check if all messages now have a different session_id (webhook updated them)
-          const newSessionId = finalMessages[0]?.sessionId
-          if (newSessionId && newSessionId !== sessionId && finalMessages.every(msg => msg.sessionId === newSessionId)) {
-            console.log('🔄 SESSION ID CHANGE DETECTED - all messages moved to new session | ' +
-              `current=${sessionId} → new=${newSessionId}`)
-            setSessionId(newSessionId)
-          }
-          
           console.log('✅ Updated UI with', finalMessages.length, 'messages')
           return finalMessages
         })
@@ -272,7 +325,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
     } else if (sessionMessages === null) {
       console.log('📭 Session messages is null, keeping current state')
     }
-  }, [sessionMessages, sessionId])
+  }, [sessionMessages])
   
 
   // Removed EventSource - using polling instead for better control
@@ -309,16 +362,67 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
       if (!hasAutoChild) {
         console.log('🤖 Triggering auto-continuation for message:', lastAssistant.id)
         
+        // Get the session ID to use for continuation
+        // Priority: next_session_id (from ResultMessage) > webhook_session_id > current session_id
+        const metadata = lastAssistant.content?.metadata || {}
+        const nextSessionId = metadata.next_session_id
+        const webhookSessionId = metadata.webhook_session_id
+        const sessionIdToUse = nextSessionId || webhookSessionId || sessionId
+        
+        console.log('🔄 Auto-continuation session resolution:', {
+          nextSessionId,
+          webhookSessionId,
+          currentSessionId: sessionId,
+          using: sessionIdToUse
+        })
+        
+        // Add a temporary auto message to show processing state immediately
+        // Use the current UI session ID for display consistency
+        const tempAutoMessage: Message = {
+          id: `temp-auto-${Date.now()}`,
+          role: 'auto',
+          content: { 
+            text: 'Continue',
+            metadata: {
+              webhook_session_id: sessionIdToUse  // Store the webhook session ID in metadata
+            }
+          },
+          timestamp: new Date().toISOString(),
+          sessionId: sessionId,  // Use UI session ID for display
+          parentMessageId: lastAssistant.id
+        }
+        
+        // Add temporary auto message
+        setMessages(prev => [...prev, tempAutoMessage])
+        
+        // Add a temporary processing assistant message
+        const tempAssistantMessage: Message = {
+          id: `temp-assistant-${Date.now()}`,
+          role: 'assistant',
+          content: { text: '', metadata: { status: 'processing' } },
+          timestamp: new Date().toISOString(),
+          sessionId: sessionId,  // Use UI session ID for display
+          isProcessing: true,
+          parentMessageId: tempAutoMessage.id
+        }
+        
+        setMessages(prev => [...prev, tempAssistantMessage])
+        
         // Trigger continuation
         api.continueChat(lastAssistant.id)
           .then(result => {
             if (result.needs_continuation) {
               console.log('✅ Auto-continuation triggered:', result)
-              // The polling will pick up the new messages
+              // The polling will pick up the new messages and replace our temp messages
+            } else {
+              // Remove temporary messages if continuation not needed
+              setMessages(prev => prev.filter(m => !m.id.startsWith('temp-')))
             }
           })
           .catch(error => {
             console.error('❌ Failed to trigger auto-continuation:', error)
+            // Remove temporary messages on error
+            setMessages(prev => prev.filter(m => !m.id.startsWith('temp-')))
           })
       }
     }
@@ -362,7 +466,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!input.trim()) return
+    if (!input.trim() || isWaitingForResponse) return
 
     const userInput = input
     setInput('')
@@ -373,15 +477,71 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
       textareaRef.current.style.height = '24px' // Reset to min-height
     }
     
+    // CRITICAL FIX: Robust session ID resolution for conversation continuity
+    // The key insight: for new messages in existing conversations, we should ALWAYS use 
+    // the current UI session ID to maintain conversation continuity in the UI.
+    // The backend will handle webhook session ID mapping internally.
+    const resolveSessionId = () => {
+      // If we have an active session, always use it for new messages
+      // This ensures conversation continuity in the UI
+      if (sessionId) {
+        console.log('🔒 PRESERVING session ID for conversation continuity:', sessionId)
+        return sessionId
+      }
+      
+      console.log('🆕 No session_id available - this is the first message in a new conversation')
+      return undefined
+    }
+    
+    let sessionIdToUse = resolveSessionId()
+    
+    // Additional safety check: if we have messages but no sessionId, something is wrong
+    if (!sessionIdToUse && messages.length > 0) {
+      console.error('❌ CRITICAL: We have messages but no session ID! This should not happen.')
+      console.log('Messages:', messages.map(m => ({ id: m.id, role: m.role, sessionId: m.sessionId })))
+      
+      // Try to recover by using the session ID from the last message
+      const lastMessage = messages[messages.length - 1]
+      if (lastMessage?.sessionId) {
+        sessionIdToUse = lastMessage.sessionId
+        setSessionId(sessionIdToUse)
+        console.log('🔧 RECOVERED session ID from last message:', sessionIdToUse)
+      }
+    }
+    
     console.log('📨 Submitting message:', {
-      session_id: sessionId || 'none (first message)',
-      messageCount: messages.length
+      session_id: sessionIdToUse || 'none (first message)',
+      messageCount: messages.length,
+      hasLastAssistant: !!messages.find(m => m.role === 'assistant')
     })
+    
+    // Add temporary user message for immediate feedback
+    const tempUserMessage: Message = {
+      id: `temp-user-${Date.now()}`,
+      role: 'user',
+      content: { text: userInput },
+      timestamp: new Date().toISOString(),
+      sessionId: sessionIdToUse || 'temp',
+    }
+    
+    setMessages(prev => [...prev, tempUserMessage])
+    
+    // Add temporary processing assistant message
+    const tempAssistantMessage: Message = {
+      id: `temp-assistant-${Date.now()}`,
+      role: 'assistant',
+      content: { text: '', metadata: { status: 'processing' } },
+      timestamp: new Date().toISOString(),
+      sessionId: sessionIdToUse || 'temp',
+      isProcessing: true,
+    }
+    
+    setMessages(prev => [...prev, tempAssistantMessage])
     
     // Send mutation with current sessionId (null for first message)
     sendMutation.mutate({
       prompt: userInput,
-      session_id: sessionId || undefined,
+      session_id: sessionIdToUse || undefined,
     })
     
     // Scroll to bottom after sending message with a slight delay
@@ -427,15 +587,21 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
   const getHookIcon = (hook: ChatHook) => {
     if (hook.tool_name) {
       const toolName = hook.tool_name.toLowerCase()
-      if (toolName.includes('bash') || toolName.includes('shell')) return <CodeIcon className="h-3 w-3" />
-      if (toolName.includes('read') || toolName.includes('write')) return <FileTextIcon className="h-3 w-3" />
-      if (toolName.includes('search') || toolName.includes('grep')) return <CubeIcon className="h-3 w-3" />
-      return <GearIcon className="h-3 w-3" />
+      const baseClass = "h-3 w-3"
+      const colorClass = hook.status === 'processing' ? "text-purple-400" : 
+                        hook.status === 'completed' ? "text-green-400" : 
+                        hook.status === 'error' || hook.status === 'failed' ? "text-red-400" : 
+                        "text-gray-400"
+      
+      if (toolName.includes('bash') || toolName.includes('shell')) return <CodeIcon className={`${baseClass} ${colorClass}`} />
+      if (toolName.includes('read') || toolName.includes('write')) return <FileTextIcon className={`${baseClass} ${colorClass}`} />
+      if (toolName.includes('search') || toolName.includes('grep')) return <CubeIcon className={`${baseClass} ${colorClass}`} />
+      return <GearIcon className={`${baseClass} ${colorClass}`} />
     }
     
     if (hook.status === 'completed') return <CheckCircledIcon className="h-3 w-3 text-green-500" />
     if (hook.status === 'error' || hook.status === 'failed') return <CrossCircledIcon className="h-3 w-3 text-red-500" />
-    if (hook.status === 'processing') return <UpdateIcon className="h-3 w-3 text-yellow-500 animate-spin" />
+    if (hook.status === 'processing') return <UpdateIcon className="h-3 w-3 text-purple-400 animate-spin" />
     return <DotFilledIcon className="h-3 w-3 text-gray-500" />
   }
 
@@ -444,6 +610,24 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
     if (hook.tool_name) return `Using tool: ${hook.tool_name}`
     if (hook.data?.result) return hook.data.result.substring(0, 100) + '...'
     return hook.status || 'Processing'
+  }
+
+  const copyMessageContent = async (message: Message) => {
+    try {
+      const textContent = message.role === 'assistant' 
+        ? (message.content?.text || '')
+        : (message.content?.text || message.content || '')
+      
+      await navigator.clipboard.writeText(textContent)
+      setCopiedMessageId(message.id)
+      
+      // Reset copied state after 2 seconds
+      setTimeout(() => {
+        setCopiedMessageId(null)
+      }, 2000)
+    } catch (error) {
+      console.error('Failed to copy message:', error)
+    }
   }
 
   return (
@@ -458,8 +642,52 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
               <div className="w-2.5 h-2.5 rounded-full bg-green-500"></div>
             </div>
             <span className="text-xs font-mono text-muted-foreground hidden sm:inline">developer-chat</span>
+            {/* Bypass Mode Indicator */}
+            <div className={cn(
+              "flex items-center gap-1 ml-2 px-2 py-0.5 rounded-full border",
+              bypassModeEnabled 
+                ? "bg-amber-500/20 border-amber-500/30" 
+                : "bg-gray-500/20 border-gray-500/30"
+            )}>
+              <GearIcon className={cn(
+                "h-3 w-3",
+                bypassModeEnabled ? "text-amber-500" : "text-gray-500"
+              )} />
+              <span className={cn(
+                "text-[10px] font-mono",
+                bypassModeEnabled ? "text-amber-500" : "text-gray-500"
+              )}>
+                Bypass {bypassModeEnabled ? "ON" : "OFF"}
+              </span>
+            </div>
           </div>
           <div className="flex items-center space-x-1 sm:space-x-2">
+            {/* Bypass Mode toggle - Always visible */}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={async () => {
+                const newState = !bypassModeEnabled
+                setBypassModeEnabled(newState)
+                // Only call API if we have an active session
+                if (sessionId) {
+                  try {
+                    await api.toggleBypassMode(sessionId, newState)
+                  } catch (error) {
+                    console.error('Failed to toggle bypass mode:', error)
+                    setBypassModeEnabled(!newState) // Revert on error
+                  }
+                }
+              }}
+              className="text-xs font-mono h-6 px-1 sm:px-2 flex items-center gap-1"
+              title={bypassModeEnabled ? 'Bypass mode enabled' : 'Bypass mode disabled'}
+            >
+              <GearIcon className={cn(
+                "h-3 w-3",
+                bypassModeEnabled ? "text-amber-500" : "text-gray-500"
+              )} />
+              <span className="hidden sm:inline">Bypass</span>
+            </Button>
             {/* Auto-continuation toggle */}
             {sessionId && (
               <Button
@@ -583,6 +811,70 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                 Ask questions about your project, request code changes, or get help with debugging.
                 All processing steps and tool usage will be shown in real-time.
               </div>
+              
+              {/* Bypass Mode Selection for New Conversations */}
+              <div className="mt-6 p-4 bg-card/50 rounded-lg border border-border/50 max-w-sm mx-auto">
+                <div className="text-sm font-medium mb-3 text-foreground">Choose Approval Mode:</div>
+                <div className="flex flex-col gap-2">
+                  <button
+                    onClick={() => setBypassModeEnabled(false)}
+                    className={cn(
+                      "p-3 rounded-md border transition-all text-left",
+                      !bypassModeEnabled 
+                        ? "border-cyan-500 bg-cyan-500/10 text-cyan-500" 
+                        : "border-border hover:border-cyan-500/50 hover:bg-muted/50"
+                    )}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className={cn(
+                        "w-4 h-4 rounded-full border-2",
+                        !bypassModeEnabled ? "border-cyan-500 bg-cyan-500" : "border-gray-500"
+                      )}>
+                        {!bypassModeEnabled && (
+                          <div className="w-2 h-2 bg-white rounded-full m-0.5" />
+                        )}
+                      </div>
+                      <div>
+                        <div className="font-medium text-sm">Approval Required</div>
+                        <div className="text-xs text-muted-foreground">
+                          Review and approve each tool use before execution
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                  
+                  <button
+                    onClick={() => setBypassModeEnabled(true)}
+                    className={cn(
+                      "p-3 rounded-md border transition-all text-left",
+                      bypassModeEnabled 
+                        ? "border-amber-500 bg-amber-500/10 text-amber-500" 
+                        : "border-border hover:border-amber-500/50 hover:bg-muted/50"
+                    )}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className={cn(
+                        "w-4 h-4 rounded-full border-2",
+                        bypassModeEnabled ? "border-amber-500 bg-amber-500" : "border-gray-500"
+                      )}>
+                        {bypassModeEnabled && (
+                          <div className="w-2 h-2 bg-white rounded-full m-0.5" />
+                        )}
+                      </div>
+                      <div>
+                        <div className="font-medium text-sm">Bypass Mode</div>
+                        <div className="text-xs text-muted-foreground">
+                          Execute tools automatically without approval
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                </div>
+                <div className="mt-3 text-xs text-muted-foreground">
+                  You can change this anytime using the Bypass button above
+                </div>
+              </div>
+              
               {sessionId && (
                 <div className="mt-4 text-xs text-muted-foreground/70">
                   Session: {sessionId.slice(0, 8)}
@@ -617,7 +909,11 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                             ? "bg-gradient-to-br from-amber-500 to-orange-600"
                             : "bg-gradient-to-br from-cyan-500 to-blue-600"
                         )}>
-                          <PersonIcon className="h-5 w-5 text-white" />
+                          {message.role === 'auto' ? (
+                            <UpdateIcon className="h-5 w-5 text-white" />
+                          ) : (
+                            <PersonIcon className="h-5 w-5 text-white" />
+                          )}
                         </div>
                         {/* User Message */}
                         <div className="flex-1 pt-1">
@@ -631,14 +927,44 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                               })}
                             </span>
                             {message.role === 'auto' && (
-                              <span className="text-xs bg-amber-500/20 text-amber-500 px-1.5 py-0.5 rounded-full flex items-center gap-1">
-                                <UpdateIcon className="h-3 w-3" />
+                              <motion.span 
+                                initial={{ opacity: 0, scale: 0.8 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                className="text-xs bg-amber-500/20 text-amber-500 px-1.5 py-0.5 rounded-full flex items-center gap-1"
+                              >
+                                <UpdateIcon className="h-3 w-3 animate-pulse" />
                                 AI Generated
-                              </span>
+                              </motion.span>
                             )}
                           </div>
                           <div className="text-[15px] leading-relaxed text-foreground">
                             {message.content.text || message.content}
+                          </div>
+                          {/* Copy button */}
+                          <div className="mt-2">
+                            <button
+                              onClick={() => copyMessageContent(message)}
+                              className={cn(
+                                "inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs",
+                                "transition-all duration-200",
+                                "border border-transparent",
+                                copiedMessageId === message.id
+                                  ? "bg-green-500/20 text-green-500 border-green-500/30"
+                                  : "hover:bg-muted/50 text-muted-foreground hover:text-foreground hover:border-border/50"
+                              )}
+                            >
+                              {copiedMessageId === message.id ? (
+                                <>
+                                  <CheckCircledIcon className="h-3 w-3" />
+                                  <span>Copied!</span>
+                                </>
+                              ) : (
+                                <>
+                                  <CopyIcon className="h-3 w-3" />
+                                  <span>Copy</span>
+                                </>
+                              )}
+                            </button>
                           </div>
                         </div>
                       </div>
@@ -664,6 +990,17 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                                 <UpdateIcon className="h-3 w-3 animate-spin" />
                                 Processing
                               </span>
+                            )}
+                            {/* Show if this is a response to an auto-continuation */}
+                            {message.parentMessageId && messages.find(m => m.id === message.parentMessageId)?.role === 'auto' && (
+                              <motion.span 
+                                initial={{ opacity: 0, scale: 0.8 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                className="text-xs bg-amber-500/20 text-amber-500 px-1.5 py-0.5 rounded-full flex items-center gap-1"
+                              >
+                                <UpdateIcon className="h-3 w-3" />
+                                Auto-generated response
+                              </motion.span>
                             )}
                           </div>
                           <div className="text-[15px] leading-relaxed">
@@ -771,7 +1108,10 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
         </div>
 
         {/* Modern X-style Input Area */}
-        <div className="border-t border-border/50 bg-black/40 backdrop-blur-sm">
+        <div className={cn(
+          "border-t border-border/50 bg-black/40 backdrop-blur-sm transition-all duration-200",
+          isWaitingForResponse && "opacity-75 bg-black/60"
+        )}>
           <form onSubmit={handleSubmit} className="p-3 sm:p-4">
             <div className="relative">
               <Textarea
@@ -787,13 +1127,13 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                 }}
                 onKeyDown={(e) => {
                   // Submit on Enter (without modifiers)
-                  if (e.key === 'Enter' && !e.shiftKey) {
+                  if (e.key === 'Enter' && !e.shiftKey && !isWaitingForResponse) {
                     e.preventDefault()
                     handleSubmit(e as any)
                   }
                 }}
-                placeholder="What's happening with your code?"
-                disabled={sendMutation.isPending}
+                placeholder={isWaitingForResponse ? "Waiting for response..." : "What's happening with your code?"}
+                disabled={sendMutation.isPending || isWaitingForResponse}
                 className="w-full bg-transparent border-0 focus:ring-0 resize-none 
                   placeholder:text-muted-foreground/50 text-base leading-relaxed
                   font-sans min-h-[24px] max-h-[200px] p-0 pr-12"
@@ -839,17 +1179,17 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                   {/* Modern circular send button like X */}
                   <Button 
                     type="submit" 
-                    disabled={sendMutation.isPending || !input.trim()}
+                    disabled={sendMutation.isPending || !input.trim() || isWaitingForResponse}
                     className={cn(
                       "rounded-full h-8 w-8 sm:h-9 sm:w-auto sm:px-4 transition-all duration-200",
                       "font-medium text-sm",
-                      input.trim() 
+                      input.trim() && !isWaitingForResponse
                         ? "bg-cyan-500 hover:bg-cyan-600 text-black" 
                         : "bg-cyan-500/20 text-cyan-500/50 cursor-not-allowed"
                     )}
                     size="sm"
                   >
-                    {sendMutation.isPending ? (
+                    {sendMutation.isPending || isWaitingForResponse ? (
                       <UpdateIcon className="h-4 w-4 animate-spin" />
                     ) : (
                       <>
@@ -861,9 +1201,16 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                 </div>
               </div>
               
-              {/* Hint text */}
+              {/* Hint text / Status indicator */}
               <div className="mt-2 text-xs text-muted-foreground/50">
-                Press Enter to send • Shift+Enter for new line
+                {isWaitingForResponse ? (
+                  <div className="flex items-center gap-2 text-cyan-500">
+                    <UpdateIcon className="h-3 w-3 animate-spin" />
+                    Processing your message... Please wait before sending another.
+                  </div>
+                ) : (
+                  <div>Press Enter to send • Shift+Enter for new line</div>
+                )}
               </div>
             </div>
           </form>

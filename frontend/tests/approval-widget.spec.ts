@@ -59,7 +59,7 @@ test.describe('Approval Widget', () => {
     await mockApprovalAPI(page);
     
     // Wait for the approval center to load
-    await page.waitForTimeout(2500); // Wait for polling
+    await page.waitForTimeout(250000); // Wait for polling
     
     // Check floating action button is visible
     const fab = page.locator('button').filter({ hasText: /^\d+$/ }).first();

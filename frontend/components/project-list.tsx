@@ -23,7 +23,7 @@ export function ProjectList() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
         {[...Array(6)].map((_, i) => (
           <div key={i} className="animate-pulse">
-            <div className="gradient-border-neon rounded-lg h-40 bg-card/50"></div>
+            <div className="gradient-border-neon rounded-lg h-48 sm:h-40 bg-card/50"></div>
           </div>
         ))}
       </div>
@@ -44,6 +44,7 @@ export function ProjectList() {
           transition={{ duration: 0.5, delay: (projects?.length || 0) * 0.1 }}
           onClick={() => setCreateDialogOpen(true)}
           className="group cursor-pointer h-full"
+          data-testid="create-project-button"
         >
           <div className="relative h-full gradient-border-neon rounded-lg overflow-hidden hover:glow-purple transition-all duration-300 border-dashed">
             {/* Terminal header */}
@@ -61,7 +62,7 @@ export function ProjectList() {
             </div>
 
             {/* Terminal content */}
-            <div className="bg-card/50 p-4 font-mono text-sm min-h-[120px] flex items-center justify-center">
+            <div className="bg-card/50 p-4 font-mono text-sm min-h-[140px] sm:min-h-[120px] flex items-center justify-center">
               <div className="text-center">
                 <div className="mb-3">
                   <span className="text-green-400">➜</span>

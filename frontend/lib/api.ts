@@ -206,7 +206,8 @@ class ApiClient {
     org_name: string
     cwd: string
     webhook_url?: string
-  }): Promise<{ session_id: string; assistant_response: string }> => {
+    bypass_mode?: boolean
+  }): Promise<{ session_id: string; assistant_response: string; chat_id?: string }> => {
     return this.request('/query', {
       method: 'POST',
       body: JSON.stringify(data),
@@ -477,6 +478,21 @@ Object.assign(api, {
       body: JSON.stringify({ session_id: sessionId, enabled })
     })
     if (!response.ok) throw new Error('Failed to toggle auto-continuation')
+    return response.json()
+  },
+  
+  // Toggle bypass mode for a session
+  toggleBypassMode: async (sessionId: string, enabled: boolean): Promise<{
+    session_id: string
+    bypass_mode_enabled: boolean
+    updated_count: number
+  }> => {
+    const response = await fetch(`${API_BASE_URL}/api/chats/toggle-bypass-mode`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId, enabled })
+    })
+    if (!response.ok) throw new Error('Failed to toggle bypass mode')
     return response.json()
   },
 })

@@ -10,14 +10,12 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-    networks:
-      - cc-wrapper
+
   cache:
     image: redis:7
     volumes:
       - redis-data:/data
-    networks:
-      - cc-wrapper
+
   backend:
     build: ./backend
     env_file: .env
@@ -35,8 +33,7 @@ services:
       - REDIS_URL=redis://cache:6379/0
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    networks:
-      - cc-wrapper
+
   frontend:
     build: 
       context: ./frontend
@@ -46,15 +43,10 @@ services:
       - "3000:3000"
     depends_on:
       - backend
-    networks:
-      - cc-wrapper
     volumes:
       - ./frontend:/app
       - /app/node_modules
       - /app/.next
-networks:
-  cc-wrapper:
-    external: true 
 
 volumes:
   db-data:
