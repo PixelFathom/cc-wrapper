@@ -25,26 +25,8 @@ async def handle_query(
     session: AsyncSession = Depends(get_session),
     redis_client: redis.Redis = Depends(get_redis_client)
 ):
-    import logging
-    logger = logging.getLogger(__name__)
-    
-    print(
-        f"🟢 /query endpoint called | "
-        f"request.session_id={request.session_id} | "
-        f"request.cwd={request.cwd} | "
-        f"prompt_length={len(request.prompt)}"
-    )
-    logger.info(
-        f"🟢 /query endpoint called | "
-        f"request.session_id={request.session_id} | "
-        f"request.cwd={request.cwd} | "
-        f"prompt_length={len(request.prompt)}"
-    )
-    logger.info(f"📊 SESSION TRACKING | Initial request.session_id={request.session_id}")
-    
     # Don't generate session_id here - wait for remote service response
     temp_session_id = request.session_id or str(uuid4())  # Temporary ID for tracking
-    
     # First try to parse existing cwd
     sub_project_id = await parse_cwd(request.cwd, session)
     
@@ -128,46 +110,19 @@ async def handle_query(
         ui_session_id = request.session_id  # This will remain constant for the conversation
         webhook_session_id_to_use = None
         
-        # If session_id provided, this is a continuation - find the correct webhook session ID
-        if ui_session_id:
-            logger.info(f"📌 Continuing conversation with stable UI session_id: {ui_session_id}")
-            
-            # Find the last assistant message in this UI session to get the latest webhook session ID
-            # We need to check both webhook_session_id and next_session_id in metadata
+        if ui_session_id:            
             stmt = select(Chat).where(
-                Chat.sub_project_id == sub_project_id,
                 Chat.session_id == ui_session_id,
                 Chat.role == "assistant"
             ).order_by(Chat.created_at.desc()).limit(1)
             
             result = await session.execute(stmt)
-            last_assistant = result.scalar_one_or_none()
-            
+            last_assistant = result.scalar_one_or_none()            
             if last_assistant and last_assistant.content.get("metadata"):
                 metadata = last_assistant.content["metadata"]
                 # Priority: next_session_id (from completed conversation) > webhook_session_id
-                webhook_session_id_to_use = metadata.get("next_session_id") or metadata.get("webhook_session_id")
-                
-                if webhook_session_id_to_use:
-                    logger.info(f"🔗 Found webhook session ID for continuation: {webhook_session_id_to_use}")
-                else:
-                    # Fallback: use UI session ID if no webhook session ID found
-                    webhook_session_id_to_use = ui_session_id
-                    logger.info(f"⚠️ No webhook session ID in metadata, using UI session ID as fallback")
-            else:
-                # No previous assistant message found, use UI session ID
-                webhook_session_id_to_use = ui_session_id
-                logger.info(f"⚠️ No previous assistant message found, using UI session ID: {ui_session_id}")
-        else:
-            logger.info("🆕 No session_id provided - first message in conversation")
-        
-        logger.info(
-            f"🔄 Session resolution for remote service | "
-            f"ui_session_id={ui_session_id} | "
-            f"webhook_session_id={webhook_session_id_to_use} | "
-            f"is_first_message={not ui_session_id}"
-        )
-        
+                webhook_session_id_to_use = metadata.get("next_session_id")
+        print(f"webhook_session_id_to_use: {webhook_session_id_to_use}")
         # Use webhook session ID for remote service, UI session ID for database
         result = await chat_service.send_query(
             session, 
@@ -184,36 +139,12 @@ async def handle_query(
         if not response_session_id:
             # If remote service didn't return session_id, use the UI session or generate new
             response_session_id = ui_session_id or temp_session_id
-        
-        logger.info(
-            f"🔄 SESSION ID FLOW | "
-            f"ui_session_id={ui_session_id} → "
-            f"response_session_id={response_session_id} | "
-            f"task_id={task_id}"
-        )
-        
-        # CONVERSATION CONTINUITY FIX: Always use stable UI session ID for conversation continuity
-        # Rule: If this is a continuation (ui_session_id exists), ALWAYS keep using it
-        # If this is first message, use response_session_id from external service as the UI session ID
+    
         final_ui_session_id = ui_session_id or response_session_id
-        
-        # CRITICAL: Ensure we NEVER change session_id for continuing conversations
-        if ui_session_id and response_session_id and ui_session_id != response_session_id:
-            logger.info(
-                f"🔒 PRESERVING UI session ID for conversation continuity | "
-                f"ui_session_id={ui_session_id} | "
-                f"external_session_id={response_session_id} | "
-                f"final_ui_session_id={final_ui_session_id}"
-            )
         
         # Update user chat record to use the stable UI session ID
         if chat.session_id != final_ui_session_id:
-            logger.info(
-                f"📝 Updating user chat session_id for UI continuity | "
-                f"from {chat.session_id} to {final_ui_session_id} | "
-                f"response_session_id={response_session_id} | "
-                f"webhook_session_id={webhook_session_id_to_use}"
-            )
+
             chat.session_id = final_ui_session_id
             session.add(chat)
             await session.commit()
@@ -245,15 +176,9 @@ async def handle_query(
         
         # CRITICAL VALIDATION: Ensure we NEVER return a different session_id for continuing conversations
         if ui_session_id and response_data["session_id"] != ui_session_id:
-            logger.error(
-                f"🚨 CRITICAL ERROR: Session ID mismatch in response! | "
-                f"request_ui_session_id={ui_session_id} | "
-                f"response_session_id={response_data['session_id']} | "
-                f"This will break conversation continuity!"
-            )
+
             # Force correction to maintain continuity
             response_data["session_id"] = ui_session_id
-            logger.info(f"🔧 CORRECTED response session_id to maintain continuity: {ui_session_id}")
         
         # Include task_id if available
         if task_id:
@@ -261,10 +186,6 @@ async def handle_query(
             
         return QueryResponse(**response_data)
     except Exception as e:
-        # Log the error and raise it - no fallback
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f"Remote chat service failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Chat service temporarily unavailable: {str(e)}"
@@ -496,9 +417,7 @@ async def get_session_chats(
             .order_by(Chat.created_at)
         )
         chats = list(result.scalars().all())
-        
-        logger.info(f"📊 Found {len(chats)} messages for session {session_id}")
-        
+                
         # SECURITY CHECK: Verify all messages belong to the same sub_project
         if chats:
             sub_project_ids = set(chat.sub_project_id for chat in chats)

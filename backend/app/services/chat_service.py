@@ -63,26 +63,22 @@ class ChatService:
             # Generate webhook URL
             webhook_url = f"{self.webhook_base_url}/api/webhooks/chat/{chat_id}"
             project_path = f"{project.name}/{task.name}-{task.id}"
-            
+            print(f"session_id: {session_id}")
             # Prepare request payload
             payload = {
                 "prompt": prompt,
                 "webhook_url": webhook_url,
                 "organization_name": self.org_name,
                 "project_path": project_path,
-                "conversation_id": str(chat_id),
                 "options": {
                     "permission_mode": "bypassPermissions" if bypass_mode is True else "interactive"
                 }
             }
-            
             # Only include session_id if it's provided (for subsequent messages)
             if session_id:
                 payload["session_id"] = session_id
-                logger.info(f"📌 Including session_id in payload: {session_id}")
-            else:
-                logger.info("📌 No session_id provided, first message in conversation")
 
+            print(f"payload: {payload}")
             
             # Make request to remote service
             async with httpx.AsyncClient(timeout=30.0) as client:
@@ -92,28 +88,10 @@ class ChatService:
                     headers={"Content-Type": "application/json"}
                 )
                 
-                elapsed_time = round(time.time() - start_time, 2)
-                
                 if response.status_code != 200:
-                    logger.error(
-                        f"❌ Chat query failed | "
-                        f"chat_id={str(chat_id)[:8]}... | "
-                        f"status={response.status_code} | "
-                        f"endpoint={self.query_url} | "
-                        f"duration={elapsed_time}s"
-                    )
                     raise Exception(f"Query request failed: {response.status_code}")
                 
                 result = response.json()
-                
-                logger.info(
-                    f"✅ Chat query successful | "
-                    f"chat_id={str(chat_id)[:8]}... | "
-                    f"status={response.status_code} | "
-                    f"response_session_id={result.get('session_id')} | "
-                    f"response_keys={list(result.keys())} | "
-                    f"duration={elapsed_time}s"
-                )
                 
                 # Store the initial query info
                 await self._store_initial_hook(db, chat_id, payload, result)
@@ -121,13 +99,6 @@ class ChatService:
                 return result
                 
         except Exception as e:
-            elapsed_time = round(time.time() - start_time, 2)
-            logger.error(
-                f"💥 Chat query error | "
-                f"chat_id={str(chat_id)[:8]}... | "
-                f"error={str(e)[:100]}... | "
-                f"duration={elapsed_time}s"
-            )
             raise
     
     async def _store_initial_hook(
@@ -161,43 +132,18 @@ class ChatService:
         chat_id: UUID, 
         webhook_data: Dict[str, Any]
     ):
-        """Process incoming webhook from remote service"""
-        logger.info(
-            f"🟣 process_webhook called | "
-            f"chat_id={str(chat_id)[:8]}... | "
-            f"webhook_keys={list(webhook_data.keys())} | "
-            f"webhook_session_id={webhook_data.get('session_id', 'None')}"
-        )
-        
+        """Process incoming webhook from remote service"""        
         try:
             # Get the original chat to find the correct session_id and sub_project_id
             chat = await db.get(Chat, chat_id)
             if not chat:
                 raise ValueError(f"Chat {chat_id} not found")
             
-            logger.info(
-                f"📋 Found chat | "
-                f"chat.session_id={chat.session_id} | "
-                f"chat.sub_project_id={str(chat.sub_project_id)[:8]}... | "
-                f"chat.role={chat.role}"
-            )
-            
             # Use the original session_id from the chat, not from webhook
             original_session_id = chat.session_id
             webhook_session_id = chat.session_id
             webhook_type = webhook_data.get("type", "processing")
             status = webhook_data.get("status", "received")
-            
-            # Log webhook processing with key details
-            logger.info(
-                f"📥 Webhook received | "
-                f"chat_id={str(chat_id)[:8]}... | "
-                f"type={webhook_type} | "
-                f"status={status} | "
-                f"original_session_id={original_session_id} | "
-                f"webhook_session_id={webhook_session_id} | "
-                f"session_ids_match={original_session_id == webhook_session_id}"
-            )
             
             # Extract fields based on new webhook format
             message_type = webhook_data.get("message_type")
@@ -256,20 +202,16 @@ class ChatService:
             # If this is a completed or failed message with result/error, update or create assistant chat
             # Check both old format and new ResultMessage format
             is_completion = (
-                webhook_data.get("status") in ["completed", "failed"] or
-                (webhook_data.get("message_type") == "ResultMessage" and webhook_data.get("content_type") == "result")
+                webhook_data.get("status") in ["completed", "failed"]
             )
+            logger.info(f"is_completion: {is_completion}")
             
             # Initialize next_session_id
             next_session_id = None
             
             # Extract session_id from ResultMessage if available
-            if webhook_data.get("message_type") == "ResultMessage" and webhook_data.get("session_id"):
+            if webhook_data.get("session_id"):
                 next_session_id = webhook_data.get("session_id")
-                logger.info(
-                    f"📌 Extracted next_session_id from ResultMessage | "
-                    f"next_session_id={next_session_id}"
-                )
             
             if is_completion:
                 result_text = webhook_data.get("result", "")
@@ -279,27 +221,6 @@ class ChatService:
                 result_text = result_text if result_text is not None else ""
                 error_text = error_text if error_text is not None else ""
                 
-                print(f"🔍 Processing completion webhook | status={webhook_data.get('status')} | message_type={webhook_data.get('message_type')} | result_length={len(result_text)} | error_length={len(error_text)}")
-                
-                # Extract the new session_id from completed status webhook
-                # Note: We'll store this after the assistant message is created/updated
-                
-                # Log completion status
-                if webhook_data.get("status") == "completed" or webhook_data.get("message_type") == "ResultMessage":
-                    logger.info(
-                        f"🎉 Chat completed | "
-                        f"chat_id={str(chat_id)[:8]}... | "
-                        f"response_length={len(result_text) if result_text else 0} chars | "
-                        f"message_type={webhook_data.get('message_type')} | "
-                        f"next_session_id={next_session_id}"
-                    )
-                else:
-                    logger.error(
-                        f"💀 Chat failed | "
-                        f"chat_id={str(chat_id)[:8]}... | "
-                        f"error={error_text[:100]}..."
-                    )
-                
                 # Determine the response text
                 if result_text:
                     response_text = result_text
@@ -308,57 +229,22 @@ class ChatService:
                 else:
                     response_text = "I apologize, but I encountered an issue processing your request."
                 
-                print(f"🔍 Looking for assistant message | sub_project_id={str(chat.sub_project_id)[:8]}... | session_id={original_session_id}")
-                
-                # First, let's see all assistant messages in this session
-                all_stmt = select(Chat).where(
-                    Chat.sub_project_id == chat.sub_project_id,
-                    Chat.session_id == original_session_id,
-                    Chat.role == "assistant"
-                ).order_by(Chat.created_at.desc())
-                
-                all_result = await db.execute(all_stmt)
-                all_assistants = all_result.scalars().all()
-                print(f"🔍 Found {len(all_assistants)} assistant messages in session")
-                for asst in all_assistants:
-                    print(f"   - ID: {str(asst.id)[:8]}... | Text: {asst.content.get('text', '')[:50]}...")
-                
                 # Find the existing assistant message using task_id
                 task_id = webhook_data.get("task_id")
                 existing_assistant = None
                 
-                if task_id:
-                    # Look for assistant message with this task_id in metadata
-                    stmt = select(Chat).where(
-                        Chat.sub_project_id == chat.sub_project_id,
-                        Chat.session_id == original_session_id,
-                        Chat.role == "assistant",
-                        Chat.content.op('->')('metadata').op('->>')('task_id') == task_id
-                    ).order_by(Chat.created_at.desc()).limit(1)
-                    
-                    result = await db.execute(stmt)
-                    existing_assistant = result.scalar_one_or_none()
+                # Look for assistant message with this task_id in metadata
+                stmt = select(Chat).where(
+                    Chat.sub_project_id == chat.sub_project_id,
+                    Chat.session_id == original_session_id,
+                    Chat.role == "assistant",
+                ).order_by(Chat.created_at.desc()).limit(1)
                 
-                # If not found by task_id, try to find by initial_response flag
-                if not existing_assistant:
-                    stmt = select(Chat).where(
-                        Chat.sub_project_id == chat.sub_project_id,
-                        Chat.session_id == original_session_id,
-                        Chat.role == "assistant",
-                        Chat.content.op('->')('metadata').op('->>')('initial_response') == 'true'
-                    ).order_by(Chat.created_at.desc()).limit(1)
-                    
-                    result = await db.execute(stmt)
-                    existing_assistant = result.scalar_one_or_none()
-                
-                print(f"🔍 Found existing assistant message: {existing_assistant is not None} | assistant_id={str(existing_assistant.id)[:8] if existing_assistant else 'None'}...")
-                
+                result = await db.execute(stmt)
+                existing_assistant = result.scalar_one_or_none()
+
                 if existing_assistant:
-                    # Update existing message
-                    print(f"✏️ Updating existing assistant message {str(existing_assistant.id)[:8]}...")
-                    print(f"   Current text: {existing_assistant.content.get('text', '')[:50]}...")
-                    print(f"   New text: {response_text[:50]}...")
-                    
+                    # Update existing message                    
                     # Preserve the original metadata and update with new values
                     current_content = existing_assistant.content.copy()
                     current_metadata = current_content.get("metadata", {})
@@ -372,22 +258,7 @@ class ChatService:
                     # CRITICAL FIX: NEVER update the session_id to maintain UI continuity
                     # Store the webhook session ID in metadata instead
                     if next_session_id:
-                        logger.info(
-                            f"🔒 Storing webhook session_id in metadata (PRESERVING UI session_id) | "
-                            f"assistant_id={str(existing_assistant.id)[:8]}... | "
-                            f"ui_session_id={existing_assistant.session_id} | "
-                            f"webhook_session_id={next_session_id}"
-                        )
                         current_metadata["next_session_id"] = next_session_id
-                        
-                        # CRITICAL: Verify the UI session_id is preserved
-                        if existing_assistant.session_id != original_session_id:
-                            logger.error(
-                                f"🚨 UI SESSION MISMATCH! Assistant message has wrong session_id | "
-                                f"expected={original_session_id} | "
-                                f"actual={existing_assistant.session_id}"
-                            )
-                    
                     # Create new content dict and force SQLAlchemy to detect the change
                     from sqlalchemy.orm.attributes import flag_modified
                     new_content = {
@@ -399,11 +270,6 @@ class ChatService:
                     
                     db.add(existing_assistant)
                     
-                    logger.info(
-                        f"📝 Updated assistant message | "
-                        f"webhook_session_id={webhook_session_id} | "
-                        f"status={webhook_data.get('status')}"
-                    )
                 else:
                     # Before creating new, check if there's already an assistant message with same text
                     stmt = select(Chat).where(
@@ -417,7 +283,6 @@ class ChatService:
                     duplicate_check = result.scalar_one_or_none()
                     
                     if duplicate_check:
-                        print(f"⚠️ Found existing assistant message with same text, updating it instead")
                         existing_assistant = duplicate_check
                         # Update its metadata
                         current_metadata = existing_assistant.content.get("metadata", {})
@@ -431,15 +296,7 @@ class ChatService:
                         # CRITICAL FIX: NEVER update the session_id to maintain UI continuity
                         # Store the webhook session ID in metadata instead
                         if next_session_id:
-                            logger.info(f"🔒 Storing webhook session_id in metadata for duplicate message (PRESERVING UI session_id)")
                             current_metadata["next_session_id"] = next_session_id
-                            
-                            # CRITICAL: Verify the UI session_id is preserved
-                            if existing_assistant.session_id != original_session_id:
-                                logger.error(
-                                    f"🚨 UI SESSION MISMATCH in duplicate! Expected={original_session_id}, "
-                                    f"Actual={existing_assistant.session_id}"
-                                )
                         
                         existing_assistant.content = {
                             "text": response_text,
@@ -447,21 +304,8 @@ class ChatService:
                         }
                         db.add(existing_assistant)
                     else:
-                        # Create new assistant message only if we really need to
-                        # For continuation responses, use the original UI session_id
-                        # Check if the user chat is an auto-continuation message
-                        is_continuation_response = False
-                        if chat.role == "auto" or (chat.content and chat.content.get("metadata", {}).get("auto_generated")):
-                            is_continuation_response = True
-                            logger.info(f"🤖 This is a response to an auto-continuation message")
-                        
                         # Use original session_id for continuation responses to maintain UI continuity
                         session_id_for_assistant = original_session_id
-                        
-                        print(f"➕ Creating new assistant message for session {session_id_for_assistant}")
-                        print(f"   Task ID: {task_id}")
-                        print(f"   Response text: {response_text[:50]}...")
-                        print(f"   Is continuation response: {is_continuation_response}")
                         
                         assistant_chat = Chat(
                             sub_project_id=chat.sub_project_id,
@@ -484,60 +328,6 @@ class ChatService:
             await db.refresh(hook)
             
             # Special handling for completed status webhook to ensure webhook_session_id is stored
-            # This webhook comes after the ResultMessage webhook and contains the session_id
-            if (webhook_data.get("status") == "completed" and 
-                webhook_session_id and
-                webhook_session_id != original_session_id):
-                
-                logger.info(
-                    f"📌 Processing completed webhook with session_id only | "
-                    f"webhook_session_id={webhook_session_id}"
-                )
-                
-                # Find the most recent assistant message to update with the webhook_session_id
-                stmt = select(Chat).where(
-                    Chat.sub_project_id == chat.sub_project_id,
-                    Chat.session_id == original_session_id,
-                    Chat.role == "assistant"
-                ).order_by(Chat.created_at.desc()).limit(1)
-                
-                result = await db.execute(stmt)
-                latest_assistant = result.scalar_one_or_none()
-                
-                if latest_assistant:
-                    logger.info(
-                        f"✅ Updating assistant message with webhook_session_id | "
-                        f"assistant_id={str(latest_assistant.id)[:8]}... | "
-                        f"webhook_session_id={webhook_session_id}"
-                    )
-                    
-                    # Update the metadata with webhook_session_id
-                    current_content = latest_assistant.content.copy()
-                    current_metadata = current_content.get("metadata", {})
-                    current_metadata["webhook_session_id"] = webhook_session_id
-                    current_metadata["status"] = "completed"
-                    
-                    # Create new content dict to ensure SQLAlchemy detects the change
-                    new_content = {
-                        "text": current_content.get("text", ""),
-                        "metadata": current_metadata
-                    }
-                    
-                    # Force update by using flag_modified
-                    from sqlalchemy.orm.attributes import flag_modified
-                    latest_assistant.content = new_content
-                    flag_modified(latest_assistant, "content")
-                    
-                    db.add(latest_assistant)
-                    await db.commit()
-                    await db.refresh(latest_assistant)
-                    
-                    # Verify the update
-                    logger.info(
-                        f"✅ Successfully stored webhook_session_id in assistant message | "
-                        f"verified_webhook_session_id={latest_assistant.content.get('metadata', {}).get('webhook_session_id')}"
-                    )
- 
             # Publish to Redis for real-time updates
             if self.redis_client:
                 import json

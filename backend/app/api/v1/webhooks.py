@@ -48,11 +48,7 @@ async def receive_chat_webhook(
     try:
         logger.info(
             f"🔴 Webhook endpoint called | "
-            f"chat_id={str(chat_id)[:8]}... | "
-            f"webhook_type={webhook_data.get('type')} | "
-            f"webhook_status={webhook_data.get('status')} | "
-            f"webhook_session_id={webhook_data.get('session_id')} | "
-            f"webhook_keys={list(webhook_data.keys())}"
+            f"webhook_data={webhook_data}"
         )
         # Set Redis client for real-time updates
         chat_service.set_redis_client(redis_client)

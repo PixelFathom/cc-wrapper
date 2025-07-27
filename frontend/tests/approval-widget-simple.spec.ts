@@ -76,7 +76,7 @@ test.describe('Approval Widget - Basic Tests', () => {
     await page.waitForLoadState('networkidle');
     
     // Wait a bit for the polling to pick up the mocked data
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(300000);
     
     // Open approval panel
     const fabButton = page.locator('button').filter({ 
