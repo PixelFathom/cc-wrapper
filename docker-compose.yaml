@@ -5,23 +5,19 @@ services:
     env_file: .env
     volumes:
       - db-data:/var/lib/postgresql/data
-    ports:
-      - "5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $POSTGRES_USER"]
       interval: 5s
       timeout: 5s
       retries: 5
     networks:
-      - app-network
-
+      - cc-wrapper
   cache:
     image: redis:7
     volumes:
       - redis-data:/data
     networks:
-      - app-network
-
+      - cc-wrapper
   backend:
     build: ./backend
     env_file: .env
@@ -32,28 +28,35 @@ services:
         condition: service_healthy
       cache:
         condition: service_started
-    networks:
-      - app-network
+    volumes:
+      - ./backend:/app
     environment:
       - POSTGRES_HOST=db
       - REDIS_URL=redis://cache:6379/0
-
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - cc-wrapper
   frontend:
-    build: ./frontend
+    build: 
+      context: ./frontend
+      dockerfile: Dockerfile.dev
     env_file: .env
     ports:
       - "3000:3000"
     depends_on:
       - backend
     networks:
-      - app-network
-    environment:
-      - NEXT_PUBLIC_BACKEND_HOST=http://backend:8000
+      - cc-wrapper
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+networks:
+  cc-wrapper:
+    external: true 
+
 
 volumes:
   db-data:
   redis-data:
-
-networks:
-  app-network:
-    driver: bridge
