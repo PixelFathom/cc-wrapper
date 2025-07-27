@@ -369,16 +369,24 @@ class ChatService:
                         "status": "completed"  # Always set to completed when updating with final content
                     })
                     
-                    # IMPORTANT: Do NOT update the session_id to maintain UI continuity
+                    # CRITICAL FIX: NEVER update the session_id to maintain UI continuity
                     # Store the webhook session ID in metadata instead
                     if next_session_id:
                         logger.info(
-                            f"📌 Storing webhook session_id in metadata (not updating message session_id) | "
+                            f"🔒 Storing webhook session_id in metadata (PRESERVING UI session_id) | "
                             f"assistant_id={str(existing_assistant.id)[:8]}... | "
                             f"ui_session_id={existing_assistant.session_id} | "
                             f"webhook_session_id={next_session_id}"
                         )
                         current_metadata["next_session_id"] = next_session_id
+                        
+                        # CRITICAL: Verify the UI session_id is preserved
+                        if existing_assistant.session_id != original_session_id:
+                            logger.error(
+                                f"🚨 UI SESSION MISMATCH! Assistant message has wrong session_id | "
+                                f"expected={original_session_id} | "
+                                f"actual={existing_assistant.session_id}"
+                            )
                     
                     # Create new content dict and force SQLAlchemy to detect the change
                     from sqlalchemy.orm.attributes import flag_modified
@@ -420,11 +428,18 @@ class ChatService:
                             "status": "completed"  # Always set to completed when updating with final content
                         })
                         
-                        # IMPORTANT: Do NOT update the session_id to maintain UI continuity
+                        # CRITICAL FIX: NEVER update the session_id to maintain UI continuity
                         # Store the webhook session ID in metadata instead
                         if next_session_id:
-                            logger.info(f"📌 Storing webhook session_id in metadata for duplicate message (not updating message session_id)")
+                            logger.info(f"🔒 Storing webhook session_id in metadata for duplicate message (PRESERVING UI session_id)")
                             current_metadata["next_session_id"] = next_session_id
+                            
+                            # CRITICAL: Verify the UI session_id is preserved
+                            if existing_assistant.session_id != original_session_id:
+                                logger.error(
+                                    f"🚨 UI SESSION MISMATCH in duplicate! Expected={original_session_id}, "
+                                    f"Actual={existing_assistant.session_id}"
+                                )
                         
                         existing_assistant.content = {
                             "text": response_text,

@@ -193,9 +193,18 @@ async def handle_query(
         )
         
         # CONVERSATION CONTINUITY FIX: Always use stable UI session ID for conversation continuity
-        # Rule: If this is a continuation (ui_session_id exists), keep using it
+        # Rule: If this is a continuation (ui_session_id exists), ALWAYS keep using it
         # If this is first message, use response_session_id from external service as the UI session ID
         final_ui_session_id = ui_session_id or response_session_id
+        
+        # CRITICAL: Ensure we NEVER change session_id for continuing conversations
+        if ui_session_id and response_session_id and ui_session_id != response_session_id:
+            logger.info(
+                f"🔒 PRESERVING UI session ID for conversation continuity | "
+                f"ui_session_id={ui_session_id} | "
+                f"external_session_id={response_session_id} | "
+                f"final_ui_session_id={final_ui_session_id}"
+            )
         
         # Update user chat record to use the stable UI session ID
         if chat.session_id != final_ui_session_id:
@@ -233,6 +242,18 @@ async def handle_query(
             "chat_id": str(chat.id),
             "assistant_chat_id": str(assistant_chat.id)
         }
+        
+        # CRITICAL VALIDATION: Ensure we NEVER return a different session_id for continuing conversations
+        if ui_session_id and response_data["session_id"] != ui_session_id:
+            logger.error(
+                f"🚨 CRITICAL ERROR: Session ID mismatch in response! | "
+                f"request_ui_session_id={ui_session_id} | "
+                f"response_session_id={response_data['session_id']} | "
+                f"This will break conversation continuity!"
+            )
+            # Force correction to maintain continuity
+            response_data["session_id"] = ui_session_id
+            logger.info(f"🔧 CORRECTED response session_id to maintain continuity: {ui_session_id}")
         
         # Include task_id if available
         if task_id:

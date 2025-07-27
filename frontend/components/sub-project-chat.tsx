@@ -159,16 +159,33 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
       return response
     },
     onSuccess: (data) => {
+      // CRITICAL FIX: Preserve conversation session ID continuity
+      // Capture the current sessionId before any updates to detect if this is truly a first message
+      const wasFirstMessage = !sessionId
+      
       console.log('✅ Query sent successfully:', {
         session_id: data.session_id,
         chat_id: data.chat_id,
-        was_first_message: !sessionId
+        was_first_message: wasFirstMessage,
+        current_session_id: sessionId,
+        response_session_id: data.session_id
       })
       
-      // Only update sessionId if this was the first message
-      // Note: We already updated sessionId in handleSubmit if needed, so this is just for the first message
-      if (!sessionId && data.session_id) {
+      // CRITICAL: Only update sessionId for the very first message of a conversation
+      // Never change session ID for continuing conversations to maintain UI continuity
+      if (wasFirstMessage && data.session_id) {
+        console.log('🆕 Setting session ID for first message:', data.session_id)
         setSessionId(data.session_id)
+      } else if (!wasFirstMessage) {
+        console.log('🔒 Preserving existing session ID for conversation continuity:', sessionId)
+        // Verify that the backend returned the same session_id for continuing conversations
+        if (data.session_id !== sessionId) {
+          console.warn(
+            '⚠️ Session ID mismatch detected! This should not happen for continuing conversations.',
+            'Frontend session:', sessionId,
+            'Backend returned:', data.session_id
+          )
+        }
       }
       
       if (data.chat_id) {
@@ -460,7 +477,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
       textareaRef.current.style.height = '24px' // Reset to min-height
     }
     
-    // FIXED: Session ID resolution for conversation continuity
+    // CRITICAL FIX: Robust session ID resolution for conversation continuity
     // The key insight: for new messages in existing conversations, we should ALWAYS use 
     // the current UI session ID to maintain conversation continuity in the UI.
     // The backend will handle webhook session ID mapping internally.
@@ -468,15 +485,29 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
       // If we have an active session, always use it for new messages
       // This ensures conversation continuity in the UI
       if (sessionId) {
-        console.log('✅ Using current UI session_id for conversation continuity:', sessionId)
+        console.log('🔒 PRESERVING session ID for conversation continuity:', sessionId)
         return sessionId
       }
       
-      console.log('🆕 No session_id available (first message)')
+      console.log('🆕 No session_id available - this is the first message in a new conversation')
       return undefined
     }
     
     let sessionIdToUse = resolveSessionId()
+    
+    // Additional safety check: if we have messages but no sessionId, something is wrong
+    if (!sessionIdToUse && messages.length > 0) {
+      console.error('❌ CRITICAL: We have messages but no session ID! This should not happen.')
+      console.log('Messages:', messages.map(m => ({ id: m.id, role: m.role, sessionId: m.sessionId })))
+      
+      // Try to recover by using the session ID from the last message
+      const lastMessage = messages[messages.length - 1]
+      if (lastMessage?.sessionId) {
+        sessionIdToUse = lastMessage.sessionId
+        setSessionId(sessionIdToUse)
+        console.log('🔧 RECOVERED session ID from last message:', sessionIdToUse)
+      }
+    }
     
     console.log('📨 Submitting message:', {
       session_id: sessionIdToUse || 'none (first message)',
