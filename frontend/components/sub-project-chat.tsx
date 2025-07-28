@@ -194,42 +194,12 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
     },
   })
 
-  // Enhanced logic to check if we're waiting for a response
-  // IMPORTANT: This is computed first based on just the mutation state and messages
-  const isWaitingForResponse = useMemo(() => {
-    // Always block if a mutation is pending
-    if (sendMutation.isPending) return true
-    
-    // Check for processing assistant messages
-    const hasProcessingAssistant = messages.some(msg => {
-      if (msg.role !== 'assistant') return false
-      
-      // Message is explicitly marked as processing
-      if (msg.isProcessing) return true
-      
-      // Message has processing metadata
-      if (msg.content?.metadata?.status === 'processing') return true
-      
-      // Message has no text content or empty content (waiting for response)
-      if (!msg.content?.text || msg.content.text === '') return true
-      
-      // Message has only placeholder text
-      if (msg.content.text === 'Processing your request...') return true
-      
-      return false
-    })
-    
-    // Check for continuation scenarios
-    const hasPendingContinuation = messages.some(msg => 
-      msg.role === 'assistant' && 
-      msg.continuationStatus === 'needed' && 
-      autoContinuationEnabled &&
-      !messages.some(m => m.role === 'auto' && m.parentMessageId === msg.id)
-    )
-    
-    return hasProcessingAssistant || hasPendingContinuation
-  }, [messages, sendMutation.isPending, autoContinuationEnabled])
-
+  // Poll for messages in the current session
+  // Check if we're waiting for a response
+  const isWaitingForResponse = messages.some(msg => 
+    msg.role === 'assistant' && (msg.isProcessing || !msg.content?.text || msg.content?.text === '')
+  ) || sendMutation.isPending
+  
   // Query for messages when sessionId is available
   const { data: sessionMessages, error: sessionError } = useQuery({
     queryKey: ['chats', 'session', sessionId],
@@ -283,20 +253,6 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
     staleTime: 0,
     gcTime: 5 * 60 * 1000,
   })
-
-  // Additional waiting check that includes hook status
-  // This creates a more complete waiting state that includes active hooks
-  const isWaitingForResponseWithHooks = useMemo(() => {
-    // Start with base waiting state
-    if (isWaitingForResponse) return true
-    
-    // Check for messages with active hooks (tools still running)
-    const hasActiveHooks = messageHooks && Array.from(messageHooks.values()).some(hooks =>
-      hooks.some(hook => hook.status === 'processing' || hook.status === 'pending')
-    )
-    
-    return hasActiveHooks
-  }, [isWaitingForResponse, messageHooks])
 
   // Update messages when session data changes - intelligent merge
   useEffect(() => {
@@ -383,7 +339,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
   // Also scroll when hooks are expanded/collapsed or when waiting for response changes
   useEffect(() => {
     scrollToBottom()
-  }, [expandedHooks, showAllHooks, isWaitingForResponseWithHooks])
+  }, [expandedHooks, showAllHooks, isWaitingForResponse])
   
   // Auto-continuation logic
   useEffect(() => {
@@ -510,7 +466,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!input.trim() || isWaitingForResponseWithHooks) return
+    if (!input.trim() || isWaitingForResponse) return
 
     const userInput = input
     setInput('')
@@ -1055,7 +1011,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                               expandedHooks={expandedHooks}
                               getHookIcon={getHookIcon}
                               formatHookMessage={formatHookMessage}
-                              isWaitingForResponse={isWaitingForResponseWithHooks}
+                              isWaitingForResponse={isWaitingForResponse}
                             />
                           </div>
                         </div>
@@ -1154,7 +1110,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
         {/* Modern X-style Input Area */}
         <div className={cn(
           "border-t border-border/50 bg-black/40 backdrop-blur-sm transition-all duration-200",
-          isWaitingForResponseWithHooks && "opacity-75 bg-black/60"
+          isWaitingForResponse && "opacity-75 bg-black/60"
         )}>
           <form onSubmit={handleSubmit} className="p-3 sm:p-4">
             <div className="relative">
@@ -1171,19 +1127,16 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                 }}
                 onKeyDown={(e) => {
                   // Submit on Enter (without modifiers)
-                  if (e.key === 'Enter' && !e.shiftKey && !isWaitingForResponseWithHooks) {
+                  if (e.key === 'Enter' && !e.shiftKey && !isWaitingForResponse) {
                     e.preventDefault()
                     handleSubmit(e as any)
                   }
                 }}
-                placeholder={isWaitingForResponseWithHooks ? "Waiting for response..." : "What's happening with your code?"}
-                disabled={sendMutation.isPending || isWaitingForResponseWithHooks}
-                className={cn(
-                  "w-full bg-transparent border-0 focus:ring-0 resize-none",
-                  "placeholder:text-muted-foreground/50 text-base leading-relaxed",
-                  "font-sans min-h-[24px] max-h-[200px] p-0 pr-12 transition-all duration-200",
-                  isWaitingForResponseWithHooks && "cursor-not-allowed opacity-75"
-                )}
+                placeholder={isWaitingForResponse ? "Waiting for response..." : "What's happening with your code?"}
+                disabled={sendMutation.isPending || isWaitingForResponse}
+                className="w-full bg-transparent border-0 focus:ring-0 resize-none 
+                  placeholder:text-muted-foreground/50 text-base leading-relaxed
+                  font-sans min-h-[24px] max-h-[200px] p-0 pr-12"
                 rows={1}
                 style={{ 
                   outline: 'none',
@@ -1226,25 +1179,18 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                   {/* Modern circular send button like X */}
                   <Button 
                     type="submit" 
-                    disabled={sendMutation.isPending || !input.trim() || isWaitingForResponseWithHooks}
+                    disabled={sendMutation.isPending || !input.trim() || isWaitingForResponse}
                     className={cn(
                       "rounded-full h-8 w-8 sm:h-9 sm:w-auto sm:px-4 transition-all duration-200",
-                      "font-medium text-sm relative",
-                      input.trim() && !isWaitingForResponseWithHooks
+                      "font-medium text-sm",
+                      input.trim() && !isWaitingForResponse
                         ? "bg-cyan-500 hover:bg-cyan-600 text-black" 
-                        : "bg-cyan-500/20 text-cyan-500/50 cursor-not-allowed opacity-60"
+                        : "bg-cyan-500/20 text-cyan-500/50 cursor-not-allowed"
                     )}
                     size="sm"
-                    title={
-                      isWaitingForResponseWithHooks 
-                        ? "Please wait for the assistant to finish responding"
-                        : !input.trim() 
-                        ? "Type a message to send"
-                        : "Send message"
-                    }
                   >
-                    {sendMutation.isPending || isWaitingForResponseWithHooks ? (
-                      <UpdateIcon className="h-4 w-4 animate-spin text-cyan-500" />
+                    {sendMutation.isPending || isWaitingForResponse ? (
+                      <UpdateIcon className="h-4 w-4 animate-spin" />
                     ) : (
                       <>
                         <PaperPlaneIcon className="h-4 w-4 sm:hidden" />
@@ -1255,21 +1201,12 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                 </div>
               </div>
               
-              {/* Enhanced status indicator */}
+              {/* Hint text / Status indicator */}
               <div className="mt-2 text-xs text-muted-foreground/50">
-                {isWaitingForResponseWithHooks ? (
+                {isWaitingForResponse ? (
                   <div className="flex items-center gap-2 text-cyan-500">
                     <UpdateIcon className="h-3 w-3 animate-spin" />
-                    <span>
-                      {sendMutation.isPending 
-                        ? "Sending your message..."
-                        : messages.some(m => m.role === 'assistant' && m.isProcessing)
-                        ? "Assistant is processing your request..."
-                        : messageHooks && Array.from(messageHooks.values()).some(hooks => hooks.some(h => h.status === 'processing'))
-                        ? "Tools are running..."
-                        : "Please wait before sending another message"
-                      } Send button is disabled.
-                    </span>
+                    Processing your message... Please wait before sending another.
                   </div>
                 ) : (
                   <div>Press Enter to send • Shift+Enter for new line</div>
