@@ -5,7 +5,7 @@ const nextConfig = {
     BACKEND_HOST: process.env.NEXT_PUBLIC_BACKEND_HOST || 'http://localhost:8000',
   },
   serverRuntimeConfig: {
-    BACKEND_HOST: process.env.BACKEND_HOST || 'http://backend:8000',
+    BACKEND_HOST: process.env.BACKEND_HOST || 'http://localhost:8000',
   },
 }
 

@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { CodeIcon, HamburgerMenuIcon, Cross2Icon } from '@radix-ui/react-icons'
 import { Button } from './ui/button'
+import { SignInButton, SignUpButton, SignedIn, SignedOut, UserButton } from '@clerk/nextjs'
 
 export function Navigation() {
   const [scrolled, setScrolled] = useState(false)
@@ -53,6 +54,23 @@ export function Navigation() {
               <span className="text-cyan-500 text-xs">●</span>
               <span className="text-muted-foreground text-xs font-mono">main</span>
             </div>
+            
+            {/* Auth buttons */}
+            <SignedOut>
+              <SignInButton mode="modal">
+                <Button variant="ghost" size="sm">
+                  Sign In
+                </Button>
+              </SignInButton>
+              <SignUpButton mode="modal">
+                <Button size="sm" className="bg-cyan-600 hover:bg-cyan-700">
+                  Sign Up
+                </Button>
+              </SignUpButton>
+            </SignedOut>
+            <SignedIn>
+              <UserButton />
+            </SignedIn>
           </div>
 
           {/* Mobile menu button */}
@@ -83,6 +101,27 @@ export function Navigation() {
                 <div className="text-center py-4">
                   <span className="text-xs text-muted-foreground font-mono">v1.0.0</span>
                 </div>
+                
+                {/* Mobile auth buttons */}
+                <SignedOut>
+                  <div className="flex flex-col space-y-2 px-4">
+                    <SignInButton mode="modal">
+                      <Button variant="ghost" size="sm" className="w-full">
+                        Sign In
+                      </Button>
+                    </SignInButton>
+                    <SignUpButton mode="modal">
+                      <Button size="sm" className="w-full bg-cyan-600 hover:bg-cyan-700">
+                        Sign Up
+                      </Button>
+                    </SignUpButton>
+                  </div>
+                </SignedOut>
+                <SignedIn>
+                  <div className="flex justify-center">
+                    <UserButton />
+                  </div>
+                </SignedIn>
               </div>
             </motion.div>
           )}

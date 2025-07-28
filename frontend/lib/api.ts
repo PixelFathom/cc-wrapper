@@ -4,7 +4,7 @@ const getApiBaseUrl = () => {
     return process.env.NEXT_PUBLIC_BACKEND_HOST || 'http://localhost:8000';
   }
   // Server-side: Use backend service name for container-to-container communication
-  return process.env.BACKEND_HOST || 'http://backend:8000';
+  return process.env.BACKEND_HOST || 'http://localhost:8000';
 };
 
 const API_BASE_URL = getApiBaseUrl()
