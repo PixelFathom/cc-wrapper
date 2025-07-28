@@ -12,7 +12,7 @@ import { MarkdownRenderer } from './markdown-renderer'
 
 interface Message {
   id: string
-  role: 'user' | 'assistant' | 'hook'
+  role: 'user' | 'assistant' | 'hook' | 'auto'
   content: any
   timestamp: string
   sessionId?: string

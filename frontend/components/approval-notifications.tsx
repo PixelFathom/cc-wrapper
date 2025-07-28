@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { 
   BellIcon, Cross2Icon, ExclamationTriangleIcon, CheckCircledIcon,
   CodeIcon, FileTextIcon, GlobeIcon, GearIcon, ClockIcon,
-  RocketIcon, LockClosedIcon
+  RocketIcon, LockClosedIcon, ChevronRightIcon
 } from '@radix-ui/react-icons'
 import { api } from '@/lib/api'
 import { Button } from './ui/button'
@@ -210,7 +210,9 @@ export function ApprovalNotifications() {
                             <p className="text-sm text-gray-300 line-clamp-2 mb-1">
                               {approval.type === 'mcp' 
                                 ? approval.display_text 
-                                : (typeof approval.details === 'object' && approval.details?.reason || 'Approval needed')}
+                                : (typeof approval.details === 'object' && approval.details && 'reason' in approval.details 
+                                  ? (approval.details as any).reason 
+                                  : 'Approval needed')}
                             </p>
 
                             <div className="flex items-center justify-between text-xs text-gray-500">

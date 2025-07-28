@@ -117,6 +117,29 @@ export interface Approval {
   display_text?: string
 }
 
+interface ExtendedApiClient {
+  getSessionChats: (sessionId: string) => Promise<{ messages: Chat[] }>
+  getSubProjectSessions: (subProjectId: string) => Promise<{ sessions: any[] }>
+  getMessageHooks: (messageId: string) => Promise<{ hooks: ChatHook[] }>
+  getMCPApprovals: (params?: { cwd?: string; sub_project_id?: string }) => Promise<Approval[]>
+  continueChat: (chatId: string) => Promise<{
+    needs_continuation: boolean
+    auto_message_id?: string
+    continuation_prompt?: string
+    reasoning?: string
+  }>
+  toggleAutoContinuation: (sessionId: string, enabled: boolean) => Promise<{
+    session_id: string
+    auto_continuation_enabled: boolean
+    updated_count: number
+  }>
+  toggleBypassMode: (sessionId: string, enabled: boolean) => Promise<{
+    session_id: string
+    bypass_mode_enabled: boolean
+    updated_count: number
+  }>
+}
+
 class ApiClient {
   private baseUrl: string
 
@@ -335,7 +358,7 @@ class ApiClient {
   }
 }
 
-export const api = new ApiClient()
+export const api = new ApiClient() as ApiClient & ExtendedApiClient
 
 // Extend api object with additional methods
 Object.assign(api, {
