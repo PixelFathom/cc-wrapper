@@ -118,38 +118,22 @@ export interface Approval {
 }
 
 class ApiClient {
-  public baseUrl: string
+  private baseUrl: string
 
   constructor() {
     this.baseUrl = `${API_BASE_URL}/api`
   }
 
   private async request<T>(path: string, options?: RequestInit): Promise<T> {
-    // Get auth token if available
-    let authHeader: Record<string, string> = {}
-    if (typeof window !== 'undefined') {
-      const token = localStorage.getItem('access_token')
-      if (token) {
-        authHeader = { 'Authorization': `Bearer ${token}` }
-      }
-    }
-
     const response = await fetch(`${this.baseUrl}${path}`, {
       ...options,
       headers: {
         'Content-Type': 'application/json',
-        ...authHeader,
         ...options?.headers,
       },
     })
 
     if (!response.ok) {
-      // Handle token expiration
-      if (response.status === 401 && typeof window !== 'undefined') {
-        // Token might be expired, auth context will handle refresh
-        const event = new CustomEvent('auth:unauthorized')
-        window.dispatchEvent(event)
-      }
       throw new Error(`API error: ${response.statusText}`)
     }
 
@@ -273,26 +257,12 @@ class ApiClient {
       formData.append('remote_path', remotePath)
     }
 
-    // Get auth token if available
-    let headers: Record<string, string> = {}
-    if (typeof window !== 'undefined') {
-      const token = localStorage.getItem('access_token')
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`
-      }
-    }
-
     const response = await fetch(`${this.baseUrl}/upload_file`, {
       method: 'POST',
-      headers,
       body: formData,
     })
 
     if (!response.ok) {
-      if (response.status === 401 && typeof window !== 'undefined') {
-        const event = new CustomEvent('auth:unauthorized')
-        window.dispatchEvent(event)
-      }
       throw new Error(`Upload error: ${response.statusText}`)
     }
 
@@ -301,16 +271,7 @@ class ApiClient {
 
   // SSE for chat streaming
   getEventSource = (sessionId: string): EventSource => {
-    // Get auth token
-    let url = `${this.baseUrl}/stream/${sessionId}`
-    if (typeof window !== 'undefined') {
-      const token = localStorage.getItem('access_token')
-      if (token) {
-        // Add token as query parameter for EventSource
-        url += `?token=${encodeURIComponent(token)}`
-      }
-    }
-    return new EventSource(url)
+    return new EventSource(`${this.baseUrl}/stream/${sessionId}`)
   }
 
   // Deployment
@@ -347,26 +308,12 @@ class ApiClient {
       formData.append('file_path', filePath)
     }
 
-    // Get auth token if available
-    let headers: Record<string, string> = {}
-    if (typeof window !== 'undefined') {
-      const token = localStorage.getItem('access_token')
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`
-      }
-    }
-
     const response = await fetch(`${this.baseUrl}/tasks/${taskId}/knowledge-base/upload`, {
       method: 'POST',
-      headers,
       body: formData,
     })
 
     if (!response.ok) {
-      if (response.status === 401 && typeof window !== 'undefined') {
-        const event = new CustomEvent('auth:unauthorized')
-        window.dispatchEvent(event)
-      }
       throw new Error(`Knowledge Base upload error: ${response.statusText}`)
     }
 
@@ -390,43 +337,25 @@ class ApiClient {
 
 export const api = new ApiClient()
 
-// Helper function to get auth headers
-const getAuthHeaders = (): Record<string, string> => {
-  const headers: Record<string, string> = {}
-  if (typeof window !== 'undefined') {
-    const token = localStorage.getItem('access_token')
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`
-    }
-  }
-  return headers
-}
-
 // Extend api object with additional methods
 Object.assign(api, {
   // Get all messages for a session
   getSessionChats: async (sessionId: string) => {
-    const response = await fetch(`${API_BASE_URL}/api/chats/session/${sessionId}`, {
-      headers: getAuthHeaders()
-    })
+    const response = await fetch(`${API_BASE_URL}/api/chats/session/${sessionId}`)
     if (!response.ok) throw new Error('Failed to get session chats')
     return response.json()
   },
 
   // Get all sessions for a sub-project
   getSubProjectSessions: async (subProjectId: string) => {
-    const response = await fetch(`${API_BASE_URL}/api/sub-projects/${subProjectId}/sessions`, {
-      headers: getAuthHeaders()
-    })
+    const response = await fetch(`${API_BASE_URL}/api/sub-projects/${subProjectId}/sessions`)
     if (!response.ok) throw new Error('Failed to get sub-project sessions')
     return response.json()
   },
   
   // Get hooks for a specific message
   getMessageHooks: async (messageId: string): Promise<{ hooks: ChatHook[] }> => {
-    const response = await fetch(`${API_BASE_URL}/api/messages/${messageId}/hooks`, {
-      headers: getAuthHeaders()
-    })
+    const response = await fetch(`${API_BASE_URL}/api/messages/${messageId}/hooks`)
     if (!response.ok) throw new Error('Failed to fetch message hooks')
     return response.json()
   },
@@ -438,9 +367,7 @@ Object.assign(api, {
     if (params?.sub_project_id) queryParams.append('sub_project_id', params.sub_project_id)
     
     const queryString = queryParams.toString()
-    const response = await fetch(`${API_BASE_URL}/api/approvals/pending${queryString ? `?${queryString}` : ''}`, {
-      headers: getAuthHeaders()
-    })
+    const response = await fetch(`${API_BASE_URL}/api/approvals/pending${queryString ? `?${queryString}` : ''}`)
     if (!response.ok) throw new Error('Failed to get MCP approvals')
     return response.json()
   },
@@ -454,10 +381,7 @@ Object.assign(api, {
   }> => {
     const response = await fetch(`${API_BASE_URL}/api/chats/${chatId}/continue`, {
       method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        ...getAuthHeaders()
-      }
+      headers: { 'Content-Type': 'application/json' }
     })
     if (!response.ok) throw new Error('Failed to continue chat')
     return response.json()
@@ -471,10 +395,7 @@ Object.assign(api, {
   }> => {
     const response = await fetch(`${API_BASE_URL}/api/chats/toggle-auto-continuation`, {
       method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        ...getAuthHeaders()
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_id: sessionId, enabled })
     })
     if (!response.ok) throw new Error('Failed to toggle auto-continuation')
