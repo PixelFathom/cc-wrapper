@@ -25,6 +25,8 @@ export interface Task {
   mcp_servers?: Array<{
     server_type: string
     access_token?: string
+    server_name?: string
+    url?: string
   }>
   deployment_status: 'pending' | 'initializing' | 'deploying' | 'completed' | 'failed'
   deployment_request_id?: string
@@ -190,6 +192,8 @@ class ApiClient {
     mcp_servers?: Array<{
       server_type: string;
       access_token?: string;
+      server_name?: string;
+      url?: string;
     }>
   }): Promise<Task> => {
     return this.request('/tasks', {
