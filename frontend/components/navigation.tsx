@@ -3,14 +3,13 @@
 import Link from 'next/link'
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { CodeIcon, HamburgerMenuIcon, Cross2Icon, ExitIcon, PersonIcon } from '@radix-ui/react-icons'
+import { CodeIcon, HamburgerMenuIcon, Cross2Icon } from '@radix-ui/react-icons'
 import { Button } from './ui/button'
-import { useAuth } from '@/lib/auth'
+import { SignInButton, SignUpButton, SignedIn, SignedOut, UserButton } from '@clerk/nextjs'
 
 export function Navigation() {
   const [scrolled, setScrolled] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
-  const { user, logout } = useAuth()
 
   useEffect(() => {
     const handleScroll = () => {
@@ -50,28 +49,28 @@ export function Navigation() {
 
           {/* Desktop menu */}
           <div className="hidden md:flex items-center space-x-4">
-            {user && (
-              <>
-                <div className="flex items-center space-x-2 bg-card/50 backdrop-blur-sm rounded-lg px-3 py-1.5 border border-border">
-                  <PersonIcon className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm text-muted-foreground">{user.username}</span>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={logout}
-                  className="flex items-center space-x-2 hover:text-red-500 transition-colors"
-                >
-                  <ExitIcon className="h-4 w-4" />
-                  <span>Logout</span>
-                </Button>
-              </>
-            )}
             <div className="flex items-center space-x-1 bg-card/50 backdrop-blur-sm rounded-lg px-3 py-1.5 border border-border">
               <span className="text-muted-foreground text-xs font-mono">v1.0.0</span>
               <span className="text-cyan-500 text-xs">●</span>
               <span className="text-muted-foreground text-xs font-mono">main</span>
             </div>
+            
+            {/* Auth buttons */}
+            <SignedOut>
+              <SignInButton mode="modal">
+                <Button variant="ghost" size="sm">
+                  Sign In
+                </Button>
+              </SignInButton>
+              <SignUpButton mode="modal">
+                <Button size="sm" className="bg-cyan-600 hover:bg-cyan-700">
+                  Sign Up
+                </Button>
+              </SignUpButton>
+            </SignedOut>
+            <SignedIn>
+              <UserButton />
+            </SignedIn>
           </div>
 
           {/* Mobile menu button */}
@@ -99,28 +98,30 @@ export function Navigation() {
               className="md:hidden mt-4 border-t border-border pt-4"
             >
               <div className="flex flex-col space-y-3">
-                {user && (
-                  <>
-                    <div className="flex items-center justify-between px-3 py-2 bg-card/50 rounded-lg border border-border">
-                      <div className="flex items-center space-x-2">
-                        <PersonIcon className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-sm text-muted-foreground">{user.username}</span>
-                      </div>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={logout}
-                      className="flex items-center justify-center space-x-2 hover:text-red-500 transition-colors w-full"
-                    >
-                      <ExitIcon className="h-4 w-4" />
-                      <span>Logout</span>
-                    </Button>
-                  </>
-                )}
                 <div className="text-center py-4">
                   <span className="text-xs text-muted-foreground font-mono">v1.0.0</span>
                 </div>
+                
+                {/* Mobile auth buttons */}
+                <SignedOut>
+                  <div className="flex flex-col space-y-2 px-4">
+                    <SignInButton mode="modal">
+                      <Button variant="ghost" size="sm" className="w-full">
+                        Sign In
+                      </Button>
+                    </SignInButton>
+                    <SignUpButton mode="modal">
+                      <Button size="sm" className="w-full bg-cyan-600 hover:bg-cyan-700">
+                        Sign Up
+                      </Button>
+                    </SignUpButton>
+                  </div>
+                </SignedOut>
+                <SignedIn>
+                  <div className="flex justify-center">
+                    <UserButton />
+                  </div>
+                </SignedIn>
               </div>
             </motion.div>
           )}

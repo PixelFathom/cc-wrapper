@@ -529,7 +529,7 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
             <div className="bg-card rounded-lg border border-border p-6">
               <h4 className="text-sm font-medium mb-4">Upload to Knowledge Base</h4>
               <UploadZone
-                orgName={project?.organization_name || 'default'}
+                orgName={project?.name || 'default'}
                 cwd={`${project?.name}/${task.name}-${task.id}`}
                 onUpload={async (file) => {
                   try {

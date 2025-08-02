@@ -4,7 +4,7 @@ import './globals.css'
 import { Providers } from '@/components/providers'
 import { Navigation } from '@/components/navigation'
 import { ApprovalCenter } from '@/components/approval-center'
-import { AuthLoading } from '@/components/auth-loading'
+import { ClerkProvider } from '@clerk/nextjs'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -19,18 +19,18 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" className="dark scroll-smooth">
-      <body className={`${inter.className} min-h-screen`}>
-        <Providers>
-          <AuthLoading>
+    <ClerkProvider>
+      <html lang="en" className="dark scroll-smooth">
+        <body className={`${inter.className} min-h-screen`}>
+          <Providers>
             <Navigation />
             <main className="pt-20 pb-10">
               {children}
             </main>
             <ApprovalCenter />
-          </AuthLoading>
-        </Providers>
-      </body>
-    </html>
+          </Providers>
+        </body>
+      </html>
+    </ClerkProvider>
   )
 }

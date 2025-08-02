@@ -6,7 +6,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { 
   PaperPlaneIcon, PersonIcon, RocketIcon, UpdateIcon, ChevronRightIcon,
   CodeIcon, GearIcon, CheckCircledIcon, CrossCircledIcon, ClockIcon,
-  FileTextIcon, CubeIcon, ChevronDownIcon, DotFilledIcon, CopyIcon
+  FileTextIcon, CubeIcon, ChevronDownIcon, DotFilledIcon, CopyIcon,
+  ChatBubbleIcon
 } from '@radix-ui/react-icons'
 import { api, ChatHook } from '@/lib/api'
 import { Button } from './ui/button'
@@ -14,6 +15,12 @@ import { Input } from './ui/input'
 import { Textarea } from './ui/textarea'
 import { cn } from '@/lib/utils'
 import { AssistantMessage } from './assistant-message'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu"
 
 interface SubProjectChatProps {
   projectName: string
@@ -46,6 +53,16 @@ interface WebhookLog {
   expanded?: boolean
 }
 
+// Available agents
+const AVAILABLE_AGENTS = [
+  { value: null, label: 'Default', description: 'Standard Claude assistant' },
+  { value: '@agent-product-manager-planner', label: 'Product Manager', description: 'Gather requirements and plan development' },
+  { value: '@agent-docs-generator', label: 'Docs Generator', description: 'Create technical documentation' },
+  { value: '@agent-frontend-component-builder', label: 'Frontend Builder', description: 'Build frontend components' },
+  { value: '@agent-code-review-tester', label: 'Code Reviewer', description: 'Review code and create tests' },
+  { value: '@agent-backend-architect', label: 'Backend Architect', description: 'Design backend systems and APIs' },
+]
+
 export function SubProjectChat({ projectName, taskName, subProjectId, initialSessionId }: SubProjectChatProps) {
   const queryClient = useQueryClient()
   const [messages, setMessages] = useState<Message[]>([])
@@ -67,8 +84,11 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
     return true
   })
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
+  const [selectedAgent, setSelectedAgent] = useState<string | null>(null)
+  const [showAgentDropdown, setShowAgentDropdown] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const agentDropdownRef = useRef<HTMLDivElement>(null)
 
   const cwd = `${projectName}/${taskName}`
   
@@ -80,6 +100,22 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
 
   // Check if this is a new chat (temporary ID)
   const isNewChat = subProjectId.startsWith('new-')
+  
+  // Handle click outside to close agent dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (agentDropdownRef.current && !agentDropdownRef.current.contains(event.target as Node)) {
+        setShowAgentDropdown(false)
+      }
+    }
+    
+    if (showAgentDropdown) {
+      document.addEventListener('mousedown', handleClickOutside)
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside)
+      }
+    }
+  }, [showAgentDropdown])
   
   // Log prop changes for debugging
   useEffect(() => {
@@ -144,6 +180,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
         org_name: 'default',
         cwd,
         bypass_mode: bypassModeEnabled,
+        agent_name: selectedAgent,
       })
       
       console.log('📥 Query response:', {
@@ -1175,6 +1212,54 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                       {input.length}
                     </span>
                   )}
+                  
+                  {/* Agent selector dropdown */}
+                  <div className="relative" ref={agentDropdownRef}>
+                    <Button
+                      type="button"
+                      onClick={() => setShowAgentDropdown(!showAgentDropdown)}
+                      className={cn(
+                        "h-8 px-3 rounded-full text-xs font-medium flex items-center gap-1",
+                        selectedAgent 
+                          ? "bg-purple-500/20 text-purple-400 hover:bg-purple-500/30" 
+                          : "bg-muted/50 text-muted-foreground hover:bg-muted"
+                      )}
+                      size="sm"
+                    >
+                      <ChatBubbleIcon className="h-3 w-3" />
+                      <span className="hidden sm:inline">
+                        {selectedAgent 
+                          ? AVAILABLE_AGENTS.find(a => a.value === selectedAgent)?.label 
+                          : 'Agent'}
+                      </span>
+                      <ChevronDownIcon className={cn(
+                        "h-3 w-3 transition-transform",
+                        showAgentDropdown && "rotate-180"
+                      )} />
+                    </Button>
+                    
+                    {/* Dropdown menu */}
+                    {showAgentDropdown && (
+                      <div className="absolute bottom-full right-0 mb-2 w-64 bg-card/95 backdrop-blur-sm border border-border rounded-lg shadow-xl p-1 z-50">
+                        {AVAILABLE_AGENTS.map((agent) => (
+                          <button
+                            key={agent.value || 'default'}
+                            onClick={() => {
+                              setSelectedAgent(agent.value)
+                              setShowAgentDropdown(false)
+                            }}
+                            className={cn(
+                              "w-full text-left px-3 py-2 rounded-md hover:bg-muted/50 transition-colors",
+                              selectedAgent === agent.value && "bg-muted"
+                            )}
+                          >
+                            <div className="font-medium text-sm">{agent.label}</div>
+                            <div className="text-xs text-muted-foreground">{agent.description}</div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                   
                   {/* Modern circular send button like X */}
                   <Button 

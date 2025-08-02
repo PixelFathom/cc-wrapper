@@ -4,6 +4,8 @@
  * Simplified session management utilities for conversation continuity
  */
 
+import { useState } from 'react';
+
 export interface MessageMetadata {
   next_session_id?: string;
   webhook_session_id?: string;
@@ -189,8 +191,8 @@ export function analyzeConversationState(messages: Message[], currentSessionId: 
  * Hook for managing session ID state in React components
  */
 export function useSessionManagement(initialSessionId?: string) {
-  const [sessionId, setSessionId] = React.useState<string | null>(initialSessionId || null);
-  const [sessionHistory, setSessionHistory] = React.useState<string[]>([]);
+  const [sessionId, setSessionId] = useState<string | null>(initialSessionId || null);
+  const [sessionHistory, setSessionHistory] = useState<string[]>([]);
   
   const updateSession = (newSessionId: string | null) => {
     if (newSessionId && newSessionId !== sessionId) {

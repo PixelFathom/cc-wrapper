@@ -7,7 +7,7 @@ import logging
 from app.core.settings import get_settings
 from app.core.redis import close_redis
 from app.deps import engine
-from app.api import projects, tasks, chat, files, approvals, auto_continuation, auth
+from app.api import projects, tasks, chat, files, approvals, auto_continuation
 from app.api.v1 import webhooks, mcp_approvals
 
 settings = get_settings()
@@ -51,7 +51,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(auth.router, prefix="/api", tags=["auth"])
 app.include_router(projects.router, prefix="/api", tags=["projects"])
 app.include_router(tasks.router, prefix="/api", tags=["tasks"])
 app.include_router(chat.router, prefix="/api", tags=["chat"])

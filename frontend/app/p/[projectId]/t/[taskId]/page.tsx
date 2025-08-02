@@ -1,9 +1,10 @@
 import { TaskDetail } from '@/components/task-detail'
 
-export default function TaskPage({
+export default async function TaskPage({
   params,
 }: {
-  params: { projectId: string; taskId: string }
+  params: Promise<{ projectId: string; taskId: string }>
 }) {
-  return <TaskDetail projectId={params.projectId} taskId={params.taskId} />
+  const { projectId, taskId } = await params
+  return <TaskDetail projectId={projectId} taskId={taskId} />
 }
