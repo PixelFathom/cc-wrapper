@@ -129,7 +129,8 @@ async def handle_query(
             chat.id, 
             request.prompt, 
             webhook_session_id_to_use,  # Use webhook session_id for remote service
-            request.bypass_mode
+            request.bypass_mode,
+            request.agent_name
         )
         
         # Get the session_id and task_id from the remote service response
@@ -685,7 +686,9 @@ async def continue_chat(
             session,
             auto_message.id,
             evaluation["continuation_prompt"],
-            auto_webhook_session_id  # Use webhook session ID for remote service
+            auto_webhook_session_id,  # Use webhook session ID for remote service
+            None,  # bypass_mode
+            None   # agent_name - don't use agent for auto-continuations
         )
         
         return {

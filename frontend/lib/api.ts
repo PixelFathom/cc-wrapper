@@ -218,6 +218,7 @@ class ApiClient {
     cwd: string
     webhook_url?: string
     bypass_mode?: boolean
+    agent_name?: string | null
   }): Promise<{ session_id: string; assistant_response: string; chat_id?: string }> => {
     return this.request('/query', {
       method: 'POST',

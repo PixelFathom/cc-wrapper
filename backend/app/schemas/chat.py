@@ -31,6 +31,7 @@ class QueryRequest(BaseModel):
     cwd: str
     webhook_url: Optional[str] = None
     bypass_mode: Optional[bool] = None
+    agent_name: Optional[str] = None
 
 
 class QueryResponse(BaseModel):

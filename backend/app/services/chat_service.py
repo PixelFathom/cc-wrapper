@@ -34,7 +34,8 @@ class ChatService:
         chat_id: UUID, 
         prompt: str, 
         session_id: Optional[str] = None,
-        bypass_mode: Optional[bool] = None
+        bypass_mode: Optional[bool] = None,
+        agent_name: Optional[str] = None
     ) -> Dict[str, Any]:
         """Send a query to the remote service"""
         start_time = time.time()
@@ -77,6 +78,9 @@ class ChatService:
             # Only include session_id if it's provided (for subsequent messages)
             if session_id:
                 payload["session_id"] = session_id
+            # Only include agent_name if it's provided
+            if agent_name:
+                payload["agent_name"] = agent_name
 
             print(f"payload: {payload}")
             
