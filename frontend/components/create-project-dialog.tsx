@@ -30,9 +30,9 @@ export function CreateProjectDialog({ open, onOpenChange }: CreateProjectDialogP
   const queryClient = useQueryClient()
 
   const validateGitUrl = (url: string): boolean => {
-    // Only accept PixelFathom SSH URLs
-    const pixelFathomSSHPattern = /^git@github\.com:PixelFathom\/[a-zA-Z0-9_-]+\.git$/
-    return pixelFathomSSHPattern.test(url)
+    // Accept any GitHub SSH URL
+    const gitHubSSHPattern = /^git@github\.com:[a-zA-Z0-9_-]+\/[a-zA-Z0-9_.-]+\.git$/
+    return gitHubSSHPattern.test(url)
   }
 
   const createMutation = useMutation({
@@ -47,7 +47,7 @@ export function CreateProjectDialog({ open, onOpenChange }: CreateProjectDialogP
     },
     onError: (error: any) => {
       // Handle validation error from backend
-      if (error.message?.includes('PixelFathom')) {
+      if (error.message?.includes('SSH URL')) {
         setUrlError(error.message)
       } else {
         setUrlError('Failed to create project. Please try again.')
@@ -59,7 +59,7 @@ export function CreateProjectDialog({ open, onOpenChange }: CreateProjectDialogP
     e.preventDefault()
     
     if (!validateGitUrl(repoUrl)) {
-      setUrlError('Only PixelFathom GitHub SSH URLs are allowed (e.g., git@github.com:PixelFathom/repo-name.git)')
+      setUrlError('Only GitHub SSH URLs are allowed (e.g., git@github.com:username/repo-name.git)')
       return
     }
     
@@ -74,7 +74,7 @@ export function CreateProjectDialog({ open, onOpenChange }: CreateProjectDialogP
     // Real-time validation
     if (value && value.length > 10) { // Only validate after user has typed a bit
       if (!validateGitUrl(value)) {
-        setUrlError('Only PixelFathom GitHub SSH URLs are allowed (e.g., git@github.com:PixelFathom/repo-name.git)')
+        setUrlError('Only GitHub SSH URLs are allowed (e.g., git@github.com:username/repo-name.git)')
         setUrlValid(false)
       } else {
         setUrlError('')
@@ -112,10 +112,10 @@ export function CreateProjectDialog({ open, onOpenChange }: CreateProjectDialogP
               <DialogDescription className="font-mono text-sm text-muted-foreground">
                 # Configure your new project repository
               </DialogDescription>
-              <div className="mt-3 p-3 bg-amber-500/10 border border-amber-500/30 rounded-md">
-                <p className="text-xs font-mono text-amber-500 flex items-center">
-                  <span className="mr-2">⚠️</span>
-                  Only PixelFathom organization repositories are accepted
+              <div className="mt-3 p-3 bg-cyan-500/10 border border-cyan-500/30 rounded-md">
+                <p className="text-xs font-mono text-cyan-500 flex items-center">
+                  <span className="mr-2">ℹ️</span>
+                  GitHub SSH URLs from any organization or user are accepted
                 </p>
               </div>
             </DialogHeader>
@@ -132,8 +132,8 @@ export function CreateProjectDialog({ open, onOpenChange }: CreateProjectDialogP
                 <div className="text-xs space-y-1">
                   <p className="text-cyan-400 font-semibold">Repository Requirements:</p>
                   <ul className="space-y-1 text-muted-foreground">
-                    <li>• Must be a PixelFathom organization repository</li>
-                    <li>• SSH format required: <code className="text-cyan-300">git@github.com:PixelFathom/repo.git</code></li>
+                    <li>• Must be a GitHub repository (any organization or user)</li>
+                    <li>• SSH format required: <code className="text-cyan-300">git@github.com:username/repo.git</code></li>
                     <li>• HTTPS URLs are not accepted</li>
                   </ul>
                 </div>
@@ -188,7 +188,7 @@ export function CreateProjectDialog({ open, onOpenChange }: CreateProjectDialogP
                     type="text"
                     value={repoUrl}
                     onChange={handleUrlChange}
-                    placeholder='"git@github.com:PixelFathom/repo-name.git"'
+                    placeholder='"git@github.com:username/repo-name.git"'
                     required
                     className={`bg-card/50 border-muted-foreground/30 focus:border-cyan-500 font-mono text-yellow-400 placeholder:text-muted-foreground/50 pr-10 ${
                       urlValid ? 'border-green-500' : urlError ? 'border-red-500' : ''
@@ -202,8 +202,8 @@ export function CreateProjectDialog({ open, onOpenChange }: CreateProjectDialogP
                   <p className="text-red-400 text-xs mt-1 font-mono">{urlError}</p>
                 )}
                 <div className="mt-2 text-xs text-muted-foreground font-mono">
-                  <p>Example: <code className="text-cyan-400">git@github.com:PixelFathom/cc-wrapper.git</code></p>
-                  <p className="text-amber-400 mt-1">ℹ️ SSH format required for PixelFathom repos</p>
+                  <p>Example: <code className="text-cyan-400">git@github.com:username/repo-name.git</code></p>
+                  <p className="text-cyan-400 mt-1">ℹ️ SSH format required for GitHub repos</p>
                 </div>
               </div>
             </motion.div>

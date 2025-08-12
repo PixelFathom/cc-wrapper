@@ -31,8 +31,8 @@ export function parseGitUrl(url: string): { owner: string; repo: string } | null
 
   // HTTPS format: https://github.com/owner/repo
   try {
-    const url = new URL(cleanUrl)
-    const pathParts = url.pathname.split('/').filter(Boolean)
+    const parsedUrl = new URL(cleanUrl)
+    const pathParts = parsedUrl.pathname.split('/').filter(Boolean)
     if (pathParts.length >= 2) {
       return {
         owner: pathParts[0],

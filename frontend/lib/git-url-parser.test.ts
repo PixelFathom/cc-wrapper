@@ -2,9 +2,9 @@ import { parseGitUrl, getGitHubUrl } from './git-url-parser'
 
 describe('parseGitUrl', () => {
   it('should parse SSH format', () => {
-    const result = parseGitUrl('git@github.com:PixelFathom/cc-wrapper.git')
+    const result = parseGitUrl('git@github.com:username/cc-wrapper.git')
     expect(result).toEqual({
-      owner: 'PixelFathom',
+      owner: 'username',
       repo: 'cc-wrapper'
     })
   })

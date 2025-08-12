@@ -7,7 +7,7 @@ import {
   PaperPlaneIcon, PersonIcon, RocketIcon, UpdateIcon, ChevronRightIcon,
   CodeIcon, GearIcon, CheckCircledIcon, CrossCircledIcon, ClockIcon,
   FileTextIcon, CubeIcon, ChevronDownIcon, DotFilledIcon, CopyIcon,
-  ChatBubbleIcon
+  ChatBubbleIcon, TrashIcon, PlayIcon, PauseIcon, ListBulletIcon
 } from '@radix-ui/react-icons'
 import { api, ChatHook } from '@/lib/api'
 import { Button } from './ui/button'
@@ -40,6 +40,13 @@ interface Message {
   hooks?: ChatHook[]  // Associated webhook logs
   continuationStatus?: 'none' | 'needed' | 'in_progress' | 'completed'
   parentMessageId?: string
+}
+
+interface QueuedMessage {
+  id: string
+  content: string
+  timestamp: string
+  agent?: string | null
 }
 
 interface WebhookLog {
@@ -86,9 +93,27 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null)
   const [showAgentDropdown, setShowAgentDropdown] = useState(false)
+  
+  // Message Queue State
+  const [messageQueue, setMessageQueue] = useState<QueuedMessage[]>([])
+  const [isQueueProcessing, setIsQueueProcessing] = useState(false)
+  const [showQueue, setShowQueue] = useState(false)
+  
+  // Auto-scroll state management
+  const [autoScrollEnabled, setAutoScrollEnabled] = useState(() => {
+    // Load auto-scroll preference from localStorage
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('autoScrollEnabled')
+      return saved !== null ? saved === 'true' : true // Default to true if not set
+    }
+    return true
+  })
+  const [userScrolledUp, setUserScrolledUp] = useState(false)
+  const [showNewMessageIndicator, setShowNewMessageIndicator] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const agentDropdownRef = useRef<HTMLDivElement>(null)
+  const messagesContainerRef = useRef<HTMLDivElement>(null)
 
   const cwd = `${projectName}/${taskName}`
   
@@ -134,6 +159,13 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
       localStorage.setItem('bypassModeEnabled', bypassModeEnabled.toString())
     }
   }, [bypassModeEnabled])
+  
+  // Save auto-scroll preference to localStorage whenever it changes
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('autoScrollEnabled', autoScrollEnabled.toString())
+    }
+  }, [autoScrollEnabled])
   
   // Load initial session messages if provided
   useEffect(() => {
@@ -367,16 +399,55 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
 
   // Removed EventSource - using polling instead for better control
 
-  // Auto-scroll to bottom when messages change
+  // Smart auto-scroll when messages change
   useEffect(() => {
-    // Small delay to ensure DOM is updated before scrolling
+    // Only scroll if conditions are met
     scrollToBottom()
-  }, [messages])
+  }, [messages, autoScrollEnabled])
   
-  // Also scroll when hooks are expanded/collapsed or when waiting for response changes
+  // Smart scroll when hooks are expanded/collapsed or when waiting for response changes
   useEffect(() => {
-    scrollToBottom()
-  }, [expandedHooks, showAllHooks, isWaitingForResponse])
+    // Only auto-scroll for hook changes if user hasn't scrolled up
+    if (!userScrolledUp) {
+      scrollToBottom()
+    }
+  }, [expandedHooks, showAllHooks, isWaitingForResponse, userScrolledUp, autoScrollEnabled])
+  
+  // Add scroll event listener to detect user scroll behavior
+  useEffect(() => {
+    const container = messagesContainerRef.current
+    if (!container) return
+    
+    let scrollTimeout: NodeJS.Timeout
+    const debouncedHandleScroll = () => {
+      clearTimeout(scrollTimeout)
+      scrollTimeout = setTimeout(handleScroll, 50)
+    }
+    
+    container.addEventListener('scroll', debouncedHandleScroll, { passive: true })
+    
+    return () => {
+      container.removeEventListener('scroll', debouncedHandleScroll)
+      clearTimeout(scrollTimeout)
+    }
+  }, [userScrolledUp])
+  
+  // Add keyboard shortcut for manual scroll to bottom
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Ctrl/Cmd + End to scroll to bottom and re-enable auto-scroll
+      if ((event.ctrlKey || event.metaKey) && event.key === 'End') {
+        event.preventDefault()
+        scrollToBottomManually()
+      }
+    }
+    
+    document.addEventListener('keydown', handleKeyDown)
+    
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [])
   
   // Auto-continuation logic
   useEffect(() => {
@@ -465,6 +536,15 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
     }
   }, [messages, autoContinuationEnabled, sessionId])
 
+  // Auto-show queue when messages are added
+  useEffect(() => {
+    if (messageQueue.length > 0 && !showQueue) {
+      setShowQueue(true)
+    }
+  }, [messageQueue.length])
+
+  // Moved to after processNextInQueue definition to avoid temporal dead zone
+
   const loadChatHistory = async (loadSessionId: string) => {
     setLoadingHistory(true)
     try {
@@ -485,8 +565,9 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
         setChatId(historyMessages[0].id)
       }
       
-      // Scroll to bottom after loading history
-      scrollToBottom('auto')
+      // Always scroll to bottom after loading history (this is user-initiated)
+      setUserScrolledUp(false)
+      scrollToBottom('auto', true)
     } catch (error) {
       console.error('Failed to load chat history:', error)
     } finally {
@@ -501,11 +582,12 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
     setShowSessions(false)
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent, forceQueue: boolean = false) => {
     e.preventDefault()
-    if (!input.trim() || isWaitingForResponse) return
+    if (!input.trim()) return
 
     const userInput = input
+    const agentToUse = selectedAgent
     setInput('')
     
     // Reset textarea height after clearing input
@@ -514,77 +596,14 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
       textareaRef.current.style.height = '24px' // Reset to min-height
     }
     
-    // CRITICAL FIX: Robust session ID resolution for conversation continuity
-    // The key insight: for new messages in existing conversations, we should ALWAYS use 
-    // the current UI session ID to maintain conversation continuity in the UI.
-    // The backend will handle webhook session ID mapping internally.
-    const resolveSessionId = () => {
-      // If we have an active session, always use it for new messages
-      // This ensures conversation continuity in the UI
-      if (sessionId) {
-        console.log('🔒 PRESERVING session ID for conversation continuity:', sessionId)
-        return sessionId
-      }
-      
-      console.log('🆕 No session_id available - this is the first message in a new conversation')
-      return undefined
+    // If we're waiting for a response or force queue, add to queue
+    if (isWaitingForResponse || isQueueProcessing || forceQueue) {
+      addToQueue(userInput, agentToUse)
+      return
     }
-    
-    let sessionIdToUse = resolveSessionId()
-    
-    // Additional safety check: if we have messages but no sessionId, something is wrong
-    if (!sessionIdToUse && messages.length > 0) {
-      console.error('❌ CRITICAL: We have messages but no session ID! This should not happen.')
-      console.log('Messages:', messages.map(m => ({ id: m.id, role: m.role, sessionId: m.sessionId })))
-      
-      // Try to recover by using the session ID from the last message
-      const lastMessage = messages[messages.length - 1]
-      if (lastMessage?.sessionId) {
-        sessionIdToUse = lastMessage.sessionId
-        setSessionId(sessionIdToUse)
-        console.log('🔧 RECOVERED session ID from last message:', sessionIdToUse)
-      }
-    }
-    
-    console.log('📨 Submitting message:', {
-      session_id: sessionIdToUse || 'none (first message)',
-      messageCount: messages.length,
-      hasLastAssistant: !!messages.find(m => m.role === 'assistant')
-    })
-    
-    // Add temporary user message for immediate feedback
-    const tempUserMessage: Message = {
-      id: `temp-user-${Date.now()}`,
-      role: 'user',
-      content: { text: userInput },
-      timestamp: new Date().toISOString(),
-      sessionId: sessionIdToUse || 'temp',
-    }
-    
-    setMessages(prev => [...prev, tempUserMessage])
-    
-    // Add temporary processing assistant message
-    const tempAssistantMessage: Message = {
-      id: `temp-assistant-${Date.now()}`,
-      role: 'assistant',
-      content: { text: '', metadata: { status: 'processing' } },
-      timestamp: new Date().toISOString(),
-      sessionId: sessionIdToUse || 'temp',
-      isProcessing: true,
-    }
-    
-    setMessages(prev => [...prev, tempAssistantMessage])
-    
-    // Send mutation with current sessionId (null for first message)
-    sendMutation.mutate({
-      prompt: userInput,
-      session_id: sessionIdToUse || undefined,
-    })
-    
-    // Scroll to bottom after sending message with a slight delay
-    setTimeout(() => {
-      scrollToBottom()
-    }, 100)
+
+    // Otherwise, process immediately
+    processMessage(userInput, agentToUse)
   }
 
   const formatTimestamp = (timestamp: string) => {
@@ -597,8 +616,49 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
     })
   }
 
-  // Scroll to bottom helper function
-  const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
+  // Enhanced scroll detection and management
+  const isNearBottom = () => {
+    if (!messagesContainerRef.current) return true
+    const container = messagesContainerRef.current
+    const threshold = 100 // pixels from bottom
+    return container.scrollTop >= container.scrollHeight - container.clientHeight - threshold
+  }
+  
+  const handleScroll = () => {
+    if (!messagesContainerRef.current) return
+    
+    const nearBottom = isNearBottom()
+    
+    // If user scrolled up manually, disable auto-scroll and show indicator
+    if (!nearBottom && !userScrolledUp) {
+      setUserScrolledUp(true)
+      setShowNewMessageIndicator(false)
+    }
+    
+    // If user scrolled back to bottom, re-enable auto-scroll behavior
+    if (nearBottom && userScrolledUp) {
+      setUserScrolledUp(false)
+      setShowNewMessageIndicator(false)
+    }
+  }
+  
+  // Enhanced scroll to bottom helper function
+  const scrollToBottom = (behavior: ScrollBehavior = 'smooth', force: boolean = false) => {
+    // Only scroll if auto-scroll is enabled or if it's forced (e.g., user action)
+    if (!autoScrollEnabled && !force) {
+      // Show new message indicator if user has scrolled up
+      if (userScrolledUp) {
+        setShowNewMessageIndicator(true)
+      }
+      return
+    }
+    
+    // Don't auto-scroll if user has manually scrolled up (unless forced)
+    if (userScrolledUp && !force) {
+      setShowNewMessageIndicator(true)
+      return
+    }
+    
     setTimeout(() => {
       if (messagesEndRef.current) {
         messagesEndRef.current.scrollIntoView({ behavior, block: 'end' })
@@ -607,8 +667,16 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
         if (messagesContainer) {
           messagesContainer.scrollTop = messagesContainer.scrollHeight
         }
+        // Clear the new message indicator
+        setShowNewMessageIndicator(false)
       }
     }, 100)
+  }
+  
+  // Manual scroll to bottom (always forces scroll and re-enables auto-scroll)
+  const scrollToBottomManually = () => {
+    setUserScrolledUp(false)
+    scrollToBottom('smooth', true)
   }
 
   const toggleHookExpansion = (hookId: string) => {
@@ -667,6 +735,135 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
     }
   }
 
+  // Queue Management Functions
+  const addToQueue = (content: string, agent?: string | null) => {
+    const queuedMessage: QueuedMessage = {
+      id: `queue-${Date.now()}-${Math.random()}`,
+      content: content.trim(),
+      timestamp: new Date().toISOString(),
+      agent
+    }
+    setMessageQueue(prev => [...prev, queuedMessage])
+    console.log('📋 Added message to queue:', { id: queuedMessage.id, content: content.substring(0, 50) + '...' })
+  }
+
+  const removeFromQueue = (messageId: string) => {
+    setMessageQueue(prev => prev.filter(msg => msg.id !== messageId))
+    console.log('🗑️ Removed message from queue:', messageId)
+  }
+
+  const clearQueue = () => {
+    setMessageQueue([])
+    console.log('🧹 Cleared message queue')
+  }
+
+  const processMessage = useCallback(async (userInput: string, agent?: string | null) => {
+    const resolveSessionId = () => {
+      if (sessionId) {
+        console.log('🔒 PRESERVING session ID for conversation continuity:', sessionId)
+        return sessionId
+      }
+      console.log('🆕 No session_id available - this is the first message in a new conversation')
+      return undefined
+    }
+    
+    let sessionIdToUse = resolveSessionId()
+    
+    // Additional safety check: if we have messages but no sessionId, something is wrong
+    if (!sessionIdToUse && messages.length > 0) {
+      console.error('❌ CRITICAL: We have messages but no session ID! This should not happen.')
+      console.log('Messages:', messages.map(m => ({ id: m.id, role: m.role, sessionId: m.sessionId })))
+      
+      // Try to recover by using the session ID from the last message
+      const lastMessage = messages[messages.length - 1]
+      if (lastMessage?.sessionId) {
+        sessionIdToUse = lastMessage.sessionId
+        setSessionId(sessionIdToUse)
+        console.log('🔧 RECOVERED session ID from last message:', sessionIdToUse)
+      }
+    }
+    
+    console.log('📨 Processing message:', {
+      session_id: sessionIdToUse || 'none (first message)',
+      messageCount: messages.length,
+      hasLastAssistant: !!messages.find(m => m.role === 'assistant'),
+      agent: agent || 'default'
+    })
+    
+    // Add temporary user message for immediate feedback
+    const tempUserMessage: Message = {
+      id: `temp-user-${Date.now()}`,
+      role: 'user',
+      content: { text: userInput },
+      timestamp: new Date().toISOString(),
+      sessionId: sessionIdToUse || 'temp',
+    }
+    
+    setMessages(prev => [...prev, tempUserMessage])
+    
+    // Add temporary processing assistant message
+    const tempAssistantMessage: Message = {
+      id: `temp-assistant-${Date.now()}`,
+      role: 'assistant',
+      content: { text: '', metadata: { status: 'processing' } },
+      timestamp: new Date().toISOString(),
+      sessionId: sessionIdToUse || 'temp',
+      isProcessing: true,
+    }
+    
+    setMessages(prev => [...prev, tempAssistantMessage])
+    
+    // Send mutation with current sessionId (null for first message)
+    sendMutation.mutate({
+      prompt: userInput,
+      session_id: sessionIdToUse || undefined,
+    })
+    
+    // Always scroll to bottom after sending message (force scroll and reset user scroll state)
+    setUserScrolledUp(false)
+    setTimeout(() => {
+      scrollToBottom('smooth', true)
+    }, 100)
+  }, [sessionId, messages, sendMutation, setMessages, setSessionId, scrollToBottom])
+
+  const processNextInQueue = useCallback(async () => {
+    if (messageQueue.length === 0 || isWaitingForResponse || isQueueProcessing) {
+      return
+    }
+
+    const nextMessage = messageQueue[0]
+    if (!nextMessage) return
+
+    setIsQueueProcessing(true)
+    console.log('🎯 Processing next message from queue:', nextMessage.id)
+
+    // Remove the message from queue
+    setMessageQueue(prev => prev.slice(1))
+
+    // Process the message using the same logic as handleSubmit
+    await processMessage(nextMessage.content, nextMessage.agent)
+    
+    setIsQueueProcessing(false)
+  }, [messageQueue, isWaitingForResponse, isQueueProcessing, processMessage])
+
+  // Automatic Queue Processing - Process next message when current completes
+  useEffect(() => {
+    // Only process queue when:
+    // 1. Not currently waiting for a response
+    // 2. Not already processing queue
+    // 3. There are messages in the queue
+    // 4. Have a session (not first message)
+    if (!isWaitingForResponse && !isQueueProcessing && messageQueue.length > 0 && sessionId) {
+      console.log('🚀 Auto-processing next queued message. Queue length:', messageQueue.length)
+      // Add a small delay to ensure UI updates are complete
+      const timeoutId = setTimeout(() => {
+        processNextInQueue()
+      }, 500)
+      
+      return () => clearTimeout(timeoutId)
+    }
+  }, [isWaitingForResponse, isQueueProcessing, messageQueue.length, sessionId, processNextInQueue])
+
   return (
     <div className="flex flex-col h-[calc(100vh-8rem)] sm:h-[calc(100vh-10rem)] md:h-[calc(100vh-12rem)]">
       <div className="flex-1 overflow-hidden flex flex-col gradient-border-neon rounded-lg relative bg-black/30">
@@ -699,6 +896,32 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
             </div>
           </div>
           <div className="flex items-center space-x-1 sm:space-x-2">
+            {/* Auto-scroll toggle */}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                const newState = !autoScrollEnabled
+                setAutoScrollEnabled(newState)
+                // If enabling auto-scroll and user is not at bottom, scroll down
+                if (newState && userScrolledUp) {
+                  scrollToBottomManually()
+                }
+              }}
+              className={cn(
+                "text-xs font-mono h-6 px-1 sm:px-2 flex items-center gap-1 transition-all duration-200",
+                autoScrollEnabled
+                  ? "text-green-500 hover:text-green-400 hover:bg-green-500/10"
+                  : "text-gray-500 hover:text-gray-400 hover:bg-gray-500/10"
+              )}
+              title={autoScrollEnabled ? 'Auto-scroll enabled - will scroll to new messages' : 'Auto-scroll disabled - stay at current position'}
+            >
+              <ChevronDownIcon className={cn(
+                "h-3 w-3 transition-all duration-200",
+                autoScrollEnabled ? "text-green-500 rotate-0" : "text-gray-500 rotate-180"
+              )} />
+              <span className="hidden sm:inline">Auto-scroll</span>
+            </Button>
             {/* Bypass Mode toggle - Always visible */}
             <Button
               variant="ghost"
@@ -830,7 +1053,10 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
         )}
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto bg-card/30 p-2 sm:p-4 space-y-3 sm:space-y-4 font-mono text-xs sm:text-sm relative">
+        <div 
+          ref={messagesContainerRef}
+          className="flex-1 overflow-y-auto bg-card/30 p-2 sm:p-4 space-y-3 sm:space-y-4 font-mono text-xs sm:text-sm relative"
+        >
           {loadingHistory && (
             <div className="absolute inset-0 bg-card/80 flex items-center justify-center">
               <div className="flex flex-col items-center gap-2">
@@ -1142,7 +1368,179 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
             })}
           </AnimatePresence>
           <div ref={messagesEndRef} style={{ height: '1px' }} />
+          
+          {/* New Message Indicator - appears when auto-scroll is disabled and there are new messages */}
+          <AnimatePresence>
+            {showNewMessageIndicator && !autoScrollEnabled && (
+              <motion.div
+                initial={{ opacity: 0, y: 20, scale: 0.8 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 20, scale: 0.8 }}
+                transition={{ type: "spring", damping: 20, stiffness: 300 }}
+                className="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-10"
+              >
+                <button
+                  onClick={scrollToBottomManually}
+                  className="flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-500 text-white px-4 py-2 rounded-full shadow-lg hover:shadow-xl transition-all duration-200 backdrop-blur-sm border border-cyan-400/30 text-sm font-medium group"
+                >
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
+                    <span>New messages below</span>
+                    <ChevronDownIcon className="h-4 w-4 group-hover:translate-y-0.5 transition-transform duration-200" />
+                  </div>
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
+
+        {/* Message Queue Display */}
+        <AnimatePresence>
+          {messageQueue.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.3, ease: 'easeInOut' }}
+              className="border-t border-border/30 bg-gradient-to-r from-amber-500/10 to-orange-500/10 backdrop-blur-sm"
+            >
+              <div className="px-3 sm:px-4 py-2">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <motion.div
+                      animate={{ rotate: isQueueProcessing ? 360 : 0 }}
+                      transition={{ duration: 1, repeat: isQueueProcessing ? Infinity : 0, ease: "linear" }}
+                    >
+                      <ListBulletIcon className="h-4 w-4 text-amber-500" />
+                    </motion.div>
+                    <span className="text-sm font-medium text-amber-500 flex items-center gap-1">
+                      Queue ({messageQueue.length})
+                      {isQueueProcessing && (
+                        <motion.span
+                          initial={{ scale: 0.8, opacity: 0.7 }}
+                          animate={{ scale: 1, opacity: 1 }}
+                          transition={{ duration: 0.5, repeat: Infinity, repeatType: "reverse" }}
+                          className="text-xs"
+                        >
+                          Processing...
+                        </motion.span>
+                      )}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowQueue(!showQueue)}
+                      className="text-xs h-6 px-2 text-amber-500 hover:text-amber-400 hover:bg-amber-500/10"
+                    >
+                      <ChevronDownIcon className={cn(
+                        "h-3 w-3 transition-transform",
+                        showQueue && "rotate-180"
+                      )} />
+                      <span className="hidden sm:inline ml-1">{showQueue ? 'Hide' : 'Show'}</span>
+                    </Button>
+                    {messageQueue.length > 0 && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={clearQueue}
+                        className="text-xs h-6 px-2 text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                      >
+                        <TrashIcon className="h-3 w-3" />
+                        <span className="hidden sm:inline ml-1">Clear</span>
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                
+                {/* Queue Messages */}
+                <AnimatePresence>
+                  {showQueue && messageQueue.length > 0 && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.2 }}
+                      className="space-y-2 max-h-32 overflow-y-auto pr-2"
+                      style={{ scrollbarWidth: 'thin' }}
+                    >
+                      {messageQueue.map((queuedMsg, index) => (
+                        <motion.div
+                          key={queuedMsg.id}
+                          initial={{ opacity: 0, x: -20, scale: 0.95 }}
+                          animate={{ opacity: 1, x: 0, scale: 1 }}
+                          exit={{ opacity: 0, x: 20, scale: 0.95 }}
+                          transition={{ duration: 0.2, delay: index * 0.05 }}
+                          className={cn(
+                            "flex items-start gap-2 p-2 rounded-lg border transition-all duration-200",
+                            index === 0 && isQueueProcessing
+                              ? "bg-amber-500/20 border-amber-500/30 animate-pulse"
+                              : "bg-card/50 border-border/30 hover:bg-card/70"
+                          )}
+                        >
+                          <div className="flex-shrink-0 w-6 h-6 rounded-full bg-amber-500/20 flex items-center justify-center">
+                            {index === 0 && isQueueProcessing ? (
+                              <UpdateIcon className="h-3 w-3 text-amber-500 animate-spin" />
+                            ) : (
+                              <span className="text-xs font-mono text-amber-500">{index + 1}</span>
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between mb-1">
+                              <div className="flex items-center gap-2">
+                                {queuedMsg.agent && (
+                                  <span className="text-xs bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded">
+                                    {AVAILABLE_AGENTS.find(a => a.value === queuedMsg.agent)?.label || 'Agent'}
+                                  </span>
+                                )}
+                                <span className="text-xs text-muted-foreground">
+                                  {new Date(queuedMsg.timestamp).toLocaleTimeString('en-US', { 
+                                    hour: 'numeric', 
+                                    minute: '2-digit',
+                                    hour12: true 
+                                  })}
+                                </span>
+                              </div>
+                              <button
+                                onClick={() => removeFromQueue(queuedMsg.id)}
+                                className="text-red-400 hover:text-red-300 p-0.5 rounded hover:bg-red-500/10 transition-colors"
+                              >
+                                <TrashIcon className="h-3 w-3" />
+                              </button>
+                            </div>
+                            <p className="text-sm text-foreground/90 leading-relaxed" style={{ 
+                              display: '-webkit-box',
+                              WebkitLineClamp: 2,
+                              WebkitBoxOrient: 'vertical',
+                              overflow: 'hidden'
+                            }}>
+                              {queuedMsg.content}
+                            </p>
+                            {index === 0 && (isWaitingForResponse || isQueueProcessing) && (
+                              <div className="mt-1 text-xs text-amber-500 flex items-center gap-1">
+                                <ClockIcon className="h-3 w-3" />
+                                {isQueueProcessing ? 'Processing now...' : 'Next in line'}
+                              </div>
+                            )}
+                          </div>
+                        </motion.div>
+                      ))}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+                
+                {/* Queue Status Bar */}
+                {messageQueue.length > 0 && !showQueue && (
+                  <div className="text-xs text-amber-500/70 text-center mt-1">
+                    {messageQueue.length} message{messageQueue.length !== 1 ? 's' : ''} queued
+                    {isWaitingForResponse && ' • Processing current message...'}
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Modern X-style Input Area */}
         <div className={cn(
@@ -1163,14 +1561,25 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                   }
                 }}
                 onKeyDown={(e) => {
-                  // Submit on Enter (without modifiers)
-                  if (e.key === 'Enter' && !e.shiftKey && !isWaitingForResponse) {
+                  // Submit on Enter (without modifiers) - will queue if processing
+                  if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault()
                     handleSubmit(e as any)
                   }
+                  // Ctrl/Cmd + Enter to force queue
+                  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                    e.preventDefault()
+                    handleSubmit(e as any, true)
+                  }
                 }}
-                placeholder={isWaitingForResponse ? "Waiting for response..." : "What's happening with your code?"}
-                disabled={sendMutation.isPending || isWaitingForResponse}
+                placeholder={
+                  isWaitingForResponse || isQueueProcessing
+                    ? (messageQueue.length > 0 
+                        ? `Message will be queued (${messageQueue.length + 1} total)...` 
+                        : "Processing... Your message will be queued")
+                    : "What's happening with your code?"
+                }
+                disabled={sendMutation.isPending && messageQueue.length === 0}
                 className="w-full bg-transparent border-0 focus:ring-0 resize-none 
                   placeholder:text-muted-foreground/50 text-base leading-relaxed
                   font-sans min-h-[24px] max-h-[200px] p-0 pr-12"
@@ -1219,82 +1628,222 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                       type="button"
                       onClick={() => setShowAgentDropdown(!showAgentDropdown)}
                       className={cn(
-                        "h-8 px-3 rounded-full text-xs font-medium flex items-center gap-1",
+                        "h-8 sm:h-9 px-2 sm:px-3 rounded-full text-xs font-medium flex items-center gap-1 min-w-0",
                         selectedAgent 
                           ? "bg-purple-500/20 text-purple-400 hover:bg-purple-500/30" 
                           : "bg-muted/50 text-muted-foreground hover:bg-muted"
                       )}
                       size="sm"
                     >
-                      <ChatBubbleIcon className="h-3 w-3" />
-                      <span className="hidden sm:inline">
+                      <ChatBubbleIcon className="h-3 w-3 flex-shrink-0" />
+                      <span className="truncate max-w-[80px] sm:max-w-none">
                         {selectedAgent 
                           ? AVAILABLE_AGENTS.find(a => a.value === selectedAgent)?.label 
                           : 'Agent'}
                       </span>
                       <ChevronDownIcon className={cn(
-                        "h-3 w-3 transition-transform",
+                        "h-3 w-3 transition-transform flex-shrink-0",
                         showAgentDropdown && "rotate-180"
                       )} />
                     </Button>
                     
                     {/* Dropdown menu */}
                     {showAgentDropdown && (
-                      <div className="absolute bottom-full right-0 mb-2 w-64 bg-card/95 backdrop-blur-sm border border-border rounded-lg shadow-xl p-1 z-50">
-                        {AVAILABLE_AGENTS.map((agent) => (
-                          <button
-                            key={agent.value || 'default'}
-                            onClick={() => {
-                              setSelectedAgent(agent.value)
-                              setShowAgentDropdown(false)
-                            }}
-                            className={cn(
-                              "w-full text-left px-3 py-2 rounded-md hover:bg-muted/50 transition-colors",
-                              selectedAgent === agent.value && "bg-muted"
-                            )}
-                          >
-                            <div className="font-medium text-sm">{agent.label}</div>
-                            <div className="text-xs text-muted-foreground">{agent.description}</div>
-                          </button>
-                        ))}
+                      <div className="fixed inset-x-4 bottom-20 sm:absolute sm:bottom-full sm:right-0 sm:left-auto sm:inset-x-auto mb-2 
+                        w-auto sm:w-96 bg-card backdrop-blur-xl border border-border rounded-2xl shadow-2xl p-3 z-50 
+                        max-h-[75vh] sm:max-h-[70vh] overflow-y-auto">
+                        
+                        {/* Header */}
+                        <div className="mb-3 px-1">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <h3 className="text-base font-bold text-foreground flex items-center gap-2">
+                                <span className="w-2 h-2 bg-cyan-500 rounded-full animate-pulse"></span>
+                                AI Agents
+                              </h3>
+                              <p className="text-xs text-muted-foreground mt-0.5">Choose your coding assistant</p>
+                            </div>
+                            <div className="text-xs text-muted-foreground bg-muted/80 px-2 py-1 rounded-md">
+                              {AVAILABLE_AGENTS.length} available
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Agent Grid */}
+                        <div className="space-y-2">
+                          {AVAILABLE_AGENTS.map((agent, index) => (
+                            <button
+                              key={agent.value || 'default'}
+                              onClick={() => {
+                                setSelectedAgent(agent.value)
+                                setShowAgentDropdown(false)
+                              }}
+                              className={cn(
+                                "w-full text-left p-4 rounded-xl transition-all duration-300 touch-manipulation group",
+                                "border-2 border-transparent hover:border-cyan-500/20 hover:shadow-lg",
+                                "focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/30",
+                                selectedAgent === agent.value 
+                                  ? "bg-gradient-to-r from-purple-500/20 to-cyan-500/20 border-purple-500/40 shadow-md" 
+                                  : "bg-muted/60 hover:bg-muted/80"
+                              )}
+                            >
+                              <div className="flex items-start gap-4">
+                                {/* Agent Icon */}
+                                <div className={cn(
+                                  "w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-all",
+                                  selectedAgent === agent.value 
+                                    ? "bg-gradient-to-br from-purple-500/60 to-cyan-500/60 text-white shadow-lg" 
+                                    : "bg-muted text-muted-foreground group-hover:bg-cyan-500/30 group-hover:text-cyan-300"
+                                )}>
+                                  <ChatBubbleIcon className="h-5 w-5" />
+                                </div>
+                                
+                                {/* Agent Info */}
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center justify-between mb-1">
+                                    <h4 className="font-bold text-sm text-foreground truncate">{agent.label}</h4>
+                                    {selectedAgent === agent.value && (
+                                      <div className="flex-shrink-0 w-6 h-6 rounded-full bg-gradient-to-r from-purple-500 to-cyan-500 flex items-center justify-center ml-2">
+                                        <svg className="w-3.5 h-3.5 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                        </svg>
+                                      </div>
+                                    )}
+                                  </div>
+                                  <p className="text-xs text-muted-foreground leading-relaxed group-hover:text-muted-foreground/80">
+                                    {agent.description}
+                                  </p>
+                                  {/* Quick tags for developer context */}
+                                  <div className="mt-2 flex flex-wrap gap-1">
+                                    {agent.value === null && (
+                                      <span className="text-xs bg-gray-500/20 text-gray-300 px-2 py-0.5 rounded-md">General</span>
+                                    )}
+                                    {agent.value === '@agent-frontend-component-builder' && (
+                                      <>
+                                        <span className="text-xs bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded-md">React</span>
+                                        <span className="text-xs bg-green-500/20 text-green-300 px-2 py-0.5 rounded-md">UI/UX</span>
+                                      </>
+                                    )}
+                                    {agent.value === '@agent-backend-architect' && (
+                                      <>
+                                        <span className="text-xs bg-orange-500/20 text-orange-300 px-2 py-0.5 rounded-md">API</span>
+                                        <span className="text-xs bg-red-500/20 text-red-300 px-2 py-0.5 rounded-md">Database</span>
+                                      </>
+                                    )}
+                                    {agent.value === '@agent-code-review-tester' && (
+                                      <>
+                                        <span className="text-xs bg-yellow-500/20 text-yellow-300 px-2 py-0.5 rounded-md">Testing</span>
+                                        <span className="text-xs bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-md">Quality</span>
+                                      </>
+                                    )}
+                                    {agent.value === '@agent-docs-generator' && (
+                                      <span className="text-xs bg-teal-500/20 text-teal-300 px-2 py-0.5 rounded-md">Documentation</span>
+                                    )}
+                                    {agent.value === '@agent-product-manager-planner' && (
+                                      <>
+                                        <span className="text-xs bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded-md">Planning</span>
+                                        <span className="text-xs bg-pink-500/20 text-pink-300 px-2 py-0.5 rounded-md">Strategy</span>
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                        
+                        {/* Footer */}
+                        <div className="mt-3 pt-3 border-t border-border/30">
+                          <p className="text-xs text-muted-foreground text-center">
+                            💡 Each agent specializes in different aspects of development
+                          </p>
+                        </div>
                       </div>
                     )}
                   </div>
                   
-                  {/* Modern circular send button like X */}
-                  <Button 
-                    type="submit" 
-                    disabled={sendMutation.isPending || !input.trim() || isWaitingForResponse}
-                    className={cn(
-                      "rounded-full h-8 w-8 sm:h-9 sm:w-auto sm:px-4 transition-all duration-200",
-                      "font-medium text-sm",
-                      input.trim() && !isWaitingForResponse
-                        ? "bg-cyan-500 hover:bg-cyan-600 text-black" 
-                        : "bg-cyan-500/20 text-cyan-500/50 cursor-not-allowed"
+                  {/* Send/Queue Button */}
+                  <div className="flex items-center gap-1">
+                    {/* Queue Button - visible when processing or when user might want to force queue */}
+                    {(isWaitingForResponse || isQueueProcessing || messageQueue.length > 0) && (
+                      <Button 
+                        type="button"
+                        onClick={(e) => handleSubmit(e as any, true)}
+                        disabled={!input.trim()}
+                        className={cn(
+                          "rounded-full h-9 w-9 sm:h-9 sm:w-auto sm:px-3 transition-all duration-200 touch-manipulation",
+                          "font-medium text-sm",
+                          input.trim()
+                            ? "bg-amber-500 hover:bg-amber-600 text-black" 
+                            : "bg-amber-500/20 text-amber-500/50 cursor-not-allowed"
+                        )}
+                        size="sm"
+                        title={`Add to queue (${messageQueue.length + 1} total) - Ctrl+Enter`}
+                      >
+                        <ListBulletIcon className="h-4 w-4 sm:hidden" />
+                        <span className="hidden sm:inline">Queue</span>
+                      </Button>
                     )}
-                    size="sm"
-                  >
-                    {sendMutation.isPending || isWaitingForResponse ? (
-                      <UpdateIcon className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <>
-                        <PaperPlaneIcon className="h-4 w-4 sm:hidden" />
-                        <span className="hidden sm:inline">Send</span>
-                      </>
-                    )}
-                  </Button>
+                    
+                    {/* Main Send Button */}
+                    <Button 
+                      type="submit" 
+                      disabled={!input.trim()}
+                      className={cn(
+                        "rounded-full h-9 w-9 sm:h-9 sm:w-auto sm:px-4 transition-all duration-200 touch-manipulation",
+                        "font-medium text-sm",
+                        input.trim()
+                          ? (isWaitingForResponse || isQueueProcessing
+                              ? "bg-amber-500 hover:bg-amber-600 text-black" // Will queue
+                              : "bg-cyan-500 hover:bg-cyan-600 text-black") // Will send immediately
+                          : "bg-cyan-500/20 text-cyan-500/50 cursor-not-allowed"
+                      )}
+                      size="sm"
+                      title={
+                        isWaitingForResponse || isQueueProcessing
+                          ? "Will add to queue - Press Enter"
+                          : "Send message - Press Enter"
+                      }
+                    >
+                      {sendMutation.isPending && messageQueue.length === 0 ? (
+                        <UpdateIcon className="h-4 w-4 animate-spin" />
+                      ) : isWaitingForResponse || isQueueProcessing ? (
+                        <>
+                          <ListBulletIcon className="h-4 w-4 sm:hidden" />
+                          <span className="hidden sm:inline">Queue</span>
+                        </>
+                      ) : (
+                        <>
+                          <PaperPlaneIcon className="h-4 w-4 sm:hidden" />
+                          <span className="hidden sm:inline">Send</span>
+                        </>
+                      )}
+                    </Button>
+                  </div>
                 </div>
               </div>
               
               {/* Hint text / Status indicator */}
               <div className="mt-2 text-xs text-muted-foreground/50">
-                {isWaitingForResponse ? (
-                  <div className="flex items-center gap-2 text-cyan-500">
+                {isWaitingForResponse || isQueueProcessing ? (
+                  <div className="flex items-center gap-2 text-amber-500">
                     <UpdateIcon className="h-3 w-3 animate-spin" />
-                    Processing your message... Please wait before sending another.
+                    {isQueueProcessing 
+                      ? 'Processing queued message...'
+                      : 'Processing current message...'}
+                    {messageQueue.length > 0 && (
+                      <span className="text-amber-400">
+                        • {messageQueue.length} message{messageQueue.length !== 1 ? 's' : ''} in queue
+                      </span>
+                    )}
+                  </div>
+                ) : messageQueue.length > 0 ? (
+                  <div className="flex items-center gap-2 text-amber-500">
+                    <ListBulletIcon className="h-3 w-3" />
+                    {messageQueue.length} message{messageQueue.length !== 1 ? 's' : ''} queued • Will process automatically
                   </div>
                 ) : (
-                  <div>Press Enter to send • Shift+Enter for new line</div>
+                  <div>Press Enter to send • Shift+Enter for new line • Ctrl+Enter to queue</div>
                 )}
               </div>
             </div>

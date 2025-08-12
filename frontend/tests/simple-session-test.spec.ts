@@ -60,7 +60,7 @@ test.describe('Session ID Preservation', () => {
         body: JSON.stringify({
           org_name: 'default',
           cwd: 'test-project/test-task',
-          repo_url: 'git@github.com:PixelFathom/test.git'
+          repo_url: 'git@github.com:username/test.git'
         })
       });
       
