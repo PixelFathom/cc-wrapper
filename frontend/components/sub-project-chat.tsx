@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
@@ -82,14 +82,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
   // Collapse all hooks by default for cleaner UI
   const [showAllHooks, setShowAllHooks] = useState(false)
   const [autoContinuationEnabled, setAutoContinuationEnabled] = useState(true)
-  const [bypassModeEnabled, setBypassModeEnabled] = useState(() => {
-    // Load bypass mode preference from localStorage
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('bypassModeEnabled')
-      return saved !== null ? saved === 'true' : true // Default to true if not set
-    }
-    return true
-  })
+  const [bypassModeEnabled, setBypassModeEnabled] = useState(true)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null)
   const [showAgentDropdown, setShowAgentDropdown] = useState(false)
@@ -100,14 +93,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
   const [showQueue, setShowQueue] = useState(false)
   
   // Auto-scroll state management
-  const [autoScrollEnabled, setAutoScrollEnabled] = useState(() => {
-    // Load auto-scroll preference from localStorage
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('autoScrollEnabled')
-      return saved !== null ? saved === 'true' : true // Default to true if not set
-    }
-    return true
-  })
+  const [autoScrollEnabled, setAutoScrollEnabled] = useState(true)
   const [userScrolledUp, setUserScrolledUp] = useState(false)
   const [showNewMessageIndicator, setShowNewMessageIndicator] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -141,6 +127,21 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
       }
     }
   }, [showAgentDropdown])
+  
+  // Load preferences from localStorage after mount to avoid SSR hydration issues
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const savedBypass = localStorage.getItem('bypassModeEnabled')
+      if (savedBypass !== null) {
+        setBypassModeEnabled(savedBypass === 'true')
+      }
+      
+      const savedAutoScroll = localStorage.getItem('autoScrollEnabled')
+      if (savedAutoScroll !== null) {
+        setAutoScrollEnabled(savedAutoScroll === 'true')
+      }
+    }
+  }, [])
   
   // Log prop changes for debugging
   useEffect(() => {
@@ -862,7 +863,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
       
       return () => clearTimeout(timeoutId)
     }
-  }, [isWaitingForResponse, isQueueProcessing, messageQueue.length, sessionId, processNextInQueue])
+  }, [isWaitingForResponse, isQueueProcessing, messageQueue.length, sessionId])
 
   return (
     <div className="flex flex-col h-[calc(100vh-8rem)] sm:h-[calc(100vh-10rem)] md:h-[calc(100vh-12rem)]">
