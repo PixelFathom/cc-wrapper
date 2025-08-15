@@ -1,16 +1,20 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from uuid import UUID
 from datetime import datetime
 import httpx
 import redis.asyncio as redis
 
 from ..deps import get_session, get_redis_client
-from ..models.test_case import TestCase, TestCaseStatus, TestCaseCreate, TestCaseUpdate, TestCaseRead, TestCaseExecutionRequest
+from ..models.test_case import (
+    TestCase, TestCaseStatus, TestCaseCreate, TestCaseUpdate, TestCaseRead, 
+    TestCaseExecutionRequest, TestCaseGenerationRequest, TestCaseGenerationResponse
+)
 from ..models.test_case_hook import TestCaseHook
 from ..services.test_case_service import test_case_service
+from ..services.test_generation_service import test_generation_service
 from ..core.settings import get_settings
 
 router = APIRouter()
@@ -23,6 +27,72 @@ async def get_test_cases(task_id: UUID, session: AsyncSession = Depends(get_sess
     result = await session.exec(statement)
     test_cases = result.all()
     return test_cases
+
+
+@router.get("/tasks/{task_id}/test-cases/grouped")
+async def get_test_cases_grouped_by_session(task_id: UUID, session: AsyncSession = Depends(get_session)):
+    """Get all test cases for a task grouped by session_id"""
+    statement = select(TestCase).where(TestCase.task_id == task_id)
+    result = await session.exec(statement)
+    test_cases = result.all()
+    
+    # Group test cases by session_id
+    grouped: Dict[Optional[str], List[Dict[str, Any]]] = {}
+    
+    for test_case in test_cases:
+        session_key = test_case.session_id or "manual"
+        
+        if session_key not in grouped:
+            grouped[session_key] = []
+        
+        # Convert test case to dict
+        test_case_dict = {
+            "id": str(test_case.id),
+            "title": test_case.title,
+            "description": test_case.description,
+            "test_steps": test_case.test_steps,
+            "expected_result": test_case.expected_result,
+            "status": test_case.status.value,
+            "last_execution_at": test_case.last_execution_at.isoformat() if test_case.last_execution_at else None,
+            "execution_result": test_case.execution_result,
+            "task_id": str(test_case.task_id),
+            "created_at": test_case.created_at.isoformat(),
+            "source": test_case.source.value,
+            "session_id": test_case.session_id,
+            "generated_from_messages": test_case.generated_from_messages,
+            "ai_model_used": test_case.ai_model_used
+        }
+        
+        grouped[session_key].append(test_case_dict)
+    
+    # Transform grouped data into a more frontend-friendly structure
+    sessions = []
+    for session_id, cases in grouped.items():
+        session_info = {
+            "session_id": session_id,
+            "display_name": f"Session: {session_id[:8]}..." if session_id != "manual" and len(session_id) > 8 else session_id.capitalize(),
+            "test_case_count": len(cases),
+            "test_cases": sorted(cases, key=lambda x: x["created_at"], reverse=True),
+            "is_ai_generated": session_id != "manual",
+            "latest_execution": max(
+                (tc["last_execution_at"] for tc in cases if tc["last_execution_at"]), 
+                default=None
+            )
+        }
+        sessions.append(session_info)
+    
+    # Sort sessions: manual first, then by latest creation
+    sessions.sort(key=lambda x: (
+        x["session_id"] != "manual",  # Manual comes first
+        -max((tc["created_at"] for tc in x["test_cases"]), default="")  # Then by latest test case
+    ))
+    
+    return {
+        "task_id": str(task_id),
+        "total_test_cases": len(test_cases),
+        "session_count": len(sessions),
+        "sessions": sessions
+    }
 
 
 @router.post("/tasks/{task_id}/test-cases", response_model=TestCaseRead)
@@ -197,3 +267,97 @@ async def get_test_case_hooks(
     hooks = await test_case_service.get_test_case_hooks(session, test_case_id)
     print(f"✅ Retrieved {len(hooks)} hooks for test case {test_case_id}")
     return {"hooks": hooks}
+
+
+@router.post("/sessions/{session_id}/generate-test-cases", response_model=TestCaseGenerationResponse)
+async def generate_test_cases_from_session(
+    session_id: str,
+    request: TestCaseGenerationRequest,
+    db_session: AsyncSession = Depends(get_session)
+):
+    """Generate test cases from a chat session using AI"""
+    try:
+        print(f"🤖 Generating test cases for session {session_id}")
+        
+        # Use the session_id from the request body
+        result = await test_generation_service.generate_test_cases_from_session(
+            db_session,
+            request.session_id,
+            request.max_test_cases or 5,
+            request.focus_areas
+        )
+        
+        print(f"✅ Generated {result['generated_count']} test cases")
+        
+        return TestCaseGenerationResponse(
+            generated_count=result['generated_count'],
+            test_cases=[TestCaseRead(**case) for case in result['test_cases']],
+            generation_summary=result['generation_summary']
+        )
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        print(f"❌ Error generating test cases: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error generating test cases: {str(e)}")
+
+
+@router.post("/sessions/{session_id}/test-cases/generate-and-execute")
+async def generate_and_execute_test_cases(
+    session_id: str,
+    request: TestCaseGenerationRequest,
+    background_tasks: BackgroundTasks,
+    db_session: AsyncSession = Depends(get_session),
+    redis_client: redis.Redis = Depends(get_redis_client)
+):
+    """Generate test cases from session and execute them immediately"""
+    try:
+        print(f"🚀 Generating and executing test cases for session {session_id}")
+        
+        # Generate test cases first
+        result = await test_generation_service.generate_test_cases_from_session(
+            db_session,
+            request.session_id,
+            request.max_test_cases or 5,
+            request.focus_areas
+        )
+        
+        print(f"✅ Generated {result['generated_count']} test cases, starting execution")
+        
+        # Set Redis client on the service
+        test_case_service.set_redis_client(redis_client)
+        
+        # Execute each test case in background
+        executed_cases = []
+        for test_case in result['test_cases']:
+            test_case_id = UUID(test_case['id'])
+            
+            # Update status to running
+            db_test_case = await db_session.get(TestCase, test_case_id)
+            if db_test_case:
+                db_test_case.status = TestCaseStatus.RUNNING
+                db_test_case.last_execution_at = datetime.utcnow()
+                db_session.add(db_test_case)
+            
+            # Add to background execution
+            background_tasks.add_task(
+                _execute_test_case_with_service,
+                test_case_id
+            )
+            
+            executed_cases.append(test_case_id)
+        
+        await db_session.commit()
+        
+        return {
+            'message': 'Test cases generated and execution started',
+            'generated_count': result['generated_count'],
+            'executing_test_case_ids': [str(tc_id) for tc_id in executed_cases],
+            'generation_summary': result['generation_summary']
+        }
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        print(f"❌ Error generating and executing test cases: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")

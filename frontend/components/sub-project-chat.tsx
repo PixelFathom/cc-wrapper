@@ -7,7 +7,7 @@ import {
   PaperPlaneIcon, PersonIcon, RocketIcon, UpdateIcon, ChevronRightIcon,
   CodeIcon, GearIcon, CheckCircledIcon, CrossCircledIcon, ClockIcon,
   FileTextIcon, CubeIcon, ChevronDownIcon, DotFilledIcon, CopyIcon,
-  ChatBubbleIcon, TrashIcon, PlayIcon, PauseIcon, ListBulletIcon
+  ChatBubbleIcon, TrashIcon, PlayIcon, PauseIcon, ListBulletIcon, MixerHorizontalIcon
 } from '@radix-ui/react-icons'
 import { api, ChatHook } from '@/lib/api'
 import { Button } from './ui/button'
@@ -15,6 +15,7 @@ import { Input } from './ui/input'
 import { Textarea } from './ui/textarea'
 import { cn } from '@/lib/utils'
 import { AssistantMessage } from './assistant-message'
+import { TestCaseGenerationModal } from './test-case-generation-modal'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,6 +28,7 @@ interface SubProjectChatProps {
   taskName: string
   subProjectId: string
   initialSessionId?: string
+  taskId?: string
 }
 
 interface Message {
@@ -70,7 +72,7 @@ const AVAILABLE_AGENTS = [
   { value: '@agent-backend-architect', label: 'Backend Architect', description: 'Design backend systems and APIs' },
 ]
 
-export function SubProjectChat({ projectName, taskName, subProjectId, initialSessionId }: SubProjectChatProps) {
+export function SubProjectChat({ projectName, taskName, subProjectId, initialSessionId, taskId }: SubProjectChatProps) {
   const queryClient = useQueryClient()
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
@@ -86,6 +88,9 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null)
   const [showAgentDropdown, setShowAgentDropdown] = useState(false)
+  
+  // Test case generation modal state
+  const [showTestCaseModal, setShowTestCaseModal] = useState(false)
   
   // Message Queue State
   const [messageQueue, setMessageQueue] = useState<QueuedMessage[]>([])
@@ -974,6 +979,22 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                 <span className="hidden sm:inline">Auto</span>
               </Button>
             )}
+            {/* Test Case Generation Button - Only show when we have a session */}
+            {sessionId && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowTestCaseModal(true)}
+                className="text-xs font-mono h-6 px-1 sm:px-2 flex items-center gap-1"
+                title="Generate AI test cases from this conversation"
+              >
+                <MixerHorizontalIcon className={cn(
+                  "h-3 w-3",
+                  "text-purple-500"
+                )} />
+                <span className="hidden sm:inline">Tests</span>
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="sm"
@@ -1851,6 +1872,16 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
           </form>
         </div>
       </div>
+
+      {/* Test Case Generation Modal */}
+      {sessionId && (
+        <TestCaseGenerationModal
+          isOpen={showTestCaseModal}
+          onClose={() => setShowTestCaseModal(false)}
+          sessionId={sessionId}
+          taskId={taskId}
+        />
+      )}
 
       {/* Approval modals removed - approvals are now handled globally via ApprovalNotifications component */}
     </div>

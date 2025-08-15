@@ -281,7 +281,7 @@ If the test fails, please implement the necessary fixes to make it pass.
         db: AsyncSession, 
         test_case_id: UUID,
         session_id: Optional[str] = None,
-        limit: int = 50
+        limit: int = 500
     ) -> List[Dict[str, Any]]:
         """Get hooks for a specific test case"""
         try:

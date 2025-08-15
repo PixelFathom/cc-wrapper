@@ -8,7 +8,8 @@ import {
   CheckCircledIcon, CrossCircledIcon, DotFilledIcon,
   PlayIcon, StopIcon, DownloadIcon, CommitIcon,
   ReaderIcon, UpdateIcon, LightningBoltIcon, CubeIcon,
-  CodeIcon, TrashIcon
+  CodeIcon, TrashIcon, ChevronDownIcon, ChevronRightIcon,
+  FileTextIcon
 } from '@radix-ui/react-icons'
 import { motion } from 'framer-motion'
 import { api, DeploymentHook } from '@/lib/api'
@@ -17,7 +18,7 @@ import { UploadZone } from './upload-zone'
 import { SubProjectChat } from './sub-project-chat'
 import { Skeleton } from './ui/skeleton'
 import { Button } from './ui/button'
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { DeploymentLogs } from './deployment-logs'
 import { TestCaseModal } from './test-case-modal'
 import { ExecutionResultModal } from './execution-result-modal'
@@ -80,16 +81,42 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
     enabled: !!task && activeTab === 'knowledge-base',
   })
 
-  // Fetch test cases (poll if any test case is running)
-  const { data: testCases, refetch: refetchTestCases } = useQuery({
-    queryKey: ['test-cases', taskId],
-    queryFn: () => api.getTestCases(taskId),
+  // Fetch grouped test cases (poll if any test case is running)
+  const { data: testCasesGrouped, refetch: refetchTestCases } = useQuery({
+    queryKey: ['test-cases-grouped', taskId],
+    queryFn: () => api.getTestCasesGrouped(taskId),
     enabled: !!task && activeTab === 'test-cases',
     refetchInterval: (query) => {
       const data = query.state.data
-      return data?.some(tc => tc.status === 'running') ? 2000 : false // Poll every 2 seconds for running tests
+      const hasRunning = data?.sessions?.some((session: any) => 
+        session.test_cases.some((tc: any) => tc.status === 'running')
+      )
+      return hasRunning ? 2000 : false // Poll every 2 seconds for running tests
     },
   })
+
+  // State for expanded sessions (expand first session by default)
+  const [expandedSessions, setExpandedSessions] = useState<Set<string>>(new Set())
+
+  // Initialize expanded sessions with the first session when test cases are loaded
+  useEffect(() => {
+    if (testCasesGrouped?.sessions?.length > 0 && expandedSessions.size === 0) {
+      setExpandedSessions(new Set([testCasesGrouped.sessions[0].session_id]))
+    }
+  }, [testCasesGrouped])
+
+  // Toggle session expansion
+  const toggleSession = useCallback((sessionId: string) => {
+    setExpandedSessions(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(sessionId)) {
+        newSet.delete(sessionId)
+      } else {
+        newSet.add(sessionId)
+      }
+      return newSet
+    })
+  }, [])
 
   // Refetch task when deployment is completed
   useEffect(() => {
@@ -522,6 +549,7 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
               projectName={project?.name || ''}
               taskName={task.name}
               subProjectId={subProjects?.sub_projects?.[0]?.id || `new-${taskId}`}
+              taskId={taskId}
             />
           </motion.div>
         )}
@@ -678,9 +706,140 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
                 />
               </div>
 
-              {testCases && testCases.length > 0 ? (
+              {testCasesGrouped && testCasesGrouped.total_test_cases > 0 ? (
                 <div className="space-y-4">
-                  {testCases.map((testCase: any) => (
+                  {/* Session Controls */}
+                  {testCasesGrouped.session_count > 1 && (
+                    <div className="flex items-center justify-between p-2 bg-card/50 rounded-lg border border-border/30">
+                      <span className="text-sm text-muted-foreground ml-2">
+                        {testCasesGrouped.session_count} sessions • {testCasesGrouped.total_test_cases} total test cases
+                      </span>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            const allSessionIds = testCasesGrouped.sessions.map((s: any) => s.session_id)
+                            setExpandedSessions(new Set(allSessionIds))
+                          }}
+                          className="h-7 px-2 text-xs text-cyan-400 hover:text-cyan-300"
+                        >
+                          <ChevronDownIcon className="h-3 w-3 mr-1" />
+                          Expand All
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setExpandedSessions(new Set())}
+                          className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                        >
+                          <ChevronRightIcon className="h-3 w-3 mr-1" />
+                          Collapse All
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Sessions (Folders) */}
+                  {testCasesGrouped.sessions.map((session: any) => (
+                    <div key={session.session_id} className="space-y-2">
+                      {/* Session Header */}
+                      <button
+                        onClick={() => toggleSession(session.session_id)}
+                        className="w-full flex items-center justify-between p-3 bg-gradient-to-r from-card/60 to-card/80 backdrop-blur-sm rounded-lg border border-border/50 hover:border-cyan-500/30 transition-all duration-200"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center">
+                            {expandedSessions.has(session.session_id) ? (
+                              <ChevronDownIcon className="h-4 w-4 text-cyan-400" />
+                            ) : (
+                              <ChevronRightIcon className="h-4 w-4 text-cyan-400" />
+                            )}
+                          </div>
+                          <div className={`p-2 rounded-lg ${
+                            session.is_ai_generated 
+                              ? 'bg-gradient-to-r from-purple-500/20 to-pink-500/20 border border-purple-500/30' 
+                              : 'bg-gradient-to-r from-blue-500/20 to-cyan-500/20 border border-blue-500/30'
+                          }`}>
+                            {session.is_ai_generated ? (
+                              <LightningBoltIcon className="h-4 w-4 text-purple-400" />
+                            ) : (
+                              <FileTextIcon className="h-4 w-4 text-blue-400" />
+                            )}
+                          </div>
+                          <div className="flex flex-col items-start">
+                            <span className="font-semibold text-sm sm:text-base text-foreground">
+                              {session.display_name}
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                              {session.test_case_count} test case{session.test_case_count !== 1 ? 's' : ''}
+                              {session.is_ai_generated && ' • AI Generated'}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {/* Session stats */}
+                          {session.test_cases.some((tc: any) => tc.status === 'passed') && (
+                            <span className="px-2 py-1 bg-green-500/20 text-green-400 text-xs rounded-full">
+                              {session.test_cases.filter((tc: any) => tc.status === 'passed').length} passed
+                            </span>
+                          )}
+                          {session.test_cases.some((tc: any) => tc.status === 'failed') && (
+                            <span className="px-2 py-1 bg-red-500/20 text-red-400 text-xs rounded-full">
+                              {session.test_cases.filter((tc: any) => tc.status === 'failed').length} failed
+                            </span>
+                          )}
+                          {session.test_cases.some((tc: any) => tc.status === 'running') && (
+                            <span className="px-2 py-1 bg-yellow-500/20 text-yellow-400 text-xs rounded-full animate-pulse">
+                              {session.test_cases.filter((tc: any) => tc.status === 'running').length} running
+                            </span>
+                          )}
+                        </div>
+                      </button>
+
+                      {/* Session Actions */}
+                      {expandedSessions.has(session.session_id) && session.test_cases.length > 0 && (
+                        <div className="flex justify-end gap-2 pl-6 pb-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={async (e) => {
+                              e.stopPropagation()
+                              const pendingTests = session.test_cases.filter((tc: any) => 
+                                tc.status === 'pending' || tc.status === 'failed'
+                              )
+                              if (pendingTests.length > 0) {
+                                if (confirm(`Execute ${pendingTests.length} test case(s) in this session?`)) {
+                                  for (const testCase of pendingTests) {
+                                    try {
+                                      await api.executeTestCase(testCase.id)
+                                    } catch (error) {
+                                      console.error('Failed to execute test case:', error)
+                                    }
+                                  }
+                                  // Refetch after executing all
+                                  setTimeout(() => refetchTestCases(), 1000)
+                                }
+                              }
+                            }}
+                            disabled={!session.test_cases.some((tc: any) => tc.status === 'pending' || tc.status === 'failed')}
+                            className="h-8 text-xs"
+                          >
+                            <PlayIcon className="h-3 w-3 mr-1" />
+                            Run All in Session
+                          </Button>
+                        </div>
+                      )}
+
+                      {/* Test Cases in Session */}
+                      {expandedSessions.has(session.session_id) && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          className="pl-6 space-y-3"
+                        >
+                          {session.test_cases.map((testCase: any) => (
                     <motion.div
                       key={testCase.id}
                       initial={{ opacity: 0, y: 10 }}
@@ -939,6 +1098,10 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
                         </div>
                       </div>
                     </motion.div>
+                          ))}
+                        </motion.div>
+                      )}
+                    </div>
                   ))}
                 </div>
               ) : (

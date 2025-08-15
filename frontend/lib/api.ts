@@ -130,6 +130,10 @@ export interface TestCase {
   execution_result?: string
   task_id: string
   created_at: string
+  source?: 'manual' | 'ai_generated'
+  session_id?: string
+  generated_from_messages?: string
+  ai_model_used?: string
 }
 
 interface ExtendedApiClient {
@@ -380,6 +384,22 @@ class ApiClient {
     return this.request(`/tasks/${taskId}/test-cases`)
   }
 
+  getTestCasesGrouped = async (taskId: string): Promise<{
+    task_id: string
+    total_test_cases: number
+    session_count: number
+    sessions: Array<{
+      session_id: string
+      display_name: string
+      test_case_count: number
+      test_cases: TestCase[]
+      is_ai_generated: boolean
+      latest_execution: string | null
+    }>
+  }> => {
+    return this.request(`/tasks/${taskId}/test-cases/grouped`)
+  }
+
   createTestCase = async (taskId: string, data: {
     title: string
     description?: string
@@ -427,6 +447,43 @@ class ApiClient {
 
   getTestCaseHooks = async (testCaseId: string): Promise<{ hooks: any[] }> => {
     return this.request(`/test-cases/${testCaseId}/hooks`)
+  }
+
+  // AI Test Case Generation
+  generateTestCasesFromSession = async (sessionId: string, data: {
+    session_id: string
+    max_test_cases?: number
+    focus_areas?: string[]
+  }): Promise<{
+    generated_count: number
+    test_cases: Array<TestCase & { 
+      source: 'manual' | 'ai_generated'
+      session_id?: string
+      ai_model_used?: string
+      category?: string
+    }>
+    generation_summary: string
+  }> => {
+    return this.request(`/sessions/${sessionId}/generate-test-cases`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  generateAndExecuteTestCases = async (sessionId: string, data: {
+    session_id: string
+    max_test_cases?: number
+    focus_areas?: string[]
+  }): Promise<{
+    message: string
+    generated_count: number
+    executing_test_case_ids: string[]
+    generation_summary: string
+  }> => {
+    return this.request(`/sessions/${sessionId}/test-cases/generate-and-execute`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
   }
 
   // Deployment Guide

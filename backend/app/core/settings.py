@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     
     backend_host: str = "http://localhost:8000"
     
-    # Deployment Service
+    # Deployment Service``
     org_name: str = "default"
     init_project_url: str = "http://host.docker.internal:8001/init-project"
     webhook_base_url: str = "http://localhost:7000"

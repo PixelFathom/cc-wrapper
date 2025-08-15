@@ -14,6 +14,7 @@ interface ChatSessionsListProps {
   projectName: string
   taskName: string
   subProjectId: string
+  taskId?: string
 }
 
 interface SessionPreview {
@@ -28,7 +29,7 @@ interface SessionPreview {
   hook_count: number
 }
 
-export function ChatSessionsList({ projectName, taskName, subProjectId }: ChatSessionsListProps) {
+export function ChatSessionsList({ projectName, taskName, subProjectId, taskId }: ChatSessionsListProps) {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
   const [showNewChat, setShowNewChat] = useState(false)
 
@@ -132,6 +133,7 @@ export function ChatSessionsList({ projectName, taskName, subProjectId }: ChatSe
           taskName={taskName}
           subProjectId={subProjectId}
           initialSessionId={selectedSessionId || undefined}
+          taskId={taskId}
         />
       </div>
     )
