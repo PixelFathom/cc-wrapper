@@ -5,6 +5,7 @@ from uuid import UUID
 from app.deps import get_session, get_redis_client
 from app.services.deployment_service import deployment_service
 from app.services.chat_service import chat_service
+from app.services.test_case_service import test_case_service
 import logging
 import redis.asyncio as redis
 
@@ -62,3 +63,31 @@ async def receive_chat_webhook(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="Failed to process chat webhook")
+
+
+@router.post("/webhooks/test-case/{test_case_id}")
+async def receive_test_case_webhook(
+    test_case_id: UUID,
+    webhook_data: Dict[str, Any],
+    session: AsyncSession = Depends(get_session),
+    redis_client: redis.Redis = Depends(get_redis_client)
+):
+    """Receive test case execution webhooks from remote service"""
+    try:
+        logger.info(
+            f"🧪 Test case webhook endpoint called | "
+            f"test_case_id={test_case_id} | "
+            f"webhook_data={webhook_data}"
+        )
+        # Set Redis client for real-time updates
+        test_case_service.set_redis_client(redis_client)
+        await test_case_service.process_webhook(session, test_case_id, webhook_data)
+        return {"status": "received", "test_case_id": test_case_id}
+    except ValueError as e:
+        logger.error(f"❌ Test case webhook ValueError: {e}")
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ Test case webhook Exception: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Failed to process test case webhook")

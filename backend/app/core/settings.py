@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     # Deployment Service
     org_name: str = "default"
     init_project_url: str = "http://host.docker.internal:8001/init-project"
-    webhook_base_url: str = "http://localhost:8000"
+    webhook_base_url: str = "http://localhost:7000"
     query_url: str = "http://host.docker.internal:8001/api/query"
     
     # External API and file storage
@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     
     # OpenAI Configuration
     openai_api_key: str = ""
+    
+    # Clerk Authentication Configuration
+    next_public_clerk_publishable_key: str = ""
+    clerk_secret_key: str = ""
+    next_public_clerk_after_sign_out_url: str = "/"
     
     @property
     def database_url(self) -> str:

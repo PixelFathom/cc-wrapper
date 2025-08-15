@@ -7,8 +7,11 @@ import logging
 from app.core.settings import get_settings
 from app.core.redis import close_redis
 from app.deps import engine
-from app.api import projects, tasks, chat, files, approvals, auto_continuation
+from app.api import projects, tasks, chat, files, approvals, auto_continuation, test_cases
 from app.api.v1 import webhooks, mcp_approvals
+
+# Import models to ensure they are registered with SQLAlchemy
+from app.models import TestCaseHook  # Ensure TestCaseHook table is created
 
 settings = get_settings()
 
@@ -57,6 +60,7 @@ app.include_router(chat.router, prefix="/api", tags=["chat"])
 app.include_router(files.router, prefix="/api", tags=["files"])
 app.include_router(approvals.router, prefix="/api", tags=["approvals"])
 app.include_router(auto_continuation.router, prefix="/api", tags=["auto-continuation"])
+app.include_router(test_cases.router, prefix="/api", tags=["test-cases"])
 app.include_router(webhooks.router, prefix="/api", tags=["webhooks"])
 app.include_router(mcp_approvals.router, prefix="/api", tags=["mcp-approvals"])
 
