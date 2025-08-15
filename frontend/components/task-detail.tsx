@@ -686,7 +686,7 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
                   <div>
                     <h4 className="text-base sm:text-lg font-semibold text-foreground">Test Cases</h4>
                     <p className="text-xs sm:text-sm text-muted-foreground">
-                      {testCases?.length || 0} test case{(testCases?.length || 0) !== 1 ? 's' : ''} configured
+                      {testCasesGrouped?.total_test_cases || 0} test case{(testCasesGrouped?.total_test_cases || 0) !== 1 ? 's' : ''} configured
                     </p>
                   </div>
                 </div>
