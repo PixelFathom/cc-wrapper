@@ -81,11 +81,18 @@ async def get_test_cases_grouped_by_session(task_id: UUID, session: AsyncSession
         }
         sessions.append(session_info)
     
-    # Sort sessions: manual first, then by latest creation
-    sessions.sort(key=lambda x: (
-        x["session_id"] != "manual",  # Manual comes first
-        -max((tc["created_at"] for tc in x["test_cases"]), default="")  # Then by latest test case
-    ))
+    # Sort sessions: manual first, then others by latest creation date (newest first)
+    manual_sessions = [s for s in sessions if s["session_id"] == "manual"]
+    other_sessions = [s for s in sessions if s["session_id"] != "manual"]
+    
+    # Sort non-manual sessions by latest test case creation date (newest first)
+    other_sessions.sort(
+        key=lambda x: max((tc["created_at"] for tc in x["test_cases"]), default="") if x["test_cases"] else "",
+        reverse=True
+    )
+    
+    # Combine: manual sessions first, then sorted others
+    sessions = manual_sessions + other_sessions
     
     return {
         "task_id": str(task_id),
