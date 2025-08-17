@@ -24,7 +24,7 @@ import { TestCaseModal } from './test-case-modal'
 import { ExecutionResultModal } from './execution-result-modal'
 import { MarkdownRenderer } from './markdown-renderer'
 import { DeploymentGuideTab } from './deployment-guide-tab'
-import { ContestHarvestingModal } from './contest-harvesting-modal'
+import { ContestHarvestingTab } from './contest-harvesting-tab'
 
 interface TaskDetailProps {
   projectId: string
@@ -33,7 +33,6 @@ interface TaskDetailProps {
 
 export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
   const [activeTab, setActiveTab] = useState<'deployment' | 'chat' | 'knowledge-base' | 'test-cases' | 'deployment-guide' | 'contest-harvesting'>('deployment')
-  const [isContextHarvestingModalOpen, setIsContextHarvestingModalOpen] = useState(false)
   
   // Helper function to format duration
   const formatDuration = (start: Date, end: Date) => {
@@ -356,13 +355,7 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
           ].map((tab) => (
             <button
               key={tab.id}
-              onClick={() => {
-                if (tab.id === 'contest-harvesting') {
-                  setIsContextHarvestingModalOpen(true)
-                } else {
-                  setActiveTab(tab.id as any)
-                }
-              }}
+              onClick={() => setActiveTab(tab.id as any)}
               className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-md sm:rounded-lg text-xs sm:text-sm font-medium transition-all whitespace-nowrap ${
                 activeTab === tab.id
                   ? 'bg-gradient-to-r from-cyan-500/20 to-purple-500/20 text-foreground border border-cyan-500/30 shadow-lg'
@@ -639,6 +632,10 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
 
         {activeTab === 'deployment-guide' && (
           <DeploymentGuideTab taskId={taskId} />
+        )}
+
+        {activeTab === 'contest-harvesting' && (
+          <ContestHarvestingTab taskId={taskId} />
         )}
 
 
@@ -1178,13 +1175,6 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
         )}
       </div>
 
-      {/* Context Harvesting Modal */}
-      <ContestHarvestingModal
-        taskId={taskId}
-        trigger={<div />} // Hidden trigger, modal controlled by state
-        open={isContextHarvestingModalOpen}
-        onOpenChange={setIsContextHarvestingModalOpen}
-      />
     </motion.div>
   )
 }
