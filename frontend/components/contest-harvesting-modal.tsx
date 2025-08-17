@@ -39,6 +39,8 @@ import { api } from '@/lib/api'
 interface ContestHarvestingModalProps {
   taskId: string
   trigger: React.ReactNode
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }
 
 interface HarvestingSession {
@@ -68,8 +70,10 @@ interface SessionData {
 
 type ViewMode = 'sessions' | 'active-session' | 'brainstorming' | 'question-navigator' | 'edit-answer'
 
-export function ContestHarvestingModal({ taskId, trigger }: ContestHarvestingModalProps) {
-  const [open, setOpen] = useState(false)
+export function ContestHarvestingModal({ taskId, trigger, open: externalOpen, onOpenChange }: ContestHarvestingModalProps) {
+  const [internalOpen, setInternalOpen] = useState(false)
+  const open = externalOpen !== undefined ? externalOpen : internalOpen
+  const setOpen = onOpenChange || setInternalOpen
   const [viewMode, setViewMode] = useState<ViewMode>('sessions')
   const [loading, setLoading] = useState(false)
   const [sessions, setSessions] = useState<HarvestingSession[]>([])
@@ -81,7 +85,7 @@ export function ContestHarvestingModal({ taskId, trigger }: ContestHarvestingMod
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedCategory, setSelectedCategory] = useState<string>('all')
   const [autoSaveDraft, setAutoSaveDraft] = useState('')
-  const [showConfirmDialog, setShowConfirmDialog] = useState<{ action: 'skip' | 'close', question?: HarvestingQuestion } | null>(null)
+  const [showConfirmDialog, setShowConfirmDialog] = useState<{ action: 'skip' | 'close' | 'start-session', question?: HarvestingQuestion } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -128,7 +132,7 @@ export function ContestHarvestingModal({ taskId, trigger }: ContestHarvestingMod
         e.preventDefault()
         if (viewMode === 'sessions' && sessions.length === 0) {
           // Quick start from no-sessions view
-          startBrainstorming()
+          handleStartSessionWithConfirmation()
         } else if (currentQuestion && currentAnswer.trim()) {
           if (editingQuestion) {
             updateQuestionAnswer()
@@ -323,11 +327,17 @@ export function ContestHarvestingModal({ taskId, trigger }: ContestHarvestingMod
     }
   }
 
+  const handleStartSessionWithConfirmation = () => {
+    setShowConfirmDialog({ action: 'start-session' })
+  }
+
   const confirmAction = () => {
     if (showConfirmDialog?.action === 'skip') {
       skipQuestion()
     } else if (showConfirmDialog?.action === 'close') {
       setOpen(false)
+    } else if (showConfirmDialog?.action === 'start-session') {
+      startBrainstorming()
     }
     setShowConfirmDialog(null)
   }
@@ -522,7 +532,7 @@ export function ContestHarvestingModal({ taskId, trigger }: ContestHarvestingMod
                             </div>
                             <div className="space-y-2">
                               <Button
-                                onClick={startBrainstorming}
+                                onClick={handleStartSessionWithConfirmation}
                                 disabled={loading}
                                 size="sm"
                                 className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white border-0 font-medium"
@@ -535,7 +545,7 @@ export function ContestHarvestingModal({ taskId, trigger }: ContestHarvestingMod
                                 ) : (
                                   <>
                                     <LightningBoltIcon className="h-4 w-4 mr-2" />
-                                    Quick Start
+                                    Start New Session
                                   </>
                                 )}
                               </Button>
@@ -630,7 +640,7 @@ export function ContestHarvestingModal({ taskId, trigger }: ContestHarvestingMod
                           <LightningBoltIcon className="h-10 w-10 text-purple-400" />
                         </div>
                         <h3 className="text-xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
-                          Ready to Start Context Harvesting?
+                          Start Your First Session
                         </h3>
                         <p className="text-muted-foreground max-w-md mx-auto">
                           Our AI will analyze your project and generate intelligent questions to gather comprehensive context.
@@ -654,19 +664,19 @@ export function ContestHarvestingModal({ taskId, trigger }: ContestHarvestingMod
                       </div>
 
                       <Button
-                        onClick={startBrainstorming}
+                        onClick={handleStartSessionWithConfirmation}
                         disabled={loading}
                         className="w-full h-12 bg-gradient-to-r from-purple-500 via-blue-500 to-pink-500 hover:from-purple-600 hover:via-blue-600 hover:to-pink-600 text-white border-0 font-semibold shadow-lg"
                       >
                         {loading ? (
                           <>
                             <UpdateIcon className="h-5 w-5 mr-2 animate-spin" />
-                            Starting Context Harvesting...
+                            Starting Session...
                           </>
                         ) : (
                           <>
                             <LightningBoltIcon className="h-5 w-5 mr-2" />
-                            Start Context Harvesting
+                            Start New Session
                           </>
                         )}
                       </Button>
@@ -1080,24 +1090,40 @@ export function ContestHarvestingModal({ taskId, trigger }: ContestHarvestingMod
             >
               <div className="space-y-4">
                 <div className="flex items-center gap-2">
-                  <ExclamationTriangleIcon className="h-5 w-5 text-orange-400" />
+                  {showConfirmDialog.action === 'start-session' ? (
+                    <InfoCircledIcon className="h-5 w-5 text-blue-400" />
+                  ) : (
+                    <ExclamationTriangleIcon className="h-5 w-5 text-orange-400" />
+                  )}
                   <h4 className="font-semibold">
-                    {showConfirmDialog.action === 'skip' ? 'Skip Question?' : 'Close Modal?'}
+                    {showConfirmDialog.action === 'skip' 
+                      ? 'Skip Question?' 
+                      : showConfirmDialog.action === 'start-session'
+                      ? 'Start New Context Harvesting Session?'
+                      : 'Close Modal?'}
                   </h4>
                 </div>
                 <p className="text-sm text-muted-foreground">
                   {showConfirmDialog.action === 'skip' 
                     ? 'Are you sure you want to skip this question? You can always come back to it later.'
+                    : showConfirmDialog.action === 'start-session'
+                    ? 'This will analyze your project and generate intelligent questions to gather comprehensive context. Continue?'
                     : 'You have unsaved changes. Are you sure you want to close?'
                   }
                 </p>
                 <div className="flex gap-3">
                   <Button
                     onClick={confirmAction}
-                    variant="destructive"
-                    className="flex-1"
+                    variant={showConfirmDialog.action === 'start-session' ? 'default' : 'destructive'}
+                    className={`flex-1 ${showConfirmDialog.action === 'start-session' 
+                      ? 'bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white border-0' 
+                      : ''}`}
                   >
-                    {showConfirmDialog.action === 'skip' ? 'Skip Question' : 'Close'}
+                    {showConfirmDialog.action === 'skip' 
+                      ? 'Skip Question' 
+                      : showConfirmDialog.action === 'start-session'
+                      ? 'Yes, Start Session'
+                      : 'Close'}
                   </Button>
                   <Button
                     onClick={() => setShowConfirmDialog(null)}
