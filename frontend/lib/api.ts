@@ -119,6 +119,23 @@ export interface Approval {
   display_text?: string
 }
 
+export interface TestCase {
+  id: string
+  title: string
+  description?: string
+  test_steps: string
+  expected_result: string
+  status: 'pending' | 'running' | 'passed' | 'failed'
+  last_execution_at?: string
+  execution_result?: string
+  task_id: string
+  created_at: string
+  source?: 'manual' | 'ai_generated'
+  session_id?: string
+  generated_from_messages?: string
+  ai_model_used?: string
+}
+
 interface ExtendedApiClient {
   getSessionChats: (sessionId: string) => Promise<{ messages: Chat[] }>
   getSubProjectSessions: (subProjectId: string) => Promise<{ sessions: any[] }>
@@ -360,6 +377,134 @@ class ApiClient {
     total_files: number
   }> => {
     return this.request(`/tasks/${taskId}/knowledge-base/files`)
+  }
+
+  // Test Cases
+  getTestCases = async (taskId: string): Promise<TestCase[]> => {
+    return this.request(`/tasks/${taskId}/test-cases`)
+  }
+
+  getTestCasesGrouped = async (taskId: string): Promise<{
+    task_id: string
+    total_test_cases: number
+    session_count: number
+    sessions: Array<{
+      session_id: string
+      display_name: string
+      test_case_count: number
+      test_cases: TestCase[]
+      is_ai_generated: boolean
+      latest_execution: string | null
+    }>
+  }> => {
+    return this.request(`/tasks/${taskId}/test-cases/grouped`)
+  }
+
+  createTestCase = async (taskId: string, data: {
+    title: string
+    description?: string
+    test_steps: string
+    expected_result: string
+  }): Promise<TestCase> => {
+    return this.request(`/tasks/${taskId}/test-cases`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  getTestCase = async (testCaseId: string): Promise<TestCase> => {
+    return this.request(`/test-cases/${testCaseId}`)
+  }
+
+  updateTestCase = async (testCaseId: string, data: {
+    title?: string
+    description?: string
+    test_steps?: string
+    expected_result?: string
+    status?: 'pending' | 'running' | 'passed' | 'failed'
+  }): Promise<TestCase> => {
+    return this.request(`/test-cases/${testCaseId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+  }
+
+  deleteTestCase = async (testCaseId: string): Promise<{ message: string }> => {
+    return this.request(`/test-cases/${testCaseId}`, {
+      method: 'DELETE',
+    })
+  }
+
+  executeTestCase = async (testCaseId: string): Promise<{
+    message: string
+    test_case_id: string
+    status: string
+  }> => {
+    return this.request(`/test-cases/${testCaseId}/execute`, {
+      method: 'POST',
+    })
+  }
+
+  getTestCaseHooks = async (testCaseId: string): Promise<{ hooks: any[] }> => {
+    return this.request(`/test-cases/${testCaseId}/hooks`)
+  }
+
+  // AI Test Case Generation
+  generateTestCasesFromSession = async (sessionId: string, data: {
+    session_id: string
+    max_test_cases?: number
+    focus_areas?: string[]
+  }): Promise<{
+    generated_count: number
+    test_cases: Array<TestCase & { 
+      source: 'manual' | 'ai_generated'
+      session_id?: string
+      ai_model_used?: string
+      category?: string
+    }>
+    generation_summary: string
+  }> => {
+    return this.request(`/sessions/${sessionId}/generate-test-cases`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  generateAndExecuteTestCases = async (sessionId: string, data: {
+    session_id: string
+    max_test_cases?: number
+    focus_areas?: string[]
+  }): Promise<{
+    message: string
+    generated_count: number
+    executing_test_case_ids: string[]
+    generation_summary: string
+  }> => {
+    return this.request(`/sessions/${sessionId}/test-cases/generate-and-execute`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  // Deployment Guide
+  getDeploymentGuide = async (taskId: string): Promise<{
+    content: string
+    task_id: string
+    updated_at: string | null
+  }> => {
+    return this.request(`/tasks/${taskId}/deployment-guide`)
+  }
+
+  updateDeploymentGuide = async (taskId: string, content: string): Promise<{
+    message: string
+    task_id: string
+    content: string
+    updated_at: string
+  }> => {
+    return this.request(`/tasks/${taskId}/deployment-guide`, {
+      method: 'PUT',
+      body: JSON.stringify({ content }),
+    })
   }
 }
 

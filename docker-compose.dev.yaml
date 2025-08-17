@@ -1,33 +1,10 @@
 version: "3.9"
 services:
-  db:
-    image: postgres:15
-    env_file: .env
-    volumes:
-      - db-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $POSTGRES_USER"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    networks:
-      - cc-wrapper
-  cache:
-    image: redis:7
-    volumes:
-      - redis-data:/data
-    networks:
-      - cc-wrapper
   backend:
     build: ./backend
     env_file: .env
     ports:
-      - "8000:8000"
-    depends_on:
-      db:
-        condition: service_healthy
-      cache:
-        condition: service_started
+      - "7000:8000"
     volumes:
       - ./backend:/app
     environment:
@@ -37,13 +14,14 @@ services:
       - "host.docker.internal:host-gateway"
     networks:
       - cc-wrapper
+
   frontend:
     build: 
       context: ./frontend
       dockerfile: Dockerfile.dev
     env_file: .env
     ports:
-      - "3000:3000"
+      - "5000:3000"
     depends_on:
       - backend
     networks:
@@ -53,7 +31,7 @@ services:
       - /app/node_modules
       - /app/.next
     environment:
-      - NEXT_PUBLIC_BACKEND_HOST=http://localhost:8000
+      - NEXT_PUBLIC_BACKEND_HOST=https://code-api.tanmaydeepsharma.com
       - NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
       - CLERK_SECRET_KEY=${CLERK_SECRET_KEY}
       - NEXT_PUBLIC_CLERK_AFTER_SIGN_OUT_URL=${NEXT_PUBLIC_CLERK_AFTER_SIGN_OUT_URL}
@@ -61,7 +39,3 @@ networks:
   cc-wrapper:
     external: true 
 
-
-volumes:
-  db-data:
-  redis-data:

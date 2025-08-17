@@ -3,13 +3,19 @@
 import Link from 'next/link'
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { CodeIcon, HamburgerMenuIcon, Cross2Icon } from '@radix-ui/react-icons'
+import { CodeIcon, HamburgerMenuIcon, Cross2Icon, RocketIcon } from '@radix-ui/react-icons'
 import { Button } from './ui/button'
 import { SignInButton, SignUpButton, SignedIn, SignedOut, UserButton } from '@clerk/nextjs'
+import { DeploymentGuideModal } from './deployment-guide-modal'
+import { usePathname } from 'next/navigation'
 
 export function Navigation() {
   const [scrolled, setScrolled] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const pathname = usePathname()
+
+  // Extract taskId from URL path like /p/[projectId]/t/[taskId]
+  const taskId = pathname?.match(/\/p\/[^\/]+\/t\/([^\/]+)/)?.[1]
 
   useEffect(() => {
     const handleScroll = () => {
@@ -54,6 +60,23 @@ export function Navigation() {
               <span className="text-cyan-500 text-xs">●</span>
               <span className="text-muted-foreground text-xs font-mono">main</span>
             </div>
+            
+            {/* Deployment Guide Button - Only show on task pages */}
+            {taskId && (
+              <DeploymentGuideModal
+                taskId={taskId}
+                trigger={
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="bg-gradient-to-r from-orange-500/10 to-red-500/10 border-orange-500/30 hover:border-orange-400/50 text-orange-400 hover:text-orange-300 hover:bg-orange-500/20 transition-all duration-200"
+                  >
+                    <RocketIcon className="h-4 w-4 mr-2" />
+                    Deployment Guide
+                  </Button>
+                }
+              />
+            )}
             
             {/* Auth buttons */}
             <SignedOut>
@@ -101,6 +124,25 @@ export function Navigation() {
                 <div className="text-center py-4">
                   <span className="text-xs text-muted-foreground font-mono">v1.0.0</span>
                 </div>
+                
+                {/* Deployment Guide Button - Mobile */}
+                {taskId && (
+                  <div className="px-4">
+                    <DeploymentGuideModal
+                      taskId={taskId}
+                      trigger={
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="w-full bg-gradient-to-r from-orange-500/10 to-red-500/10 border-orange-500/30 hover:border-orange-400/50 text-orange-400 hover:text-orange-300 hover:bg-orange-500/20 transition-all duration-200"
+                        >
+                          <RocketIcon className="h-4 w-4 mr-2" />
+                          Deployment Guide
+                        </Button>
+                      }
+                    />
+                  </div>
+                )}
                 
                 {/* Mobile auth buttons */}
                 <SignedOut>

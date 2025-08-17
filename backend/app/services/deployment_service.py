@@ -37,7 +37,7 @@ class DeploymentService:
         # Prepare init project request
         payload = {
             "organization_name": self.org_name,
-            "project_path": cwd,
+            "project_name": cwd,
             "github_repo_url": task.project.repo_url,
             "webhook_url": webhook_url
         }

@@ -12,11 +12,11 @@ class ProjectBase(BaseModel):
 
 class ProjectCreate(ProjectBase):
     @validator('repo_url')
-    def validate_pixelfathom_ssh_url(cls, v):
+    def validate_github_ssh_url(cls, v):
         if v:
-            pattern = r'^git@github\.com:PixelFathom/[a-zA-Z0-9_-]+\.git$'
+            pattern = r'^git@github\.com:[a-zA-Z0-9_-]+/[a-zA-Z0-9_.-]+\.git$'
             if not re.match(pattern, v):
-                raise ValueError('Only PixelFathom GitHub SSH URLs are allowed (e.g., git@github.com:PixelFathom/repo-name.git)')
+                raise ValueError('Only GitHub SSH URLs are allowed (e.g., git@github.com:username/repo-name.git)')
         return v
 
 
@@ -25,11 +25,11 @@ class ProjectUpdate(BaseModel):
     repo_url: Optional[str] = None
     
     @validator('repo_url')
-    def validate_pixelfathom_ssh_url(cls, v):
+    def validate_github_ssh_url(cls, v):
         if v:
-            pattern = r'^git@github\.com:PixelFathom/[a-zA-Z0-9_-]+\.git$'
+            pattern = r'^git@github\.com:[a-zA-Z0-9_-]+/[a-zA-Z0-9_.-]+\.git$'
             if not re.match(pattern, v):
-                raise ValueError('Only PixelFathom GitHub SSH URLs are allowed (e.g., git@github.com:PixelFathom/repo-name.git)')
+                raise ValueError('Only GitHub SSH URLs are allowed (e.g., git@github.com:username/repo-name.git)')
         return v
 
 

@@ -3,6 +3,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
 from typing import List, Optional
 from uuid import UUID
+from datetime import datetime
 import aiohttp
 import os
 import tempfile
@@ -426,3 +427,55 @@ async def get_task_vscode_link(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Failed to generate VS Code link: {str(e)}"
         )
+
+
+@router.get("/tasks/{task_id}/deployment-guide")
+async def get_task_deployment_guide(
+    task_id: UUID,
+    session: AsyncSession = Depends(get_session)
+):
+    """Get deployment guide for a task"""
+    task = await session.get(Task, task_id)
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task not found"
+        )
+    
+    return {
+        "task_id": str(task_id),
+        "content": task.deployment_guide or "",
+        "updated_at": task.deployment_guide_updated_at.isoformat() if task.deployment_guide_updated_at else None
+    }
+
+
+@router.put("/tasks/{task_id}/deployment-guide")
+async def update_task_deployment_guide(
+    task_id: UUID,
+    content_data: dict,
+    session: AsyncSession = Depends(get_session)
+):
+    """Update deployment guide for a task"""
+    task = await session.get(Task, task_id)
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task not found"
+        )
+    
+    content = content_data.get('content', '')
+    
+    # Update the task
+    task.deployment_guide = content
+    task.deployment_guide_updated_at = datetime.utcnow()
+    
+    session.add(task)
+    await session.commit()
+    await session.refresh(task)
+    
+    return {
+        "message": "Deployment guide updated successfully",
+        "task_id": str(task_id),
+        "content": task.deployment_guide,
+        "updated_at": task.deployment_guide_updated_at.isoformat()
+    }

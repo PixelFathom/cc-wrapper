@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from .sub_project import SubProject
     from .deployment_hook import DeploymentHook
     from .knowledge_base_file import KnowledgeBaseFile
+    from .test_case import TestCase
 
 
 class Task(BaseModel, table=True):
@@ -28,7 +29,12 @@ class Task(BaseModel, table=True):
     deployment_started_at: Optional[datetime] = Field(default=None)
     deployment_completed_at: Optional[datetime] = Field(default=None)
     
+    # Deployment guide fields
+    deployment_guide: Optional[str] = Field(default=None)
+    deployment_guide_updated_at: Optional[datetime] = Field(default=None)
+    
     project: Optional["Project"] = Relationship(back_populates="tasks")
     sub_projects: List["SubProject"] = Relationship(back_populates="task")
     deployment_hooks: List["DeploymentHook"] = Relationship(back_populates="task")
     knowledge_base_files: List["KnowledgeBaseFile"] = Relationship(back_populates="task")
+    test_cases: List["TestCase"] = Relationship(back_populates="task")
