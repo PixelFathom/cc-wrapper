@@ -3,19 +3,26 @@
 import Link from 'next/link'
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { CodeIcon, HamburgerMenuIcon, Cross2Icon, RocketIcon } from '@radix-ui/react-icons'
+import { CodeIcon, HamburgerMenuIcon, Cross2Icon, RocketIcon, ExitIcon } from '@radix-ui/react-icons'
 import { Button } from './ui/button'
-import { SignInButton, SignUpButton, SignedIn, SignedOut, UserButton } from '@clerk/nextjs'
+// Removed Clerk imports as basic auth is used instead
 import { DeploymentGuideModal } from './deployment-guide-modal'
 import { usePathname } from 'next/navigation'
+import { useBasicAuth } from '@/contexts/basic-auth-context'
 
 export function Navigation() {
   const [scrolled, setScrolled] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const pathname = usePathname()
+  const { logout } = useBasicAuth()
 
   // Extract taskId from URL path like /p/[projectId]/t/[taskId]
   const taskId = pathname?.match(/\/p\/[^\/]+\/t\/([^\/]+)/)?.[1]
+
+  const handleBasicAuthLogout = () => {
+    logout()
+    setMobileMenuOpen(false) // Close mobile menu after logout
+  }
 
   useEffect(() => {
     const handleScroll = () => {
@@ -78,22 +85,18 @@ export function Navigation() {
               />
             )}
             
-            {/* Auth buttons */}
-            <SignedOut>
-              <SignInButton mode="modal">
-                <Button variant="ghost" size="sm">
-                  Sign In
-                </Button>
-              </SignInButton>
-              <SignUpButton mode="modal">
-                <Button size="sm" className="bg-cyan-600 hover:bg-cyan-700">
-                  Sign Up
-                </Button>
-              </SignUpButton>
-            </SignedOut>
-            <SignedIn>
-              <UserButton />
-            </SignedIn>
+            {/* Basic Auth Logout Button */}
+            <Button
+              onClick={handleBasicAuthLogout}
+              variant="outline"
+              size="sm"
+              className="bg-red-500/10 border-red-500/30 hover:border-red-400/50 text-red-400 hover:text-red-300 hover:bg-red-500/20 transition-all duration-200"
+            >
+              <ExitIcon className="h-4 w-4 mr-2" />
+              Logout
+            </Button>
+            
+            {/* Clerk auth buttons removed - using basic auth instead */}
           </div>
 
           {/* Mobile menu button */}
@@ -144,26 +147,20 @@ export function Navigation() {
                   </div>
                 )}
                 
-                {/* Mobile auth buttons */}
-                <SignedOut>
-                  <div className="flex flex-col space-y-2 px-4">
-                    <SignInButton mode="modal">
-                      <Button variant="ghost" size="sm" className="w-full">
-                        Sign In
-                      </Button>
-                    </SignInButton>
-                    <SignUpButton mode="modal">
-                      <Button size="sm" className="w-full bg-cyan-600 hover:bg-cyan-700">
-                        Sign Up
-                      </Button>
-                    </SignUpButton>
-                  </div>
-                </SignedOut>
-                <SignedIn>
-                  <div className="flex justify-center">
-                    <UserButton />
-                  </div>
-                </SignedIn>
+                {/* Basic Auth Logout Button - Mobile */}
+                <div className="px-4">
+                  <Button
+                    onClick={handleBasicAuthLogout}
+                    variant="outline"
+                    size="sm"
+                    className="w-full bg-red-500/10 border-red-500/30 hover:border-red-400/50 text-red-400 hover:text-red-300 hover:bg-red-500/20 transition-all duration-200"
+                  >
+                    <ExitIcon className="h-4 w-4 mr-2" />
+                    Logout
+                  </Button>
+                </div>
+                
+                {/* Clerk mobile auth buttons removed - using basic auth instead */}
               </div>
             </motion.div>
           )}

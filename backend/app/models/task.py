@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from .deployment_hook import DeploymentHook
     from .knowledge_base_file import KnowledgeBaseFile
     from .test_case import TestCase
+    from .contest_harvesting import ContestHarvestingSession
 
 
 class Task(BaseModel, table=True):
@@ -38,3 +39,4 @@ class Task(BaseModel, table=True):
     deployment_hooks: List["DeploymentHook"] = Relationship(back_populates="task")
     knowledge_base_files: List["KnowledgeBaseFile"] = Relationship(back_populates="task")
     test_cases: List["TestCase"] = Relationship(back_populates="task")
+    contest_harvesting_sessions: List["ContestHarvestingSession"] = Relationship(back_populates="task")

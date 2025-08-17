@@ -157,6 +157,78 @@ interface ExtendedApiClient {
     bypass_mode_enabled: boolean
     updated_count: number
   }>
+  // Contest Harvesting methods
+  startContestHarvesting: (taskId: string, data?: { context_prompt?: string }) => Promise<{
+    session_id: string
+    total_questions: number
+    message: string
+  }>
+  getContestHarvestingSessions: (taskId: string) => Promise<{
+    sessions: Array<{
+      id: string
+      task_id: string
+      total_questions: number
+      questions_answered: number
+      status: string
+      created_at: string
+    }>
+    total_sessions: number
+  }>
+  getContestHarvestingSession: (sessionId: string) => Promise<{
+    session: {
+      id: string
+      task_id: string
+      total_questions: number
+      questions_answered: number
+      status: string
+      created_at: string
+    }
+    questions: Array<{
+      id: string
+      question_text: string
+      answer?: string
+      category: string
+      priority: number
+      order: number
+      status: string
+      answered_at?: string
+    }>
+  }>
+  getCurrentQuestion: (sessionId: string) => Promise<{
+    question?: {
+      id: string
+      question_text: string
+      category: string
+      priority: number
+      order: number
+      status: string
+    }
+    message?: string
+  }>
+  answerContestHarvestingQuestion: (questionId: string, data: { answer: string }) => Promise<{
+    success: boolean
+    message: string
+    next_question?: {
+      id: string
+      question_text: string
+      category: string
+      priority: number
+      order: number
+      status: string
+    }
+  }>
+  skipContestHarvestingQuestion: (questionId: string, reason?: string) => Promise<{
+    success: boolean
+    message: string
+    next_question?: {
+      id: string
+      question_text: string
+      category: string
+      priority: number
+      order: number
+      status: string
+    }
+  }>
 }
 
 class ApiClient {
@@ -587,6 +659,120 @@ Object.assign(api, {
       body: JSON.stringify({ session_id: sessionId, enabled })
     })
     if (!response.ok) throw new Error('Failed to toggle bypass mode')
+    return response.json()
+  },
+
+  // Contest Harvesting API methods
+  startContestHarvesting: async (taskId: string, data?: { context_prompt?: string }): Promise<{
+    session_id: string
+    total_questions: number
+    message: string
+  }> => {
+    const response = await fetch(`${API_BASE_URL}/api/tasks/${taskId}/contest-harvesting/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data || {})
+    })
+    if (!response.ok) throw new Error('Failed to start contest harvesting')
+    return response.json()
+  },
+
+  getContestHarvestingSessions: async (taskId: string): Promise<{
+    sessions: Array<{
+      id: string
+      task_id: string
+      total_questions: number
+      questions_answered: number
+      status: string
+      created_at: string
+    }>
+    total_sessions: number
+  }> => {
+    const response = await fetch(`${API_BASE_URL}/api/tasks/${taskId}/contest-harvesting/sessions`)
+    if (!response.ok) throw new Error('Failed to get contest harvesting sessions')
+    return response.json()
+  },
+
+  getContestHarvestingSession: async (sessionId: string): Promise<{
+    session: {
+      id: string
+      task_id: string
+      total_questions: number
+      questions_answered: number
+      status: string
+      created_at: string
+    }
+    questions: Array<{
+      id: string
+      question_text: string
+      answer?: string
+      category: string
+      priority: number
+      order: number
+      status: string
+      answered_at?: string
+    }>
+  }> => {
+    const response = await fetch(`${API_BASE_URL}/api/contest-harvesting/sessions/${sessionId}`)
+    if (!response.ok) throw new Error('Failed to get contest harvesting session')
+    return response.json()
+  },
+
+  getCurrentQuestion: async (sessionId: string): Promise<{
+    question?: {
+      id: string
+      question_text: string
+      category: string
+      priority: number
+      order: number
+      status: string
+    }
+    message?: string
+  }> => {
+    const response = await fetch(`${API_BASE_URL}/api/contest-harvesting/sessions/${sessionId}/current-question`)
+    if (!response.ok) throw new Error('Failed to get current question')
+    return response.json()
+  },
+
+  answerContestHarvestingQuestion: async (questionId: string, data: { answer: string }): Promise<{
+    success: boolean
+    message: string
+    next_question?: {
+      id: string
+      question_text: string
+      category: string
+      priority: number
+      order: number
+      status: string
+    }
+  }> => {
+    const response = await fetch(`${API_BASE_URL}/api/contest-harvesting/questions/${questionId}/answer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    })
+    if (!response.ok) throw new Error('Failed to answer question')
+    return response.json()
+  },
+
+  skipContestHarvestingQuestion: async (questionId: string, reason?: string): Promise<{
+    success: boolean
+    message: string
+    next_question?: {
+      id: string
+      question_text: string
+      category: string
+      priority: number
+      order: number
+      status: string
+    }
+  }> => {
+    const response = await fetch(`${API_BASE_URL}/api/contest-harvesting/questions/${questionId}/skip`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason })
+    })
+    if (!response.ok) throw new Error('Failed to skip question')
     return response.json()
   },
 })

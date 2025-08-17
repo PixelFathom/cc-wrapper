@@ -1,5 +1,7 @@
 import { clerkMiddleware } from "@clerk/nextjs/server";
 
+// Basic auth is handled client-side, so we keep the existing Clerk middleware
+// The basic auth wrapper will protect all routes at the component level
 export default clerkMiddleware();
 
 export const config = {

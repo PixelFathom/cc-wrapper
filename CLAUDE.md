@@ -22,6 +22,9 @@ make dev-down    # Development
 
 # Clean everything (containers + volumes)
 make clean
+
+# View help for all available Make commands
+make help
 ```
 
 ### Backend Development (FastAPI)
@@ -123,6 +126,7 @@ backend/
 │   │   ├── files.py         # File upload handling
 │   │   ├── projects.py      # Project management
 │   │   ├── tasks.py         # Task management
+│   │   ├── test_cases.py    # Test case management
 │   │   └── v1/              # Versioned endpoints
 │   │       ├── mcp_approvals.py  # MCP approval handling
 │   │       └── webhooks.py       # Webhook endpoints
@@ -132,19 +136,28 @@ backend/
 │   │   └── settings.py      # Pydantic settings
 │   ├── models/              # SQLModel database models
 │   │   ├── approval.py
+│   │   ├── approval_request.py
 │   │   ├── chat.py
+│   │   ├── chat_hook.py
 │   │   ├── deployment_hook.py
+│   │   ├── knowledge_base_file.py
 │   │   ├── project.py
-│   │   └── task.py
+│   │   ├── sub_project.py
+│   │   ├── task.py
+│   │   ├── test_case.py
+│   │   └── test_case_hook.py
 │   ├── schemas/             # Pydantic schemas for API
 │   ├── services/            # Business logic layer
 │   │   ├── approval_service.py
 │   │   ├── chat_service.py
 │   │   ├── deployment_service.py
-│   │   └── file_upload_service.py
+│   │   ├── file_upload_service.py
+│   │   ├── test_case_service.py
+│   │   └── test_generation_service.py
 │   ├── deps.py              # Dependency injection
 │   └── main.py              # FastAPI app initialization
 ├── alembic/                 # Database migrations
+├── scripts/                 # Utility scripts (create_admin.py)
 ├── tests/                   # Test suite
 └── requirements.txt
 ```
@@ -156,16 +169,26 @@ frontend/
 │   ├── layout.tsx          # Root layout with Clerk provider
 │   ├── page.tsx            # Home page
 │   ├── p/[projectId]/      # Project pages
+│   │   └── t/[taskId]/     # Task-specific pages
 │   └── test-auth/          # Auth testing page
 ├── components/
 │   ├── ui/                 # shadcn/ui components
 │   ├── navigation.tsx      # Main navigation
-│   ├── chat-session.tsx    # Chat interface
-│   ├── file-upload.tsx     # File upload component
-│   └── approval-dialog.tsx # Approval workflow UI
+│   ├── chat-sessions-list.tsx    # Chat interface
+│   ├── upload-zone.tsx     # File upload component
+│   ├── approval-center.tsx # Approval workflow UI
+│   ├── mcp-approval-modal.tsx    # MCP-specific approvals
+│   ├── test-case-generation-modal.tsx  # Test case UI
+│   ├── deployment-guide-modal.tsx      # Deployment guides
+│   └── mobile-chat-layout.tsx          # Mobile-responsive chat
 ├── lib/
 │   ├── api.ts              # API client
-│   └── utils.ts            # Utility functions
+│   ├── utils.ts            # Utility functions
+│   ├── session-utils.ts    # Session management
+│   ├── git-url-parser.ts   # Git URL parsing utilities
+│   └── hooks/              # Custom React hooks
+│       └── useMobile.ts
+├── tests/                  # Playwright E2E tests
 ├── middleware.ts           # Clerk auth middleware
 └── package.json
 ```
@@ -176,8 +199,11 @@ frontend/
 2. **Session Continuity**: Stateless design with session_id for conversation continuity
 3. **Streaming Responses**: SSE/WebSocket support for real-time updates
 4. **Approval Workflows**: Pause/resume pattern with MCP integration
-5. **Service Layer**: Business logic separated from API routes
-6. **Dependency Injection**: FastAPI's dependency system for clean architecture
+5. **Test Case Management**: AI-generated test cases with execution hooks
+6. **Sub-Project Architecture**: Hierarchical project organization
+7. **Hook System**: Chat hooks and test case hooks for event-driven workflows
+8. **Service Layer**: Business logic separated from API routes
+9. **Dependency Injection**: FastAPI's dependency system for clean architecture
 
 ## API Endpoints
 
@@ -189,6 +215,16 @@ frontend/
 - `POST /api/approvals/result` - Submit approval decision
 - `POST /api/webhooks/deployment/{task_id}` - Deployment status webhook
 - `GET /api/v1/mcp/approvals/pending` - MCP-specific approvals
+
+### Test Case Management
+- `GET /api/tasks/{task_id}/test-cases` - Get all test cases for a task
+- `POST /api/tasks/{task_id}/test-cases` - Create new test case
+- `POST /api/test-cases/{test_case_id}/execute` - Execute test case
+- `POST /api/tasks/{task_id}/generate-test-cases` - AI-generate test cases
+
+### Sub-Project Management
+- Sub-projects allow hierarchical organization within projects
+- Each sub-project can have its own chat sessions and resources
 
 ### WebSocket/SSE
 - Real-time updates via polling (2-second intervals)
@@ -220,11 +256,17 @@ DEPLOYMENT_SERVICE_URL=http://localhost:8001  # External service
 
 # Optional
 BYPASS_MODE=false  # Skip approvals in dev
+
+# Auto-continuation (OpenAI integration)
+OPENAI_API_KEY=sk-...  # Required for auto-continuation features
+
+# Production deployment
+DEPLOYMENT_SERVICE_URL=http://localhost:8001  # External deployment service
 ```
 
 ### Service Ports
-- Frontend: `http://localhost:3000`
-- Backend API: `http://localhost:8000`  
+- Frontend: `http://localhost:2000` (Docker), `http://localhost:3000` (local dev)
+- Backend API: `http://localhost:9000` (Docker), `http://localhost:8000` (local dev)
 - External Deployment: `http://localhost:8001`
 - PostgreSQL: `5432`
 - Redis: `6379`
@@ -241,9 +283,13 @@ BYPASS_MODE=false  # Skip approvals in dev
 - Frontend mounts with node_modules and .next excluded
 
 ### Configurations
-- `docker-compose.yaml` - Production setup
-- `docker-compose.dev.yaml` - Development with hot-reload
-- Both use `.env` file for configuration
+- `docker-compose.yaml` - Production setup with volume mounts for development
+- `docker-compose.admin.yaml` - Admin-specific configuration
+- Multiple Dockerfiles for different purposes:
+  - `frontend/Dockerfile.dev` - Development build
+  - `frontend/Dockerfile.simple` - Simple production build
+  - `frontend/Dockerfile.test` - Testing environment
+- All configurations use `.env` file for environment variables
 
 ## Testing Strategy
 
@@ -262,12 +308,32 @@ cd frontend
 npm test                  # Jest unit tests
 npm run test:e2e          # Playwright E2E
 npx playwright test --ui  # Interactive UI mode
+
+# Run specific Playwright tests
+npx playwright test tests/approval-widget.spec.ts
+npx playwright test tests/conversation-continuity-final.spec.ts
+npx playwright test tests/mcp-playwright-integration.spec.ts
+
+# Run tests for specific browsers
+npx playwright test --project=chromium
+npx playwright test --project="Mobile Chrome"
+
+# Docker-based testing
+./scripts/test-docker.sh  # Run tests in Docker environment
 ```
 
 ### Test Files
 - Backend: `backend/tests/` - pytest async tests
+  - `test_chat_service.py` - Chat functionality tests
+  - `test_projects.py` - Project management tests
+  - `test_bypass_mode.py` - Bypass mode functionality
 - Frontend unit: `frontend/**/*.test.{ts,tsx}`
-- E2E: `frontend/tests/` - Playwright tests
+- E2E: `frontend/tests/` - Comprehensive Playwright test suite
+  - Approval workflow tests
+  - Session continuity tests
+  - MCP integration tests
+  - Mobile responsiveness tests
+  - Bypass mode behavior tests
 
 ## Database Management
 
@@ -315,6 +381,30 @@ alembic history
 3. Approval/rejection sent to backend
 4. Process continues or halts based on decision
 
+## Key Features
+
+### Auto-Continuation System
+- Powered by OpenAI integration for intelligent conversation flow
+- Automatically determines when to continue conversations
+- Configurable via `auto_continuation_config.py`
+- Requires `OPENAI_API_KEY` environment variable
+
+### Test Case Generation
+- AI-powered test case generation for tasks
+- Automated execution with webhook notifications
+- Test case hooks for event-driven workflows
+- Integration with external testing services
+
+### MCP (Model Context Protocol) Integration
+- Approval requests for tool usage
+- Configurable MCP servers per task
+- Webhook-based approval flow with pause/resume capability
+
+### Bypass Mode
+- Development feature to skip approval workflows
+- Controlled via `BYPASS_MODE` environment variable
+- Useful for rapid development and testing
+
 ## Performance Considerations
 
 - **Async Operations**: All I/O operations are async
@@ -322,6 +412,7 @@ alembic history
 - **Caching**: Redis for session data and frequent queries
 - **Pagination**: Implemented on list endpoints
 - **File Uploads**: Chunked upload for large files
+- **Mobile Optimization**: Dedicated mobile layout components
 
 ## Security Notes
 
@@ -330,3 +421,30 @@ alembic history
 - Environment variables for secrets
 - SQL injection protection via SQLModel
 - Input validation with Pydantic schemas
+
+## Development Notes
+
+### Database Schema Evolution
+- The application has extensive migration history with many feature additions
+- Pay attention to enum changes and foreign key relationships
+- Use `alembic history` to understand migration dependencies
+
+### External Network Requirement
+- Requires `cc-wrapper` external Docker network
+- Create with: `docker network create cc-wrapper`
+- Essential for service communication between containers
+
+### Logging and Debugging
+- Custom logging configuration in `logging_config.py`
+- Debug logs available at `backend_debug.log`
+- Use `make logs` for real-time log monitoring
+
+### Mobile-First Development
+- Mobile responsiveness is a key requirement
+- Dedicated mobile components and responsive layouts
+- Test on both desktop and mobile breakpoints
+
+### Git Integration
+- Built-in Git URL parsing utilities
+- Repository integration for project initialization
+- Knowledge base file management for Claude context

@@ -5,6 +5,8 @@ import { Providers } from '@/components/providers'
 import { Navigation } from '@/components/navigation'
 import { ApprovalCenter } from '@/components/approval-center'
 import { ClerkProvider } from '@clerk/nextjs'
+import { BasicAuthProvider } from '@/contexts/basic-auth-context'
+import { BasicAuthWrapper } from '@/components/basic-auth-wrapper'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -19,18 +21,22 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <ClerkProvider>
-      <html lang="en" className="dark scroll-smooth">
-        <body className={`${inter.className} min-h-screen`}>
-          <Providers>
-            <Navigation />
-            <main className="pt-20 pb-10">
-              {children}
-            </main>
-            <ApprovalCenter />
-          </Providers>
-        </body>
-      </html>
-    </ClerkProvider>
+    <html lang="en" className="dark scroll-smooth">
+      <body className={`${inter.className} min-h-screen`}>
+        <BasicAuthProvider>
+          <BasicAuthWrapper>
+            <ClerkProvider>
+              <Providers>
+                <Navigation />
+                <main className="pt-20 pb-10">
+                  {children}
+                </main>
+                <ApprovalCenter />
+              </Providers>
+            </ClerkProvider>
+          </BasicAuthWrapper>
+        </BasicAuthProvider>
+      </body>
+    </html>
   )
 }

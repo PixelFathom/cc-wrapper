@@ -9,6 +9,7 @@ import { Button } from './ui/button'
 import { Badge } from './ui/badge'
 import { cn } from '@/lib/utils'
 import { SubProjectChat } from './sub-project-chat'
+import { useMobile } from '@/lib/hooks/useMobile'
 
 interface ChatSessionsListProps {
   projectName: string
@@ -30,6 +31,7 @@ interface SessionPreview {
 }
 
 export function ChatSessionsList({ projectName, taskName, subProjectId, taskId }: ChatSessionsListProps) {
+  const isMobile = useMobile()
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
   const [showNewChat, setShowNewChat] = useState(false)
 
@@ -169,7 +171,7 @@ export function ChatSessionsList({ projectName, taskName, subProjectId, taskId }
         <div className="terminal-bg rounded-lg border border-border p-4 sm:p-8 text-center">
           <ChatBubbleIcon className="h-8 w-8 sm:h-12 sm:w-12 mx-auto mb-2 sm:mb-4 text-muted-foreground/50" />
           <div className="font-mono text-muted-foreground text-sm sm:text-base">No chat sessions yet</div>
-          <div className="text-xs mt-1 sm:mt-2">Click "New Chat" to start a conversation</div>
+          <div className="text-xs mt-1 sm:mt-2">{isMobile ? 'Tap "New" to start' : 'Click "New Chat" to start a conversation'}</div>
         </div>
       ) : (
         <div className="space-y-2 sm:space-y-3">
@@ -179,11 +181,11 @@ export function ChatSessionsList({ projectName, taskName, subProjectId, taskId }
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: index * 0.05 }}
-              className="gradient-border-subtle rounded-lg overflow-hidden"
+              className="gradient-border-subtle rounded-lg overflow-hidden touch-manipulation"
             >
               <button
                 onClick={() => setSelectedSessionId(session.session_id)}
-                className="w-full text-left p-3 sm:p-4 hover:bg-card/50 transition-colors"
+                className="w-full text-left p-3 sm:p-4 hover:bg-card/50 transition-colors active:bg-card/70"
               >
                 <div className="space-y-2 sm:space-y-3">
                   {/* Session Header */}
@@ -208,8 +210,10 @@ export function ChatSessionsList({ projectName, taskName, subProjectId, taskId }
                         )}
                       </div>
                       <div className="text-xs sm:text-sm font-medium mt-1 text-foreground line-clamp-2">
-                        {session.first_message.slice(0, 60)}
-                        {session.first_message.length > 60 && '...'}
+                        {isMobile 
+                          ? `${session.first_message.slice(0, 40)}${session.first_message.length > 40 ? '...' : ''}`
+                          : `${session.first_message.slice(0, 60)}${session.first_message.length > 60 ? '...' : ''}`
+                        }
                       </div>
                     </div>
                     <ChevronRightIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
@@ -236,9 +240,9 @@ export function ChatSessionsList({ projectName, taskName, subProjectId, taskId }
                     </span>
                   </div>
 
-                  {/* Last Message Preview - Hidden on mobile */}
-                  {session.last_message && (
-                    <div className="text-xs text-muted-foreground bg-muted/30 rounded p-2 hidden sm:block">
+                  {/* Last Message Preview - Mobile Optimized */}
+                  {session.last_message && !isMobile && (
+                    <div className="text-xs text-muted-foreground bg-muted/30 rounded p-2">
                       <div className="flex items-center space-x-1 mb-1">
                         <PersonIcon className="h-3 w-3" />
                         <span>Last message:</span>

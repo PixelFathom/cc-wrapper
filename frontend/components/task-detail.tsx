@@ -33,6 +33,7 @@ interface TaskDetailProps {
 
 export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
   const [activeTab, setActiveTab] = useState<'deployment' | 'chat' | 'knowledge-base' | 'test-cases' | 'deployment-guide' | 'contest-harvesting'>('deployment')
+  const [isContextHarvestingModalOpen, setIsContextHarvestingModalOpen] = useState(false)
   
   // Helper function to format duration
   const formatDuration = (start: Date, end: Date) => {
@@ -355,7 +356,13 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
           ].map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
+              onClick={() => {
+                if (tab.id === 'contest-harvesting') {
+                  setIsContextHarvestingModalOpen(true)
+                } else {
+                  setActiveTab(tab.id as any)
+                }
+              }}
               className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-md sm:rounded-lg text-xs sm:text-sm font-medium transition-all whitespace-nowrap ${
                 activeTab === tab.id
                   ? 'bg-gradient-to-r from-cyan-500/20 to-purple-500/20 text-foreground border border-cyan-500/30 shadow-lg'
@@ -634,80 +641,6 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
           <DeploymentGuideTab taskId={taskId} />
         )}
 
-        {activeTab === 'contest-harvesting' && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="space-y-6"
-          >
-            {/* Contest Harvesting Header */}
-            <div className="space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="bg-gradient-to-r from-purple-500/20 to-pink-500/20 p-3 rounded-xl border border-purple-500/30">
-                  <QuestionMarkCircledIcon className="h-6 w-6 text-purple-400" />
-                </div>
-                <div className="flex-1">
-                  <h3 className="text-xl sm:text-2xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
-                    Context Harvesting
-                  </h3>
-                  <p className="text-sm sm:text-base text-muted-foreground mt-1 leading-relaxed">
-                    Gather comprehensive context through intelligent questioning
-                  </p>
-                </div>
-              </div>
-              
-              <div className="bg-gradient-to-r from-purple-500/5 to-pink-500/5 rounded-lg p-4 border border-purple-500/20">
-                <p className="text-sm text-muted-foreground leading-relaxed">
-                  Use AI-powered context harvesting to gather detailed information about your project through smart, targeted questions.
-                </p>
-                <div className="hidden sm:flex items-center gap-4 mt-3 text-xs text-muted-foreground">
-                  <span className="flex items-center gap-1.5">
-                    <div className="w-2 h-2 rounded-full bg-purple-400" />
-                    AI-generated questions
-                  </span>
-                  <span className="flex items-center gap-1.5">
-                    <div className="w-2 h-2 rounded-full bg-pink-400" />
-                    Context-aware analysis
-                  </span>
-                  <span className="flex items-center gap-1.5">
-                    <div className="w-2 h-2 rounded-full bg-blue-400" />
-                    Progressive disclosure
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Contest Harvesting Action */}
-            <div className="bg-gradient-to-br from-card/80 to-card rounded-xl border border-border/50 p-6 backdrop-blur-sm">
-              <div className="text-center space-y-4">
-                <div className="bg-gradient-to-br from-purple-500/20 via-blue-500/20 to-pink-500/20 rounded-full w-20 h-20 mx-auto flex items-center justify-center border border-purple-500/30">
-                  <LightningBoltIcon className="h-10 w-10 text-purple-400" />
-                </div>
-                <div className="space-y-2">
-                  <h4 className="text-lg font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
-                    Ready to Start Context Harvesting?
-                  </h4>
-                  <p className="text-sm text-muted-foreground max-w-md mx-auto">
-                    Launch an intelligent session to gather comprehensive context about your project through AI-generated questions.
-                  </p>
-                </div>
-                
-                <ContestHarvestingModal
-                  taskId={taskId}
-                  trigger={
-                    <Button
-                      className="bg-gradient-to-r from-purple-500 via-blue-500 to-pink-500 hover:from-purple-600 hover:via-blue-600 hover:to-pink-600 text-white border-0 font-semibold h-12 px-8 shadow-lg hover:shadow-xl transition-all duration-200"
-                    >
-                      <LightningBoltIcon className="h-5 w-5 mr-2" />
-                      <span className="hidden sm:inline">Start Context Harvesting</span>
-                      <span className="sm:hidden">Start Harvesting</span>
-                    </Button>
-                  }
-                />
-              </div>
-            </div>
-          </motion.div>
-        )}
 
         {activeTab === 'test-cases' && (
           <motion.div
@@ -1244,6 +1177,14 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
           </motion.div>
         )}
       </div>
+
+      {/* Context Harvesting Modal */}
+      <ContestHarvestingModal
+        taskId={taskId}
+        trigger={<div />} // Hidden trigger, modal controlled by state
+        open={isContextHarvestingModalOpen}
+        onOpenChange={setIsContextHarvestingModalOpen}
+      />
     </motion.div>
   )
 }

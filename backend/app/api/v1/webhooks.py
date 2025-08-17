@@ -6,6 +6,7 @@ from app.deps import get_session, get_redis_client
 from app.services.deployment_service import deployment_service
 from app.services.chat_service import chat_service
 from app.services.test_case_service import test_case_service
+from app.services.contest_harvesting_service import contest_harvesting_service
 import logging
 import redis.asyncio as redis
 
@@ -91,3 +92,31 @@ async def receive_test_case_webhook(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="Failed to process test case webhook")
+
+
+@router.post("/webhooks/contest-harvesting/{session_id}")
+async def receive_contest_harvesting_webhook(
+    session_id: UUID,
+    webhook_data: Dict[str, Any],
+    session: AsyncSession = Depends(get_session),
+    redis_client: redis.Redis = Depends(get_redis_client)
+):
+    """Receive contest harvesting webhooks from remote service"""
+    try:
+        logger.info(
+            f"🏆 Contest harvesting webhook endpoint called | "
+            f"session_id={session_id} | "
+            f"webhook_data={webhook_data}"
+        )
+        # Set Redis client for real-time updates
+        contest_harvesting_service.set_redis_client(redis_client)
+        await contest_harvesting_service.process_webhook(session, session_id, webhook_data)
+        return {"status": "received", "session_id": session_id}
+    except ValueError as e:
+        logger.error(f"❌ Contest harvesting webhook ValueError: {e}")
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ Contest harvesting webhook Exception: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Failed to process contest harvesting webhook")
