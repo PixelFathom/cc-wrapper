@@ -336,16 +336,6 @@ async def init_project(
     repo_url = request.get("repo_url")
     webhook_url = request.get("webhook_url")
     
-    # Validate repo_url is a GitHub SSH URL
-    if repo_url:
-        import re
-        pattern = r'^git@github\.com:[a-zA-Z0-9_-]+/[a-zA-Z0-9_.-]+\.git$'
-        if not re.match(pattern, repo_url):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid repository URL. Only GitHub SSH URLs are allowed (e.g., git@github.com:username/repo-name.git)"
-            )
-    
     parts = cwd.split("/")
     if len(parts) < 2:
         raise HTTPException(

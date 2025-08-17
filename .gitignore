@@ -27,3 +27,6 @@ coverage/
 dist/
 build/
 .next/
+
+ecs_lambda_deployment/
+pnpm-lock.yaml

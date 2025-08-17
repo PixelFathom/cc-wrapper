@@ -31,8 +31,7 @@ export function CreateProjectDialog({ open, onOpenChange }: CreateProjectDialogP
 
   const validateGitUrl = (url: string): boolean => {
     // Accept any GitHub SSH URL
-    const gitHubSSHPattern = /^git@github\.com:[a-zA-Z0-9_-]+\/[a-zA-Z0-9_.-]+\.git$/
-    return gitHubSSHPattern.test(url)
+    return true;
   }
 
   const createMutation = useMutation({
