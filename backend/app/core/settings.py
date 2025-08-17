@@ -15,14 +15,12 @@ class Settings(BaseSettings):
     
     # Deployment Service``
     org_name: str = "default"
-    init_project_url: str = "http://host.docker.internal:8001/init-project"
-    webhook_base_url: str = "http://localhost:7000"
-    query_url: str = "http://host.docker.internal:8001/api/query"
-    
+    init_project_url: str = "https://claude.thegetshitdone.ai/init-project"
+    webhook_base_url: str = "https://api-code.thegetshitdone.ai"
+    query_url: str = "https://claude.thegetshitdone.ai/api/query"
     # External API and file storage
-    external_api_url: str = "http://host.docker.internal:8001/api"
+    external_api_url: str = "https://claude.thegetshitdone.ai/api"
     projects_dir: str = "/projects"
-    
     # OpenAI Configuration
     openai_api_key: str = ""
     
