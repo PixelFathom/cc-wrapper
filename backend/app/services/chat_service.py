@@ -29,13 +29,15 @@ class ChatService:
         self.redis_client = redis_client
         
     async def send_query(
-        self, 
-        db: AsyncSession, 
-        chat_id: UUID, 
-        prompt: str, 
+        self,
+        db: AsyncSession,
+        chat_id: UUID,
+        prompt: str,
         session_id: Optional[str] = None,
         bypass_mode: Optional[bool] = None,
-        agent_name: Optional[str] = None
+        permission_mode: Optional[str] = None,
+        agent_name: Optional[str] = None,
+        include_task_id: Optional[bool] = True
     ) -> Dict[str, Any]:
         """Send a query to the remote service"""
         start_time = time.time()
@@ -63,8 +65,20 @@ class ChatService:
             
             # Generate webhook URL
             webhook_url = f"{self.webhook_base_url}/api/webhooks/chat/{chat_id}"
-            project_path = f"{project.name}/{task.name}-{task.id}"
-            print(f"session_id: {session_id}")
+            
+            project_path = f"{project.name}/{task.name}-{task.id}" if include_task_id else f"{project.name}/{task.name}"
+
+            # Determine permission mode
+            # Priority: permission_mode parameter > bypass_mode (for backward compatibility) > default to "interactive"
+            if permission_mode:
+                final_permission_mode = permission_mode
+            elif bypass_mode is True:
+                final_permission_mode = "bypassPermissions"
+            elif bypass_mode is False:
+                final_permission_mode = "interactive"
+            else:
+                final_permission_mode = "interactive"
+
             # Prepare request payload
             payload = {
                 "prompt": prompt,
@@ -72,7 +86,7 @@ class ChatService:
                 "organization_name": self.org_name,
                 "project_path": project_path,
                 "options": {
-                    "permission_mode": "bypassPermissions" if bypass_mode is True else "interactive"
+                    "permission_mode": final_permission_mode
                 }
             }
             # Only include session_id if it's provided (for subsequent messages)

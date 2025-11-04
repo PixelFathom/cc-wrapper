@@ -27,6 +27,7 @@ class TaskRead(TaskBase):
     deployment_completed: bool
     deployment_started_at: Optional[datetime]
     deployment_completed_at: Optional[datetime]
-    
+    task_type: Optional[str] = None
+
     class Config:
         from_attributes = True

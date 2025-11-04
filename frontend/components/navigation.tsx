@@ -8,21 +8,15 @@ import { Button } from './ui/button'
 // Removed Clerk imports as basic auth is used instead
 import { DeploymentGuideModal } from './deployment-guide-modal'
 import { usePathname } from 'next/navigation'
-import { useBasicAuth } from '@/contexts/basic-auth-context'
+import { GitHubAuthButton } from './github-auth-button'
 
 export function Navigation() {
   const [scrolled, setScrolled] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const pathname = usePathname()
-  const { logout } = useBasicAuth()
 
   // Extract taskId from URL path like /p/[projectId]/t/[taskId]
   const taskId = pathname?.match(/\/p\/[^\/]+\/t\/([^\/]+)/)?.[1]
-
-  const handleBasicAuthLogout = () => {
-    logout()
-    setMobileMenuOpen(false) // Close mobile menu after logout
-  }
 
   useEffect(() => {
     const handleScroll = () => {
@@ -67,7 +61,10 @@ export function Navigation() {
               <span className="text-cyan-500 text-xs">●</span>
               <span className="text-muted-foreground text-xs font-mono">main</span>
             </div>
-            
+
+            {/* GitHub Auth Button */}
+            <GitHubAuthButton />
+
             {/* Deployment Guide Button - Only show on task pages */}
             {taskId && (
               <DeploymentGuideModal
@@ -84,19 +81,6 @@ export function Navigation() {
                 }
               />
             )}
-            
-            {/* Basic Auth Logout Button */}
-            <Button
-              onClick={handleBasicAuthLogout}
-              variant="outline"
-              size="sm"
-              className="bg-red-500/10 border-red-500/30 hover:border-red-400/50 text-red-400 hover:text-red-300 hover:bg-red-500/20 transition-all duration-200"
-            >
-              <ExitIcon className="h-4 w-4 mr-2" />
-              Logout
-            </Button>
-            
-            {/* Clerk auth buttons removed - using basic auth instead */}
           </div>
 
           {/* Mobile menu button */}
@@ -127,7 +111,12 @@ export function Navigation() {
                 <div className="text-center py-4">
                   <span className="text-xs text-muted-foreground font-mono">v1.0.0</span>
                 </div>
-                
+
+                {/* GitHub Auth Button - Mobile */}
+                <div className="px-4">
+                  <GitHubAuthButton />
+                </div>
+
                 {/* Deployment Guide Button - Mobile */}
                 {taskId && (
                   <div className="px-4">
@@ -146,21 +135,6 @@ export function Navigation() {
                     />
                   </div>
                 )}
-                
-                {/* Basic Auth Logout Button - Mobile */}
-                <div className="px-4">
-                  <Button
-                    onClick={handleBasicAuthLogout}
-                    variant="outline"
-                    size="sm"
-                    className="w-full bg-red-500/10 border-red-500/30 hover:border-red-400/50 text-red-400 hover:text-red-300 hover:bg-red-500/20 transition-all duration-200"
-                  >
-                    <ExitIcon className="h-4 w-4 mr-2" />
-                    Logout
-                  </Button>
-                </div>
-                
-                {/* Clerk mobile auth buttons removed - using basic auth instead */}
               </div>
             </motion.div>
           )}

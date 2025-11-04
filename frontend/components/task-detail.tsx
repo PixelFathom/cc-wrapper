@@ -25,6 +25,8 @@ import { ExecutionResultModal } from './execution-result-modal'
 import { MarkdownRenderer } from './markdown-renderer'
 import { DeploymentGuideTab } from './deployment-guide-tab'
 import { ContestHarvestingTab } from './contest-harvesting-tab'
+import { IssueResolutionView } from './issue-resolution-view'
+import { MessagesTab } from './messages-tab'
 
 interface TaskDetailProps {
   projectId: string
@@ -32,7 +34,8 @@ interface TaskDetailProps {
 }
 
 export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
-  const [activeTab, setActiveTab] = useState<'deployment' | 'chat' | 'knowledge-base' | 'test-cases' | 'deployment-guide' | 'contest-harvesting'>('deployment')
+  // Will be set to 'issue-resolution' for issue tasks after loading
+  const [activeTab, setActiveTab] = useState<'deployment' | 'chat' | 'knowledge-base' | 'test-cases' | 'deployment-guide' | 'contest-harvesting' | 'issue-resolution' | 'messages'>('deployment')
   
   // Helper function to format duration
   const formatDuration = (start: Date, end: Date) => {
@@ -118,6 +121,13 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
       return newSet
     })
   }, [])
+
+  // Set default tab for issue resolution tasks
+  useEffect(() => {
+    if (task?.task_type === 'issue_resolution' && activeTab === 'deployment') {
+      setActiveTab('issue-resolution')
+    }
+  }, [task, activeTab])
 
   // Refetch task when deployment is completed
   useEffect(() => {
@@ -346,8 +356,22 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
       <div className="bg-card/50 backdrop-blur-sm rounded-lg sm:rounded-xl border border-border/50 p-1 mb-6 sm:mb-8 overflow-x-auto">
         <div className="flex space-x-1 min-w-max">
           {[
-            { id: 'deployment', label: 'Summary', icon: <ActivityLogIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
-            { id: 'chat', label: 'Chat', icon: <ChatBubbleIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
+            // Show Issue Resolution tab first for issue tasks
+            ...(task.task_type === 'issue_resolution' ? [
+              { id: 'issue-resolution', label: 'Issue Resolution', icon: <FileTextIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
+            ] : []),
+            // Show Messages tab for issue resolution tasks
+            ...(task.task_type === 'issue_resolution' ? [
+              { id: 'messages', label: 'Messages', icon: <ChatBubbleIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
+            ] : []),
+            // Show deployment tab for non-issue tasks
+            ...(task.task_type !== 'issue_resolution' ? [
+              { id: 'deployment', label: 'Summary', icon: <ActivityLogIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
+            ] : []),
+            // Hide Chat tab for issue resolution tasks - they have integrated chat
+            ...(task.task_type !== 'issue_resolution' ? [
+              { id: 'chat', label: 'Chat', icon: <ChatBubbleIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
+            ] : []),
             { id: 'knowledge-base', label: 'Knowledge Base', icon: <ReaderIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
             { id: 'test-cases', label: 'Test Cases', icon: <PlayIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
             { id: 'contest-harvesting', label: 'Context Harvesting', icon: <QuestionMarkCircledIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
@@ -542,7 +566,7 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
           </motion.div>
         )}
 
-        {activeTab === 'chat' && (
+        {activeTab === 'chat' && task.task_type !== 'issue_resolution' && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -638,6 +662,13 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
           <ContestHarvestingTab taskId={taskId} />
         )}
 
+        {activeTab === 'issue-resolution' && (
+          <IssueResolutionView projectId={projectId} taskId={taskId} />
+        )}
+
+        {activeTab === 'messages' && (
+          <MessagesTab projectId={projectId} taskId={taskId} />
+        )}
 
         {activeTab === 'test-cases' && (
           <motion.div

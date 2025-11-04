@@ -19,26 +19,40 @@ class DeploymentService:
         self.init_project_url = settings.init_project_url  # Remote service URL
         self.webhook_base_url = settings.webhook_base_url
         
-    async def initialize_project(self, db: AsyncSession, task_id: UUID) -> Optional[str]:
+    async def initialize_project(self, db: AsyncSession, task_id: UUID, github_token: Optional[str] = None) -> Optional[str]:
         """Initialize a project deployment for a task"""
-        # Get task with project
+        # Get task with project and user
         task = await db.get(Task, task_id)
         if not task:
             raise ValueError("Task not found")
-            
+
         await db.refresh(task, ["project"])
-        
-        # Build CWD path
-        cwd = f"{task.project.name}/{task.name}-{task.id}"
-        
+        await db.refresh(task.project, ["user"])
+
+        # Get GitHub token if not provided
+        if not github_token and task.project.user_id:
+            from app.services.github_auth_service import GitHubAuthService
+            auth_service = GitHubAuthService(db)
+            github_token = await auth_service.get_user_token(task.project.user_id)
+
+        # Build GitHub URL with auth token embedded
+        github_repo_url = task.project.repo_url
+        if github_token and task.project.repo_url:
+            # Convert https://github.com/owner/repo.git to https://TOKEN@github.com/owner/repo.git
+            if github_repo_url.startswith("https://github.com/"):
+                github_repo_url = github_repo_url.replace("https://github.com/", f"https://{github_token}@github.com/")
+
+        # Build CWD path as project_name/task.id
+        cwd = f"{task.project.name}/{task.id}"
+
         # Webhook URL for this task
         webhook_url = f"{self.webhook_base_url}/api/webhooks/deployment/{task.id}"
-        
+
         # Prepare init project request
         payload = {
             "organization_name": self.org_name,
             "project_name": cwd,
-            "github_repo_url": task.project.repo_url,
+            "github_repo_url": github_repo_url,
             "webhook_url": webhook_url
         }
         
@@ -161,17 +175,44 @@ class DeploymentService:
         
         # Update task status based on webhook
         status = webhook_data.get("status", "").upper()
+        task_type = webhook_data.get("task", "")  # e.g., "INIT_PROJECT"
+
         if status == "COMPLETED":
             task.deployment_completed = True
             task.deployment_completed_at = datetime.utcnow()
             task.deployment_status = "completed"
+
+            # For issue resolution tasks, trigger query after init completes
+            if task_type == "INIT_PROJECT" and task.task_type == "issue_resolution":
+                # Import here to avoid circular dependency
+                from app.models.issue_resolution import IssueResolution
+                from app.models.project import Project
+
+                # Get issue resolution record
+                stmt = select(IssueResolution).where(IssueResolution.task_id == task.id)
+                result = await db.execute(stmt)
+                resolution = result.scalar_one_or_none()
+                
+                if resolution:
+                    # Get project
+                    project = await db.get(Project, task.project_id)
+
+                    if project:
+                        # Import and trigger query
+                        from app.api.issue_resolution import trigger_issue_resolution_query
+
+                        # Trigger in background (fire and forget)
+                        # Pass IDs instead of objects to avoid session conflicts
+                        import asyncio
+                        asyncio.create_task(trigger_issue_resolution_query(task.id, resolution.id, project.id))
+
         elif status == "ERROR":
             task.deployment_status = "failed"
         elif status == "DEPLOYING":
             task.deployment_status = "deploying"
         elif status == "PROCESSING":
             task.deployment_status = "deploying"
-            
+
         await db.commit()
         
     async def get_deployment_hooks(self, db: AsyncSession, task_id: UUID, limit: int = 20) -> list[DeploymentHook]:

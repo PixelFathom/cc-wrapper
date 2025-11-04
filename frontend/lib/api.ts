@@ -238,6 +238,30 @@ class ApiClient {
     this.baseUrl = `${API_BASE_URL}/api`
   }
 
+  /**
+   * Get authentication headers from stored user
+   */
+  private getAuthHeaders(): HeadersInit {
+    const storedUser = typeof window !== 'undefined' ? localStorage.getItem('github_user') : null
+    if (!storedUser) {
+      throw new Error('User not authenticated. Please log in with GitHub.')
+    }
+
+    try {
+      const user = JSON.parse(storedUser)
+      if (!user.id) {
+        throw new Error('Invalid user data. Please re-authenticate.')
+      }
+
+      return {
+        'Content-Type': 'application/json',
+        'X-User-ID': user.id,
+      }
+    } catch (e) {
+      throw new Error('Failed to parse user data. Please re-authenticate.')
+    }
+  }
+
   private async request<T>(path: string, options?: RequestInit): Promise<T> {
     const response = await fetch(`${this.baseUrl}${path}`, {
       ...options,
@@ -254,29 +278,52 @@ class ApiClient {
     return response.json()
   }
 
-  // Projects
+  private async authenticatedRequest<T>(path: string, options?: RequestInit): Promise<T> {
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      ...options,
+      headers: {
+        ...this.getAuthHeaders(),
+        ...options?.headers,
+      },
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`API error (${response.status}): ${errorText}`)
+    }
+
+    return response.json()
+  }
+
+  // Projects (all require authentication)
   getProjects = async (): Promise<Project[]> => {
-    return this.request('/projects')
+    return this.authenticatedRequest('/projects')
   }
 
   createProject = async (data: { name: string; repo_url: string }): Promise<Project> => {
-    return this.request('/projects', {
+    return this.authenticatedRequest('/projects', {
       method: 'POST',
       body: JSON.stringify(data),
     })
   }
 
   getProject = async (id: string): Promise<Project> => {
-    return this.request(`/projects/${id}`)
+    return this.authenticatedRequest(`/projects/${id}`)
   }
 
-  // Tasks
+  deleteProject = async (id: string): Promise<void> => {
+    await this.authenticatedRequest(`/projects/${id}`, {
+      method: 'DELETE',
+    })
+  }
+
+  // Tasks (all require authentication)
   getTasks = async (projectId: string): Promise<Task[]> => {
-    return this.request(`/projects/${projectId}/tasks`)
+    return this.authenticatedRequest(`/projects/${projectId}/tasks`)
   }
 
-  createTask = async (data: { 
-    name: string; 
+  createTask = async (data: {
+    name: string;
     project_id: string;
     mcp_servers?: Array<{
       server_type: string;
@@ -285,21 +332,21 @@ class ApiClient {
       url?: string;
     }>
   }): Promise<Task> => {
-    return this.request('/tasks', {
+    return this.authenticatedRequest('/tasks', {
       method: 'POST',
       body: JSON.stringify(data),
     })
   }
 
   getTask = async (id: string): Promise<Task> => {
-    return this.request(`/tasks/${id}`)
+    return this.authenticatedRequest(`/tasks/${id}`)
   }
 
   getTaskSubProjects = async (taskId: string): Promise<{ task_id: string; sub_projects: Array<{ id: string; created_at: string }> }> => {
-    return this.request(`/tasks/${taskId}/sub-projects`)
+    return this.authenticatedRequest(`/tasks/${taskId}/sub-projects`)
   }
 
-  // Chat
+  // Chat (all require authentication)
   sendQuery = async (data: {
     prompt: string
     session_id?: string
@@ -307,9 +354,10 @@ class ApiClient {
     cwd: string
     webhook_url?: string
     bypass_mode?: boolean
+    permission_mode?: 'interactive' | 'bypassPermissions' | 'plan'
     agent_name?: string | null
   }): Promise<{ session_id: string; assistant_response: string; chat_id?: string }> => {
-    return this.request('/query', {
+    return this.authenticatedRequest('/query', {
       method: 'POST',
       body: JSON.stringify(data),
     })
@@ -320,7 +368,7 @@ class ApiClient {
     prompt: string
     session_id?: string
   }): Promise<{ session_id: string; assistant_response: string }> => {
-    return this.request(`/chats/${chatId}/query`, {
+    return this.authenticatedRequest(`/chats/${chatId}/query`, {
       method: 'POST',
       body: JSON.stringify(data),
     })
@@ -330,27 +378,27 @@ class ApiClient {
     const params = new URLSearchParams()
     if (sessionId) params.append('session_id', sessionId)
     params.append('limit', limit.toString())
-    
+
     const queryString = params.toString()
-    return this.request(`/chats/${chatId}/hooks${queryString ? `?${queryString}` : ''}`)
+    return this.authenticatedRequest(`/chats/${chatId}/hooks${queryString ? `?${queryString}` : ''}`)
   }
 
   getMessageHooks = async (messageId: string, limit: number = 50): Promise<ChatHooksResponse> => {
     const params = new URLSearchParams()
     params.append('limit', limit.toString())
-    
+
     const queryString = params.toString()
-    return this.request(`/messages/${messageId}/hooks${queryString ? `?${queryString}` : ''}`)
+    return this.authenticatedRequest(`/messages/${messageId}/hooks${queryString ? `?${queryString}` : ''}`)
   }
 
-  // Approvals
+  // Approvals (requires authentication)
   getPendingApprovals = async (params?: { cwd?: string; sub_project_id?: string }): Promise<Approval[]> => {
     const queryParams = new URLSearchParams()
     if (params?.cwd) queryParams.append('cwd', params.cwd)
     if (params?.sub_project_id) queryParams.append('sub_project_id', params.sub_project_id)
-    
+
     const queryString = queryParams.toString()
-    return this.request(`/approvals/pending${queryString ? `?${queryString}` : ''}`)
+    return this.authenticatedRequest(`/approvals/pending${queryString ? `?${queryString}` : ''}`)
   }
 
   submitApprovalResult = async (data: {
@@ -358,7 +406,7 @@ class ApiClient {
     decision: string
     comment?: string
   }): Promise<{ message: string }> => {
-    return this.request('/approvals/result', {
+    return this.authenticatedRequest('/approvals/result', {
       method: 'POST',
       body: JSON.stringify(data),
     })
@@ -391,21 +439,21 @@ class ApiClient {
     return new EventSource(`${this.baseUrl}/stream/${sessionId}`)
   }
 
-  // Deployment
+  // Deployment (all require authentication)
   getTaskDeploymentHooks = async (taskId: string, limit: number = 20): Promise<DeploymentHooksResponse> => {
-    return this.request(`/tasks/${taskId}/deployment-hooks?limit=${limit}`)
+    return this.authenticatedRequest(`/tasks/${taskId}/deployment-hooks?limit=${limit}`)
   }
 
   retryTaskDeployment = async (taskId: string): Promise<{ status: string; request_id?: string }> => {
-    return this.request(`/tasks/${taskId}/retry-deployment`, {
+    return this.authenticatedRequest(`/tasks/${taskId}/retry-deployment`, {
       method: 'POST',
     })
   }
 
-  // VS Code
+  // VS Code (requires authentication)
   getTaskVSCodeLink = async (taskId: string, filePath?: string): Promise<{ tunnel_link: string; tunnel_name: string }> => {
     const queryParams = filePath ? `?file_path=${encodeURIComponent(filePath)}` : ''
-    return this.request(`/tasks/${taskId}/vscode-link${queryParams}`)
+    return this.authenticatedRequest(`/tasks/${taskId}/vscode-link${queryParams}`)
   }
 
   // Knowledge Base
@@ -448,12 +496,12 @@ class ApiClient {
     }>
     total_files: number
   }> => {
-    return this.request(`/tasks/${taskId}/knowledge-base/files`)
+    return this.authenticatedRequest(`/tasks/${taskId}/knowledge-base/files`)
   }
 
-  // Test Cases
+  // Test Cases (all require authentication)
   getTestCases = async (taskId: string): Promise<TestCase[]> => {
-    return this.request(`/tasks/${taskId}/test-cases`)
+    return this.authenticatedRequest(`/tasks/${taskId}/test-cases`)
   }
 
   getTestCasesGrouped = async (taskId: string): Promise<{
@@ -469,7 +517,7 @@ class ApiClient {
       latest_execution: string | null
     }>
   }> => {
-    return this.request(`/tasks/${taskId}/test-cases/grouped`)
+    return this.authenticatedRequest(`/tasks/${taskId}/test-cases/grouped`)
   }
 
   createTestCase = async (taskId: string, data: {
@@ -478,14 +526,14 @@ class ApiClient {
     test_steps: string
     expected_result: string
   }): Promise<TestCase> => {
-    return this.request(`/tasks/${taskId}/test-cases`, {
+    return this.authenticatedRequest(`/tasks/${taskId}/test-cases`, {
       method: 'POST',
       body: JSON.stringify(data),
     })
   }
 
   getTestCase = async (testCaseId: string): Promise<TestCase> => {
-    return this.request(`/test-cases/${testCaseId}`)
+    return this.authenticatedRequest(`/test-cases/${testCaseId}`)
   }
 
   updateTestCase = async (testCaseId: string, data: {
@@ -495,14 +543,14 @@ class ApiClient {
     expected_result?: string
     status?: 'pending' | 'running' | 'passed' | 'failed'
   }): Promise<TestCase> => {
-    return this.request(`/test-cases/${testCaseId}`, {
+    return this.authenticatedRequest(`/test-cases/${testCaseId}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     })
   }
 
   deleteTestCase = async (testCaseId: string): Promise<{ message: string }> => {
-    return this.request(`/test-cases/${testCaseId}`, {
+    return this.authenticatedRequest(`/test-cases/${testCaseId}`, {
       method: 'DELETE',
     })
   }
@@ -512,23 +560,23 @@ class ApiClient {
     test_case_id: string
     status: string
   }> => {
-    return this.request(`/test-cases/${testCaseId}/execute`, {
+    return this.authenticatedRequest(`/test-cases/${testCaseId}/execute`, {
       method: 'POST',
     })
   }
 
   getTestCaseHooks = async (testCaseId: string): Promise<{ hooks: any[] }> => {
-    return this.request(`/test-cases/${testCaseId}/hooks`)
+    return this.authenticatedRequest(`/test-cases/${testCaseId}/hooks`)
   }
 
-  // AI Test Case Generation
+  // AI Test Case Generation (requires authentication)
   generateTestCasesFromSession = async (sessionId: string, data: {
     session_id: string
     max_test_cases?: number
     focus_areas?: string[]
   }): Promise<{
     generated_count: number
-    test_cases: Array<TestCase & { 
+    test_cases: Array<TestCase & {
       source: 'manual' | 'ai_generated'
       session_id?: string
       ai_model_used?: string
@@ -536,7 +584,7 @@ class ApiClient {
     }>
     generation_summary: string
   }> => {
-    return this.request(`/sessions/${sessionId}/generate-test-cases`, {
+    return this.authenticatedRequest(`/sessions/${sessionId}/generate-test-cases`, {
       method: 'POST',
       body: JSON.stringify(data),
     })
@@ -552,19 +600,19 @@ class ApiClient {
     executing_test_case_ids: string[]
     generation_summary: string
   }> => {
-    return this.request(`/sessions/${sessionId}/test-cases/generate-and-execute`, {
+    return this.authenticatedRequest(`/sessions/${sessionId}/test-cases/generate-and-execute`, {
       method: 'POST',
       body: JSON.stringify(data),
     })
   }
 
-  // Deployment Guide
+  // Deployment Guide (requires authentication)
   getDeploymentGuide = async (taskId: string): Promise<{
     content: string
     task_id: string
     updated_at: string | null
   }> => {
-    return this.request(`/tasks/${taskId}/deployment-guide`)
+    return this.authenticatedRequest(`/tasks/${taskId}/deployment-guide`)
   }
 
   updateDeploymentGuide = async (taskId: string, content: string): Promise<{
@@ -573,7 +621,7 @@ class ApiClient {
     content: string
     updated_at: string
   }> => {
-    return this.request(`/tasks/${taskId}/deployment-guide`, {
+    return this.authenticatedRequest(`/tasks/${taskId}/deployment-guide`, {
       method: 'PUT',
       body: JSON.stringify({ content }),
     })

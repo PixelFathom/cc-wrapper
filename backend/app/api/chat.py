@@ -9,8 +9,8 @@ import asyncio
 import logging
 from uuid import uuid4, UUID
 
-from app.deps import get_session, get_redis_client
-from app.models import Chat, SubProject, Project, Task, ChatHook
+from app.deps import get_session, get_redis_client, get_current_user
+from app.models import Chat, SubProject, Project, Task, ChatHook, User
 from app.schemas import QueryRequest, QueryResponse
 from app.services.cwd import parse_cwd
 from app.services.chat_service import chat_service
@@ -22,6 +22,7 @@ router = APIRouter()
 async def handle_query(
     request: QueryRequest,
     background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
     redis_client: redis.Redis = Depends(get_redis_client)
 ):
@@ -50,11 +51,18 @@ async def handle_query(
             .limit(1)
         )
         project = result.scalar_one_or_none()
-        
+
         if not project:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Project '{project_name}' not found"
+            )
+
+        # Authorization: verify user owns the project
+        if project.user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have permission to access this project"
             )
         
         # Find or create task
@@ -125,11 +133,12 @@ async def handle_query(
         print(f"webhook_session_id_to_use: {webhook_session_id_to_use}")
         # Use webhook session ID for remote service, UI session ID for database
         result = await chat_service.send_query(
-            session, 
-            chat.id, 
-            request.prompt, 
+            session,
+            chat.id,
+            request.prompt,
             webhook_session_id_to_use,  # Use webhook session_id for remote service
             request.bypass_mode,
+            request.permission_mode,
             request.agent_name
         )
         

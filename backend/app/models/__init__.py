@@ -11,8 +11,8 @@ from .knowledge_base_file import KnowledgeBaseFile
 from .test_case import TestCase, TestCaseCreate, TestCaseSource, TestCaseUpdate, TestCaseRead
 from .test_case_hook import TestCaseHook
 from .contest_harvesting import (
-    ContestHarvestingSession, 
-    HarvestingQuestion, 
+    ContestHarvestingSession,
+    HarvestingQuestion,
     ContestHarvestingStartRequest,
     ContestHarvestingStartResponse,
     QuestionAnswerRequest,
@@ -23,13 +23,20 @@ from .contest_harvesting import (
     HarvestingSessionListResponse,
     QuestionStatus
 )
+from .user import User
+from .user_token import UserToken
+from .audit_log import AuditLog
+from .github_repository import GitHubRepository
+from .github_issue import GitHubIssue
+from .issue_resolution import IssueResolution
 
 __all__ = [
-    "Project", "Task", "SubProject", "File", "Chat", "Approval", "DeploymentHook", 
+    "Project", "Task", "SubProject", "File", "Chat", "Approval", "DeploymentHook",
     "ChatHook", "ApprovalRequest", "KnowledgeBaseFile", "TestCase", "TestCaseHook",
     "TestCaseCreate", "TestCaseSource", "TestCaseUpdate", "TestCaseRead",
     "ContestHarvestingSession", "HarvestingQuestion", "ContestHarvestingStartRequest",
     "ContestHarvestingStartResponse", "QuestionAnswerRequest", "QuestionAnswerResponse",
     "HarvestingQuestionRead", "ContestHarvestingSessionRead", "QuestionSkipRequest",
-    "HarvestingSessionListResponse", "QuestionStatus"
+    "HarvestingSessionListResponse", "QuestionStatus",
+    "User", "UserToken", "AuditLog", "GitHubRepository", "GitHubIssue", "IssueResolution"
 ]

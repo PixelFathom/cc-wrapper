@@ -84,7 +84,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
   // Collapse all hooks by default for cleaner UI
   const [showAllHooks, setShowAllHooks] = useState(false)
   const [autoContinuationEnabled, setAutoContinuationEnabled] = useState(true)
-  const [bypassModeEnabled, setBypassModeEnabled] = useState(true)
+  const [permissionMode, setPermissionMode] = useState<'interactive' | 'bypassPermissions' | 'plan'>('bypassPermissions')
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null)
   const [showAgentDropdown, setShowAgentDropdown] = useState(false)
@@ -136,11 +136,11 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
   // Load preferences from localStorage after mount to avoid SSR hydration issues
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const savedBypass = localStorage.getItem('bypassModeEnabled')
-      if (savedBypass !== null) {
-        setBypassModeEnabled(savedBypass === 'true')
+      const savedPermissionMode = localStorage.getItem('permissionMode')
+      if (savedPermissionMode && (savedPermissionMode === 'interactive' || savedPermissionMode === 'bypassPermissions' || savedPermissionMode === 'plan')) {
+        setPermissionMode(savedPermissionMode as 'interactive' | 'bypassPermissions' | 'plan')
       }
-      
+
       const savedAutoScroll = localStorage.getItem('autoScrollEnabled')
       if (savedAutoScroll !== null) {
         setAutoScrollEnabled(savedAutoScroll === 'true')
@@ -159,12 +159,12 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
     })
   }, [projectName, taskName, subProjectId, initialSessionId, sessionId])
   
-  // Save bypass mode preference to localStorage whenever it changes
+  // Save permission mode preference to localStorage whenever it changes
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      localStorage.setItem('bypassModeEnabled', bypassModeEnabled.toString())
+      localStorage.setItem('permissionMode', permissionMode)
     }
-  }, [bypassModeEnabled])
+  }, [permissionMode])
   
   // Save auto-scroll preference to localStorage whenever it changes
   useEffect(() => {
@@ -181,15 +181,15 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
     }
   }, [initialSessionId])
   
-  // Load bypass mode preference from session metadata
+  // Load permission mode preference from session metadata
   useEffect(() => {
     if (messages.length > 0) {
-      // Find the last assistant message to get bypass mode preference
+      // Find the last assistant message to get permission mode preference
       const assistantMessages = messages.filter(m => m.role === 'assistant' && m.content?.metadata)
       const lastAssistantMessage = assistantMessages[assistantMessages.length - 1]
-      
-      if (lastAssistantMessage && lastAssistantMessage.content?.metadata?.bypass_mode_enabled !== undefined) {
-        setBypassModeEnabled(lastAssistantMessage.content.metadata.bypass_mode_enabled)
+
+      if (lastAssistantMessage && lastAssistantMessage.content?.metadata?.permission_mode) {
+        setPermissionMode(lastAssistantMessage.content.metadata.permission_mode)
       }
     }
   }, [messages])
@@ -217,7 +217,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
         ...data,
         org_name: 'default',
         cwd,
-        bypass_mode: bypassModeEnabled,
+        permission_mode: permissionMode,
         agent_name: selectedAgent,
       })
       
@@ -882,22 +882,32 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
               <div className="w-2.5 h-2.5 rounded-full bg-green-500"></div>
             </div>
             <span className="text-xs font-mono text-muted-foreground hidden sm:inline">developer-chat</span>
-            {/* Bypass Mode Indicator */}
+            {/* Permission Mode Indicator */}
             <div className={cn(
               "flex items-center gap-1 ml-2 px-2 py-0.5 rounded-full border",
-              bypassModeEnabled 
-                ? "bg-amber-500/20 border-amber-500/30" 
+              permissionMode === 'bypassPermissions'
+                ? "bg-amber-500/20 border-amber-500/30"
+                : permissionMode === 'plan'
+                ? "bg-purple-500/20 border-purple-500/30"
                 : "bg-gray-500/20 border-gray-500/30"
             )}>
               <GearIcon className={cn(
                 "h-3 w-3",
-                bypassModeEnabled ? "text-amber-500" : "text-gray-500"
+                permissionMode === 'bypassPermissions'
+                  ? "text-amber-500"
+                  : permissionMode === 'plan'
+                  ? "text-purple-500"
+                  : "text-gray-500"
               )} />
               <span className={cn(
                 "text-[10px] font-mono",
-                bypassModeEnabled ? "text-amber-500" : "text-gray-500"
+                permissionMode === 'bypassPermissions'
+                  ? "text-amber-500"
+                  : permissionMode === 'plan'
+                  ? "text-purple-500"
+                  : "text-gray-500"
               )}>
-                Bypass {bypassModeEnabled ? "ON" : "OFF"}
+                {permissionMode === 'bypassPermissions' ? 'Bypass' : permissionMode === 'plan' ? 'Plan' : 'Interactive'}
               </span>
             </div>
           </div>
@@ -928,32 +938,56 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
               )} />
               <span className="hidden sm:inline">Auto-scroll</span>
             </Button>
-            {/* Bypass Mode toggle - Always visible */}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={async () => {
-                const newState = !bypassModeEnabled
-                setBypassModeEnabled(newState)
-                // Only call API if we have an active session
-                if (sessionId) {
-                  try {
-                    await api.toggleBypassMode(sessionId, newState)
-                  } catch (error) {
-                    console.error('Failed to toggle bypass mode:', error)
-                    setBypassModeEnabled(!newState) // Revert on error
-                  }
-                }
-              }}
-              className="text-xs font-mono h-6 px-1 sm:px-2 flex items-center gap-1"
-              title={bypassModeEnabled ? 'Bypass mode enabled' : 'Bypass mode disabled'}
-            >
-              <GearIcon className={cn(
-                "h-3 w-3",
-                bypassModeEnabled ? "text-amber-500" : "text-gray-500"
-              )} />
-              <span className="hidden sm:inline">Bypass</span>
-            </Button>
+            {/* Permission Mode toggle - Cycles through modes */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-xs font-mono h-6 px-1 sm:px-2 flex items-center gap-1"
+                  title="Change permission mode"
+                >
+                  <GearIcon className={cn(
+                    "h-3 w-3",
+                    permissionMode === 'bypassPermissions'
+                      ? "text-amber-500"
+                      : permissionMode === 'plan'
+                      ? "text-purple-500"
+                      : "text-gray-500"
+                  )} />
+                  <span className="hidden sm:inline">Mode</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => setPermissionMode('interactive')}>
+                  <div className="flex items-center gap-2">
+                    <div className={cn(
+                      "w-2 h-2 rounded-full",
+                      permissionMode === 'interactive' ? "bg-gray-500" : "bg-transparent"
+                    )} />
+                    <span>Interactive (Approval Required)</span>
+                  </div>
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setPermissionMode('bypassPermissions')}>
+                  <div className="flex items-center gap-2">
+                    <div className={cn(
+                      "w-2 h-2 rounded-full",
+                      permissionMode === 'bypassPermissions' ? "bg-amber-500" : "bg-transparent"
+                    )} />
+                    <span>Bypass (Auto-execute)</span>
+                  </div>
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setPermissionMode('plan')}>
+                  <div className="flex items-center gap-2">
+                    <div className={cn(
+                      "w-2 h-2 rounded-full",
+                      permissionMode === 'plan' ? "bg-purple-500" : "bg-transparent"
+                    )} />
+                    <span>Plan (Planning Mode)</span>
+                  </div>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             {/* Auto-continuation toggle */}
             {sessionId && (
               <Button
@@ -1097,52 +1131,52 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                 All processing steps and tool usage will be shown in real-time.
               </div>
               
-              {/* Bypass Mode Selection for New Conversations */}
+              {/* Permission Mode Selection for New Conversations */}
               <div className="mt-6 p-4 bg-card/50 rounded-lg border border-border/50 max-w-sm mx-auto">
-                <div className="text-sm font-medium mb-3 text-foreground">Choose Approval Mode:</div>
+                <div className="text-sm font-medium mb-3 text-foreground">Choose Permission Mode:</div>
                 <div className="flex flex-col gap-2">
                   <button
-                    onClick={() => setBypassModeEnabled(false)}
+                    onClick={() => setPermissionMode('interactive')}
                     className={cn(
                       "p-3 rounded-md border transition-all text-left",
-                      !bypassModeEnabled 
-                        ? "border-cyan-500 bg-cyan-500/10 text-cyan-500" 
-                        : "border-border hover:border-cyan-500/50 hover:bg-muted/50"
+                      permissionMode === 'interactive'
+                        ? "border-gray-500 bg-gray-500/10 text-gray-300"
+                        : "border-border hover:border-gray-500/50 hover:bg-muted/50"
                     )}
                   >
                     <div className="flex items-center gap-2">
                       <div className={cn(
                         "w-4 h-4 rounded-full border-2",
-                        !bypassModeEnabled ? "border-cyan-500 bg-cyan-500" : "border-gray-500"
+                        permissionMode === 'interactive' ? "border-gray-500 bg-gray-500" : "border-gray-500"
                       )}>
-                        {!bypassModeEnabled && (
+                        {permissionMode === 'interactive' && (
                           <div className="w-2 h-2 bg-white rounded-full m-0.5" />
                         )}
                       </div>
                       <div>
-                        <div className="font-medium text-sm">Approval Required</div>
+                        <div className="font-medium text-sm">Interactive Mode</div>
                         <div className="text-xs text-muted-foreground">
                           Review and approve each tool use before execution
                         </div>
                       </div>
                     </div>
                   </button>
-                  
+
                   <button
-                    onClick={() => setBypassModeEnabled(true)}
+                    onClick={() => setPermissionMode('bypassPermissions')}
                     className={cn(
                       "p-3 rounded-md border transition-all text-left",
-                      bypassModeEnabled 
-                        ? "border-amber-500 bg-amber-500/10 text-amber-500" 
+                      permissionMode === 'bypassPermissions'
+                        ? "border-amber-500 bg-amber-500/10 text-amber-500"
                         : "border-border hover:border-amber-500/50 hover:bg-muted/50"
                     )}
                   >
                     <div className="flex items-center gap-2">
                       <div className={cn(
                         "w-4 h-4 rounded-full border-2",
-                        bypassModeEnabled ? "border-amber-500 bg-amber-500" : "border-gray-500"
+                        permissionMode === 'bypassPermissions' ? "border-amber-500 bg-amber-500" : "border-gray-500"
                       )}>
-                        {bypassModeEnabled && (
+                        {permissionMode === 'bypassPermissions' && (
                           <div className="w-2 h-2 bg-white rounded-full m-0.5" />
                         )}
                       </div>
@@ -1154,9 +1188,36 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                       </div>
                     </div>
                   </button>
+
+                  <button
+                    onClick={() => setPermissionMode('plan')}
+                    className={cn(
+                      "p-3 rounded-md border transition-all text-left",
+                      permissionMode === 'plan'
+                        ? "border-purple-500 bg-purple-500/10 text-purple-500"
+                        : "border-border hover:border-purple-500/50 hover:bg-muted/50"
+                    )}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className={cn(
+                        "w-4 h-4 rounded-full border-2",
+                        permissionMode === 'plan' ? "border-purple-500 bg-purple-500" : "border-gray-500"
+                      )}>
+                        {permissionMode === 'plan' && (
+                          <div className="w-2 h-2 bg-white rounded-full m-0.5" />
+                        )}
+                      </div>
+                      <div>
+                        <div className="font-medium text-sm">Plan Mode</div>
+                        <div className="text-xs text-muted-foreground">
+                          Planning mode for architectural decisions
+                        </div>
+                      </div>
+                    </div>
+                  </button>
                 </div>
                 <div className="mt-3 text-xs text-muted-foreground">
-                  You can change this anytime using the Bypass button above
+                  You can change this anytime using the Mode button above
                 </div>
               </div>
               

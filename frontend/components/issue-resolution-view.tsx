@@ -1,0 +1,914 @@
+'use client'
+
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import {
+  GitHubLogoIcon,
+  RocketIcon,
+  CheckCircledIcon,
+  CrossCircledIcon,
+  ReloadIcon,
+  ExclamationTriangleIcon,
+  FileTextIcon,
+  CodeIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+} from '@radix-ui/react-icons'
+import { Button } from './ui/button'
+import { Badge } from './ui/badge'
+import { Progress } from './ui/progress'
+import { Textarea } from './ui/textarea'
+import { motion, AnimatePresence } from 'framer-motion'
+import { getIssueResolutionStatus, createPullRequest, type IssueResolutionStatus } from '@/lib/api/issue-resolution'
+import { api } from '@/lib/api'
+import { useState, useRef, useEffect, useMemo } from 'react'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from './ui/dialog'
+import { Input } from './ui/input'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible'
+import ReactMarkdown from 'react-markdown'
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism'
+
+interface IssueResolutionViewProps {
+  projectId: string
+  taskId: string
+}
+
+export function IssueResolutionView({ projectId, taskId }: IssueResolutionViewProps) {
+  const [prDialogOpen, setPrDialogOpen] = useState(false)
+  const [prTitle, setPrTitle] = useState('')
+  const [prBody, setPrBody] = useState('')
+  const [prBranch, setPrBranch] = useState('')
+  const [expandedActivities, setExpandedActivities] = useState<Record<string, boolean>>({})
+  const [solutionOpen, setSolutionOpen] = useState(true)
+  const [filesOpen, setFilesOpen] = useState(false)
+  const [testsOpen, setTestsOpen] = useState(true)
+  const [prInfoOpen, setPrInfoOpen] = useState(true)
+  const [hooksOpen, setHooksOpen] = useState(false)
+  const [deploymentOpen, setDeploymentOpen] = useState(false)
+  const activityEndRef = useRef<HTMLDivElement>(null)
+  const queryClient = useQueryClient()
+
+  // Fetch resolution status
+  const { data: resolution, isLoading, error, refetch } = useQuery({
+    queryKey: ['issue-resolution', projectId, taskId],
+    queryFn: () => getIssueResolutionStatus(projectId, taskId),
+    refetchInterval: 5000, // Poll every 5 seconds
+  })
+
+  // Fetch chat messages
+  const { data: chatData } = useQuery({
+    queryKey: ['issue-chat-messages', resolution?.session_id],
+    queryFn: () => api.getSessionChats(resolution!.session_id!),
+    enabled: !!resolution?.session_id,
+    refetchInterval: 2000,
+  })
+
+  // Fetch hooks
+  const { data: hooksData } = useQuery({
+    queryKey: ['issue-chat-hooks', resolution?.chat_id],
+    queryFn: () => api.getChatHooks(resolution!.chat_id!),
+    enabled: !!resolution?.chat_id,
+    refetchInterval: 2000,
+  })
+
+  // Fetch task data for deployment status
+  const { data: taskData } = useQuery({
+    queryKey: ['task-data', taskId],
+    queryFn: () => api.getTask(taskId),
+    refetchInterval: 5000,
+  })
+
+  // Fetch deployment hooks
+  const { data: deploymentHooksData } = useQuery({
+    queryKey: ['deployment-hooks', taskId],
+    queryFn: () => api.getTaskDeploymentHooks(taskId, 100),
+    refetchInterval: 5000,
+  })
+
+  // Create PR mutation
+  const createPRMutation = useMutation({
+    mutationFn: () => createPullRequest(projectId, taskId, {
+      title: prTitle || undefined,
+      body: prBody || undefined,
+      branch: prBranch || undefined,
+    }),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['issue-resolution', projectId, taskId] })
+      setPrDialogOpen(false)
+      setPrTitle('')
+      setPrBody('')
+      setPrBranch('')
+      if (data.pr_url) {
+        window.open(data.pr_url, '_blank')
+      }
+    },
+  })
+
+  // Process hooks data
+  const hooks = useMemo(() => {
+    const hooksData_ = hooksData?.hooks || []
+
+    const hooksData_sorted = hooksData_
+      .map((hook: any) => ({
+        id: `hook-${hook.id}`,
+        timestamp: new Date(hook.created_at || hook.received_at),
+        data: hook,
+      }))
+      .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+
+    return hooksData_sorted
+  }, [hooksData])
+
+  // Auto-scroll to bottom when new activity arrives
+  useEffect(() => {
+    activityEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [hooks])
+
+  const getStateColor = (state: string) => {
+    switch (state) {
+      case 'pending':
+        return 'text-yellow-400 border-yellow-500/50 bg-yellow-500/10'
+      case 'initializing':
+      case 'analyzing':
+        return 'text-blue-400 border-blue-500/50 bg-blue-500/10'
+      case 'implementing':
+      case 'testing':
+        return 'text-cyan-400 border-cyan-500/50 bg-cyan-500/10'
+      case 'ready_for_pr':
+        return 'text-green-400 border-green-500/50 bg-green-500/10'
+      case 'pr_created':
+        return 'text-purple-400 border-purple-500/50 bg-purple-500/10'
+      case 'completed':
+        return 'text-green-400 border-green-500/50 bg-green-500/10'
+      case 'failed':
+        return 'text-red-400 border-red-500/50 bg-red-500/10'
+      default:
+        return 'text-gray-400 border-gray-500/50 bg-gray-500/10'
+    }
+  }
+
+  const getProgress = (state: string): number => {
+    const stateProgress: Record<string, number> = {
+      pending: 0,
+      initializing: 10,
+      analyzing: 25,
+      implementing: 50,
+      testing: 75,
+      ready_for_pr: 90,
+      pr_created: 95,
+      completed: 100,
+      failed: 0,
+    }
+    return stateProgress[state] || 0
+  }
+
+  const formatState = (state: string): string => {
+    return state.split('_').map(word =>
+      word.charAt(0).toUpperCase() + word.slice(1)
+    ).join(' ')
+  }
+
+  const getHookIcon = (status: string) => {
+    switch (status) {
+      case 'completed':
+        return <CheckCircledIcon className="h-4 w-4 text-green-400" />
+      case 'processing':
+        return <ReloadIcon className="h-4 w-4 animate-spin text-blue-400" />
+      case 'failed':
+        return <ExclamationTriangleIcon className="h-4 w-4 text-red-400" />
+      default:
+        return <RocketIcon className="h-4 w-4 text-gray-400" />
+    }
+  }
+
+  const toggleActivityExpand = (id: string) => {
+    setExpandedActivities(prev => ({
+      ...prev,
+      [id]: !prev[id]
+    }))
+  }
+
+  const handleCreatePR = () => {
+    if (resolution) {
+      setPrTitle(`Fix: Resolve issue #${resolution.issue_number}`)
+      setPrBody(`## Description\nThis PR resolves #${resolution.issue_number}\n\n${resolution.solution_approach || ''}\n\nCloses #${resolution.issue_number}`)
+      setPrBranch(resolution.resolution_branch || '')
+    }
+    setPrDialogOpen(true)
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="text-center space-y-4">
+          <ReloadIcon className="h-8 w-8 animate-spin text-cyan-500 mx-auto" />
+          <p className="text-sm font-mono text-muted-foreground">Loading resolution status...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="py-12 text-center space-y-4">
+        <ExclamationTriangleIcon className="h-12 w-12 text-red-400 mx-auto" />
+        <p className="text-red-400 font-mono text-sm">Failed to load resolution status</p>
+        <Button onClick={() => refetch()} variant="outline" className="font-mono">
+          <ReloadIcon className="mr-2 h-4 w-4" />
+          Retry
+        </Button>
+      </div>
+    )
+  }
+
+  if (!resolution) {
+    return (
+      <div className="py-12 text-center space-y-4">
+        <GitHubLogoIcon className="h-12 w-12 text-muted-foreground mx-auto opacity-50" />
+        <p className="text-muted-foreground font-mono text-sm">
+          No resolution found for this task
+        </p>
+      </div>
+    )
+  }
+
+  const progress = getProgress(resolution.resolution_state)
+
+  return (
+    <div className="space-y-6 pb-8">
+      {/* Issue Header */}
+      <motion.div
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="p-4 rounded-lg border border-border bg-card/50"
+      >
+        <div className="flex items-start justify-between mb-3">
+          <div className="flex items-center gap-3">
+            <GitHubLogoIcon className="h-6 w-6 text-cyan-500" />
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-xs font-mono text-muted-foreground">#{resolution.issue_number}</span>
+                <Badge variant="outline" className={getStateColor(resolution.resolution_state)}>
+                  {formatState(resolution.resolution_state)}
+                </Badge>
+              </div>
+              <h2 className="text-lg font-mono font-semibold text-cyan-400">
+                {resolution.issue_title}
+              </h2>
+            </div>
+          </div>
+        </div>
+
+        {resolution.issue_body && (
+          <div className="text-xs text-muted-foreground font-mono mb-3 prose prose-invert prose-sm max-w-none
+            prose-p:text-muted-foreground prose-p:font-mono prose-p:text-xs prose-p:leading-relaxed
+            prose-code:text-cyan-400 prose-code:bg-cyan-500/10 prose-code:px-1 prose-code:rounded prose-code:text-xs
+            line-clamp-3"
+          >
+            <ReactMarkdown>{resolution.issue_body}</ReactMarkdown>
+          </div>
+        )}
+
+        {resolution.issue_labels && resolution.issue_labels.length > 0 && (
+          <div className="flex gap-2 flex-wrap">
+            {resolution.issue_labels.map(label => (
+              <Badge
+                key={label}
+                variant="outline"
+                className="text-xs bg-cyan-500/10 text-cyan-400 border-cyan-500/50"
+              >
+                {label}
+              </Badge>
+            ))}
+          </div>
+        )}
+      </motion.div>
+
+
+      {/* Tool Executions / Hooks Section */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+      >
+        <Collapsible open={hooksOpen} onOpenChange={setHooksOpen}>
+          <div className="rounded-lg border border-orange-500/30 bg-card/50">
+            <CollapsibleTrigger className="w-full p-4 flex items-center justify-between hover:bg-orange-500/5 transition-colors">
+              <div className="flex items-center gap-2">
+                <CodeIcon className="h-4 w-4 text-orange-500" />
+                <h3 className="text-sm font-mono font-semibold text-orange-400">Tool Executions</h3>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="text-xs bg-orange-500/10 border-orange-500/30 text-orange-400">
+                  {hooks.length} executions
+                </Badge>
+                {hooksOpen ? (
+                  <ChevronDownIcon className="h-4 w-4 text-orange-400" />
+                ) : (
+                  <ChevronRightIcon className="h-4 w-4 text-orange-400" />
+                )}
+              </div>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <div className="px-4 pb-4 border-t border-orange-500/20 pt-3 space-y-2 max-h-[400px] overflow-y-auto scroll-smooth">
+                {hooks.length === 0 ? (
+                  <div className="text-center py-12 text-muted-foreground text-xs font-mono">
+                    <ReloadIcon className="h-8 w-8 animate-spin mx-auto mb-3 text-orange-500/50" />
+                    <p>No tool executions yet...</p>
+                  </div>
+                ) : (
+                  <AnimatePresence>
+                    {hooks.map((hook) => (
+                <motion.div
+                  key={hook.id}
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="rounded-lg border border-orange-500/30 bg-orange-500/5 overflow-hidden"
+                >
+                  <div className="p-3">
+                    <button
+                      onClick={() => toggleActivityExpand(hook.id)}
+                      className="w-full flex items-center gap-2 text-left hover:bg-orange-500/10 transition-colors rounded px-2 py-1 -mx-2 -my-1"
+                    >
+                      {getHookIcon(hook.data.status)}
+                      <span className="text-xs font-mono font-semibold flex-1 text-orange-400">
+                        {hook.data.step_name || hook.data.hook_type || 'System Event'}
+                      </span>
+                      {hook.data.step_index !== null && hook.data.total_steps && (
+                        <Badge variant="outline" className="text-xs bg-orange-500/10 border-orange-500/30 text-orange-400">
+                          Step {hook.data.step_index}/{hook.data.total_steps}
+                        </Badge>
+                      )}
+                      <span className="text-xs text-muted-foreground font-mono">
+                        {hook.timestamp.toLocaleTimeString()}
+                      </span>
+                      {hook.data.message && (
+                        <Badge variant="outline" className="text-xs">
+                          {expandedActivities[hook.id] ? 'Hide' : 'Show'} Details
+                        </Badge>
+                      )}
+                      {hook.data.message && (
+                        expandedActivities[hook.id] ? (
+                          <ChevronDownIcon className="h-4 w-4 text-orange-400" />
+                        ) : (
+                          <ChevronRightIcon className="h-4 w-4 text-orange-400" />
+                        )
+                      )}
+                    </button>
+
+                    {expandedActivities[hook.id] && hook.data.message && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="mt-3 pl-6 pt-3 border-t border-orange-500/20 bg-orange-500/10 rounded-md p-3 -ml-3 -mr-3 -mb-3"
+                      >
+                        <div className="flex items-center gap-2 mb-2">
+                          <Badge variant="outline" className="text-xs bg-orange-500/10 border-orange-500/30 text-orange-400">
+                            Execution Details
+                          </Badge>
+                        </div>
+                        <div className="text-xs prose prose-invert prose-sm max-w-none
+                          prose-headings:text-cyan-400 prose-headings:font-mono
+                          prose-p:text-foreground/80 prose-p:font-mono prose-p:leading-relaxed
+                          prose-code:text-cyan-400 prose-code:bg-cyan-500/10 prose-code:px-1 prose-code:rounded prose-code:font-mono
+                          prose-pre:bg-card/50 prose-pre:border prose-pre:border-border/50 prose-pre:rounded
+                        ">
+                          <ReactMarkdown
+                            components={{
+                              code({ node, inline, className, children, ...props }: any) {
+                                const match = /language-(\w+)/.exec(className || '')
+                                return !inline && match ? (
+                                  <SyntaxHighlighter
+                                    style={vscDarkPlus as any}
+                                    language={match[1]}
+                                    PreTag="div"
+                                    className="rounded text-xs"
+                                    {...props}
+                                  >
+                                    {String(children).replace(/\n$/, '')}
+                                  </SyntaxHighlighter>
+                                ) : (
+                                  <code className={className} {...props}>
+                                    {children}
+                                  </code>
+                                )
+                              }
+                            }}
+                          >
+                            {hook.data.message}
+                          </ReactMarkdown>
+                        </div>
+                      </motion.div>
+                    )}
+                  </div>
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
+                )}
+              </div>
+            </CollapsibleContent>
+          </div>
+        </Collapsible>
+      </motion.div>
+
+      {/* Deployment Section */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+      >
+        <Collapsible open={deploymentOpen} onOpenChange={setDeploymentOpen}>
+          <div className="rounded-lg border border-green-500/30 bg-card/50">
+            <CollapsibleTrigger className="w-full p-4 flex items-center justify-between hover:bg-green-500/5 transition-colors">
+              <div className="flex items-center gap-2">
+                <RocketIcon className="h-4 w-4 text-green-500" />
+                <h3 className="text-sm font-mono font-semibold text-green-400">Deployment</h3>
+              </div>
+              <div className="flex items-center gap-2">
+                {deploymentHooksData?.hooks && (
+                  <Badge variant="outline" className="text-xs bg-green-500/10 border-green-500/30 text-green-400">
+                    {deploymentHooksData.hooks.length} hooks
+                  </Badge>
+                )}
+                <Badge variant="outline" className={`text-xs ${
+                  taskData?.deployment_completed
+                    ? 'bg-green-500/10 border-green-500/30 text-green-400'
+                    : 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400'
+                }`}>
+                  {taskData?.deployment_completed ? 'Completed' : taskData?.deployment_status || 'Pending'}
+                </Badge>
+                {deploymentOpen ? (
+                  <ChevronDownIcon className="h-4 w-4 text-green-400" />
+                ) : (
+                  <ChevronRightIcon className="h-4 w-4 text-green-400" />
+                )}
+              </div>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <div className="px-4 pb-4 border-t border-green-500/20 pt-3 space-y-3">
+                {/* Deployment Status Summary */}
+                <div className="grid grid-cols-2 gap-4 text-xs font-mono">
+                  <div className="p-3 rounded-lg border border-border/30 bg-muted/10">
+                    <span className="text-muted-foreground">Status:</span>
+                    <p className="mt-2 text-foreground font-semibold">{taskData?.deployment_status || 'Not Started'}</p>
+                  </div>
+                  <div className="p-3 rounded-lg border border-border/30 bg-muted/10">
+                    <span className="text-muted-foreground">Completed:</span>
+                    <p className="mt-2 text-foreground font-semibold">
+                      {taskData?.deployment_completed ? (
+                        <span className="text-green-400">✓ Yes</span>
+                      ) : (
+                        <span className="text-yellow-400">○ No</span>
+                      )}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Timestamps */}
+                {taskData?.deployment_started_at && (
+                  <div className="p-3 rounded-lg border border-border/30 bg-muted/10 text-xs">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-muted-foreground font-mono">Started At:</span>
+                      <span className="text-foreground">{new Date(taskData.deployment_started_at).toLocaleString()}</span>
+                    </div>
+                    {taskData?.deployment_completed_at && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-muted-foreground font-mono">Completed At:</span>
+                        <span className="text-foreground">{new Date(taskData.deployment_completed_at).toLocaleString()}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Request ID */}
+                {taskData?.deployment_request_id && (
+                  <div className="p-2 rounded bg-muted/20 text-center">
+                    <p className="text-xs text-muted-foreground font-mono">
+                      Request ID: <span className="text-cyan-400 font-semibold">{taskData.deployment_request_id}</span>
+                    </p>
+                  </div>
+                )}
+
+                {/* Deployment Hooks */}
+                {deploymentHooksData?.hooks && deploymentHooksData.hooks.length > 0 && (
+                  <div className="space-y-2">
+                    <h4 className="text-xs font-mono font-semibold text-green-400 flex items-center gap-2">
+                      <CodeIcon className="h-3 w-3" />
+                      Deployment Hooks ({deploymentHooksData.hooks.length})
+                    </h4>
+                    <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                      {deploymentHooksData.hooks.map((hook) => (
+                        <div
+                          key={hook.id}
+                          className="rounded-lg border border-green-500/30 bg-green-500/5 overflow-hidden"
+                        >
+                          <div className="p-3">
+                            <button
+                              onClick={() => toggleActivityExpand(`deploy-${hook.id}`)}
+                              className="w-full flex items-center gap-2 text-left hover:bg-green-500/10 transition-colors rounded px-2 py-1 -mx-2 -my-1"
+                            >
+                              {getHookIcon(hook.status)}
+                              <span className="text-xs font-mono font-semibold flex-1 text-green-400">
+                                {hook.hook_type || 'Deployment Event'}
+                              </span>
+                              <Badge variant="outline" className="text-xs bg-green-500/10 border-green-500/30 text-green-400">
+                                {hook.status}
+                              </Badge>
+                              <span className="text-xs text-muted-foreground font-mono">
+                                {new Date(hook.received_at).toLocaleTimeString()}
+                              </span>
+                              {hook.message && (
+                                <Badge variant="outline" className="text-xs">
+                                  {expandedActivities[`deploy-${hook.id}`] ? 'Hide' : 'Show'} Details
+                                </Badge>
+                              )}
+                              {hook.message && (
+                                expandedActivities[`deploy-${hook.id}`] ? (
+                                  <ChevronDownIcon className="h-4 w-4 text-green-400" />
+                                ) : (
+                                  <ChevronRightIcon className="h-4 w-4 text-green-400" />
+                                )
+                              )}
+                            </button>
+
+                            {expandedActivities[`deploy-${hook.id}`] && hook.message && (
+                              <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: 'auto', opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                className="mt-3 pl-6 pt-3 border-t border-green-500/20 bg-green-500/10 rounded-md p-3 -ml-3 -mr-3 -mb-3"
+                              >
+                                <div className="flex items-center gap-2 mb-2">
+                                  <Badge variant="outline" className="text-xs bg-green-500/10 border-green-500/30 text-green-400">
+                                    Hook Details
+                                  </Badge>
+                                </div>
+                                <div className="text-xs prose prose-invert prose-sm max-w-none
+                                  prose-headings:text-green-400 prose-headings:font-mono
+                                  prose-p:text-foreground/80 prose-p:font-mono prose-p:leading-relaxed
+                                  prose-code:text-green-400 prose-code:bg-green-500/10 prose-code:px-1 prose-code:rounded prose-code:font-mono
+                                  prose-pre:bg-card/50 prose-pre:border prose-pre:border-border/50 prose-pre:rounded
+                                ">
+                                  <ReactMarkdown
+                                    components={{
+                                      code({ node, inline, className, children, ...props }: any) {
+                                        const match = /language-(\w+)/.exec(className || '')
+                                        return !inline && match ? (
+                                          <SyntaxHighlighter
+                                            style={vscDarkPlus as any}
+                                            language={match[1]}
+                                            PreTag="div"
+                                            className="rounded text-xs"
+                                            {...props}
+                                          >
+                                            {String(children).replace(/\n$/, '')}
+                                          </SyntaxHighlighter>
+                                        ) : (
+                                          <code className={className} {...props}>
+                                            {children}
+                                          </code>
+                                        )
+                                      }
+                                    }}
+                                  >
+                                    {hook.message}
+                                  </ReactMarkdown>
+                                </div>
+                                {hook.data && Object.keys(hook.data).length > 0 && (
+                                  <div className="mt-2 p-2 rounded bg-card/50 border border-border/30">
+                                    <p className="text-xs font-mono text-muted-foreground mb-1">Hook Data:</p>
+                                    <pre className="text-xs text-foreground/80 font-mono overflow-x-auto">
+                                      {JSON.stringify(hook.data, null, 2)}
+                                    </pre>
+                                  </div>
+                                )}
+                              </motion.div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </CollapsibleContent>
+          </div>
+        </Collapsible>
+      </motion.div>
+
+      {/* Solution Details */}
+      {resolution.solution_approach && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+        >
+          <Collapsible open={solutionOpen} onOpenChange={setSolutionOpen}>
+            <div className="rounded-lg border border-border bg-card/50">
+              <CollapsibleTrigger className="w-full p-4 flex items-center justify-between hover:bg-muted/10 transition-colors">
+                <div className="flex items-center gap-2">
+                  <FileTextIcon className="h-4 w-4 text-cyan-500" />
+                  <h3 className="text-sm font-mono font-semibold">Solution Approach</h3>
+                </div>
+                {solutionOpen ? (
+                  <ChevronDownIcon className="h-4 w-4 text-cyan-400" />
+                ) : (
+                  <ChevronRightIcon className="h-4 w-4 text-cyan-400" />
+                )}
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <div className="px-4 pb-4 border-t border-border/50 pt-3">
+                  <div className="text-xs prose prose-invert prose-sm max-w-none
+                    prose-headings:text-cyan-400 prose-headings:font-mono
+                    prose-p:text-muted-foreground prose-p:font-mono prose-p:leading-relaxed
+                    prose-ul:list-disc prose-ul:pl-4 prose-ol:list-decimal prose-ol:pl-4
+                    prose-li:text-muted-foreground prose-li:font-mono
+                    prose-code:text-cyan-400 prose-code:bg-cyan-500/10 prose-code:px-1 prose-code:rounded
+                  ">
+                    <ReactMarkdown>{resolution.solution_approach}</ReactMarkdown>
+                  </div>
+                </div>
+              </CollapsibleContent>
+            </div>
+          </Collapsible>
+        </motion.div>
+      )}
+
+      {/* Files Changed */}
+      {resolution.files_changed && resolution.files_changed.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+        >
+          <Collapsible open={filesOpen} onOpenChange={setFilesOpen}>
+            <div className="rounded-lg border border-border bg-card/50">
+              <CollapsibleTrigger className="w-full p-4 flex items-center justify-between hover:bg-muted/10 transition-colors">
+                <div className="flex items-center gap-2">
+                  <CodeIcon className="h-4 w-4 text-cyan-500" />
+                  <h3 className="text-sm font-mono font-semibold">
+                    Files Changed
+                  </h3>
+                  <Badge variant="outline" className="text-xs bg-cyan-500/10 border-cyan-500/30 text-cyan-400">
+                    {resolution.files_changed.length}
+                  </Badge>
+                </div>
+                {filesOpen ? (
+                  <ChevronDownIcon className="h-4 w-4 text-cyan-400" />
+                ) : (
+                  <ChevronRightIcon className="h-4 w-4 text-cyan-400" />
+                )}
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <div className="px-4 pb-4 border-t border-border/50 pt-3 space-y-1 max-h-[300px] overflow-y-auto">
+                  {resolution.files_changed.map((file, idx) => (
+                    <div key={idx} className="text-xs font-mono text-muted-foreground hover:text-cyan-400 transition-colors py-1 px-2 rounded hover:bg-cyan-500/5">
+                      {file}
+                    </div>
+                  ))}
+                </div>
+              </CollapsibleContent>
+            </div>
+          </Collapsible>
+        </motion.div>
+      )}
+
+      {/* Test Results */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+      >
+        <Collapsible open={testsOpen} onOpenChange={setTestsOpen}>
+          <div className="rounded-lg border border-border bg-card/50">
+            <CollapsibleTrigger className="w-full p-4 flex items-center justify-between hover:bg-muted/10 transition-colors">
+              <div className="flex items-center gap-2">
+                <CheckCircledIcon className="h-4 w-4 text-cyan-500" />
+                <h3 className="text-sm font-mono font-semibold">Test Cases</h3>
+                <Badge variant="outline" className="text-xs bg-green-500/10 border-green-500/30 text-green-400">
+                  {resolution.test_cases_passed}/{resolution.test_cases_generated}
+                </Badge>
+              </div>
+              {testsOpen ? (
+                <ChevronDownIcon className="h-4 w-4 text-cyan-400" />
+              ) : (
+                <ChevronRightIcon className="h-4 w-4 text-cyan-400" />
+              )}
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <div className="px-4 pb-4 border-t border-border/50 pt-3">
+                <div className="grid grid-cols-2 gap-4 text-xs font-mono">
+                  <div className="p-3 rounded-lg border border-cyan-500/30 bg-cyan-500/5">
+                    <span className="text-muted-foreground">Generated:</span>
+                    <p className="mt-2 text-cyan-400 text-2xl font-bold">{resolution.test_cases_generated}</p>
+                  </div>
+                  <div className="p-3 rounded-lg border border-green-500/30 bg-green-500/5">
+                    <span className="text-muted-foreground">Passed:</span>
+                    <p className="mt-2 text-green-400 text-2xl font-bold">{resolution.test_cases_passed}</p>
+                  </div>
+                </div>
+                {resolution.test_cases_generated > 0 && (
+                  <div className="mt-3 p-2 rounded bg-muted/20 text-center">
+                    <p className="text-xs text-muted-foreground font-mono">
+                      Success Rate: <span className="text-cyan-400 font-semibold">
+                        {Math.round((resolution.test_cases_passed / resolution.test_cases_generated) * 100)}%
+                      </span>
+                    </p>
+                  </div>
+                )}
+              </div>
+            </CollapsibleContent>
+          </div>
+        </Collapsible>
+      </motion.div>
+
+      {/* PR Information */}
+      {resolution.pr_number && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+        >
+          <Collapsible open={prInfoOpen} onOpenChange={setPrInfoOpen}>
+            <div className="rounded-lg border border-green-500/50 bg-green-500/10">
+              <CollapsibleTrigger className="w-full p-4 flex items-center justify-between hover:bg-green-500/20 transition-colors">
+                <div className="flex items-center gap-2">
+                  <GitHubLogoIcon className="h-4 w-4 text-green-400" />
+                  <h3 className="text-sm font-mono font-semibold text-green-400">Pull Request Created</h3>
+                  <Badge variant="outline" className="text-xs bg-green-500/20 border-green-500/50 text-green-300">
+                    #{resolution.pr_number}
+                  </Badge>
+                </div>
+                {prInfoOpen ? (
+                  <ChevronDownIcon className="h-4 w-4 text-green-400" />
+                ) : (
+                  <ChevronRightIcon className="h-4 w-4 text-green-400" />
+                )}
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <div className="px-4 pb-4 border-t border-green-500/30 pt-3">
+                  <div className="space-y-3 text-xs font-mono">
+                    <div className="flex items-center justify-between p-2 rounded bg-green-500/10">
+                      <span className="text-muted-foreground">PR Number:</span>
+                      <span className="text-green-400 font-semibold">#{resolution.pr_number}</span>
+                    </div>
+                    <div className="flex items-center justify-between p-2 rounded bg-green-500/10">
+                      <span className="text-muted-foreground">Status:</span>
+                      <Badge variant="outline" className="text-green-400 border-green-500/50 bg-green-500/20">
+                        {resolution.pr_state}
+                      </Badge>
+                    </div>
+                    {resolution.pr_url && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => window.open(resolution.pr_url!, '_blank')}
+                        className="w-full font-mono border-green-500/50 text-green-400 hover:bg-green-500/20 hover:border-green-500"
+                      >
+                        <GitHubLogoIcon className="mr-2 h-4 w-4" />
+                        View Pull Request on GitHub
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </CollapsibleContent>
+            </div>
+          </Collapsible>
+        </motion.div>
+      )}
+
+      {/* Error Message */}
+      {resolution.error_message && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="p-4 rounded-lg border border-red-500/50 bg-red-500/10 space-y-2"
+        >
+          <h3 className="text-sm font-mono font-semibold flex items-center gap-2 text-red-400">
+            <ExclamationTriangleIcon className="h-4 w-4" />
+            Error
+          </h3>
+          <p className="text-xs text-red-400 font-mono whitespace-pre-wrap">
+            {resolution.error_message}
+          </p>
+        </motion.div>
+      )}
+
+      {/* Actions */}
+      <div className="flex items-center gap-3">
+        {resolution.resolution_state === 'ready_for_pr' && !resolution.pr_number && (
+          <Button
+            onClick={handleCreatePR}
+            disabled={createPRMutation.isPending}
+            className="bg-green-500 hover:bg-green-600 text-black font-mono"
+          >
+            {createPRMutation.isPending ? (
+              <>
+                <ReloadIcon className="animate-spin h-4 w-4 mr-2" />
+                Creating PR...
+              </>
+            ) : (
+              <>
+                <GitHubLogoIcon className="mr-2 h-4 w-4" />
+                Create Pull Request
+              </>
+            )}
+          </Button>
+        )}
+
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => refetch()}
+          className="font-mono hover:text-cyan-500"
+        >
+          <ReloadIcon className="h-4 w-4 mr-2" />
+          Refresh Status
+        </Button>
+      </div>
+
+
+      {/* Create PR Dialog */}
+      <Dialog open={prDialogOpen} onOpenChange={setPrDialogOpen}>
+        <DialogContent className="sm:max-w-[600px] terminal-bg border-cyan-500/50">
+          <DialogHeader>
+            <DialogTitle className="font-mono flex items-center gap-2">
+              <GitHubLogoIcon className="h-5 w-5 text-cyan-500" />
+              Create Pull Request
+            </DialogTitle>
+            <DialogDescription className="font-mono text-xs">
+              Create a PR for issue #{resolution.issue_number}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-xs font-mono text-muted-foreground">
+                PR Title
+              </label>
+              <Input
+                value={prTitle}
+                onChange={(e) => setPrTitle(e.target.value)}
+                placeholder="Fix: Resolve issue #..."
+                className="bg-card/50 border-muted-foreground/30 focus:border-cyan-500 font-mono"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-mono text-muted-foreground">
+                PR Body
+              </label>
+              <Textarea
+                value={prBody}
+                onChange={(e) => setPrBody(e.target.value)}
+                placeholder="Description of changes..."
+                rows={6}
+                className="bg-card/50 border-muted-foreground/30 focus:border-cyan-500 font-mono text-xs"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-mono text-muted-foreground">
+                Branch (optional)
+              </label>
+              <Input
+                value={prBranch}
+                onChange={(e) => setPrBranch(e.target.value)}
+                placeholder={resolution.resolution_branch || 'Branch name...'}
+                className="bg-card/50 border-muted-foreground/30 focus:border-cyan-500 font-mono"
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setPrDialogOpen(false)}
+              className="font-mono"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => createPRMutation.mutate()}
+              disabled={createPRMutation.isPending}
+              className="bg-green-500 hover:bg-green-600 text-black font-mono"
+            >
+              {createPRMutation.isPending ? (
+                <>
+                  <ReloadIcon className="animate-spin h-4 w-4 mr-2" />
+                  Creating...
+                </>
+              ) : (
+                'Create PR'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}

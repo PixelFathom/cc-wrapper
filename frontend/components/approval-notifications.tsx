@@ -14,12 +14,29 @@ import { ApprovalModal } from './approval-modal'
 import { MCPApprovalModal } from './mcp-approval-modal'
 import { cn } from '@/lib/utils'
 
+// Helper to check authentication synchronously
+const checkAuth = () => {
+  if (typeof window === 'undefined') return false
+  try {
+    const storedUser = localStorage.getItem('github_user')
+    return !!storedUser
+  } catch {
+    return false
+  }
+}
+
 export function ApprovalNotifications() {
   const [isOpen, setIsOpen] = useState(false)
   const [selectedApproval, setSelectedApproval] = useState<any>(null)
+  const [isAuth, setIsAuth] = useState(false)
   const queryClient = useQueryClient()
 
-  // Poll for pending approvals across all projects every 2 seconds
+  // Check authentication status on mount
+  useEffect(() => {
+    setIsAuth(checkAuth())
+  }, [])
+
+  // Poll for pending approvals across all projects every 3 seconds - ONLY if authenticated
   const { data: allApprovals = [] } = useQuery({
     queryKey: ['global-approvals'],
     queryFn: async () => {
@@ -27,11 +44,13 @@ export function ApprovalNotifications() {
         // Fetch all pending approvals (no filters)
         return await api.getPendingApprovals()
       } catch (error) {
-        console.error('Failed to fetch approvals:', error)
+        // Silently return empty array if not authenticated
         return []
       }
     },
-    refetchInterval: 3000, // Poll every 3 seconds for better performance
+    refetchInterval: isAuth ? 3000 : false, // Only poll if authenticated
+    enabled: isAuth, // Only run query if user is authenticated
+    retry: false, // Don't retry on auth errors
   })
 
   const approvalCount = allApprovals.length

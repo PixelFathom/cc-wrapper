@@ -26,12 +26,29 @@ interface ApprovalItem {
   urgency: 'high' | 'medium' | 'low'
 }
 
+// Helper to check authentication synchronously
+const checkAuth = () => {
+  if (typeof window === 'undefined') return false
+  try {
+    const storedUser = localStorage.getItem('github_user')
+    return !!storedUser
+  } catch {
+    return false
+  }
+}
+
 export function ApprovalCenter() {
   const [isOpen, setIsOpen] = useState(false)
   const [selectedApproval, setSelectedApproval] = useState<ApprovalItem | null>(null)
+  const [isAuth, setIsAuth] = useState(false)
   const queryClient = useQueryClient()
 
-  // Poll for pending approvals
+  // Check authentication status on mount
+  useEffect(() => {
+    setIsAuth(checkAuth())
+  }, [])
+
+  // Poll for pending approvals - ONLY if authenticated
   const { data: approvals = [], isLoading } = useQuery({
     queryKey: ['approval-center'],
     queryFn: async () => {
@@ -42,12 +59,14 @@ export function ApprovalCenter() {
           urgency: getUrgencyLevel(approval)
         }))
       } catch (error) {
-        console.error('Failed to fetch approvals:', error)
+        // Silently return empty array if not authenticated
         return []
       }
     },
-    refetchInterval: 5000, // Poll every 5 seconds for better performance
+    refetchInterval: isAuth ? 5000 : false, // Only poll if authenticated
     staleTime: 0,
+    enabled: isAuth, // Only run query if user is authenticated
+    retry: false, // Don't retry on auth errors
   })
 
   const pendingCount = approvals.length

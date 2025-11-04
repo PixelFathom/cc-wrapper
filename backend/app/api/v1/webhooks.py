@@ -24,11 +24,7 @@ async def receive_deployment_webhook(
     try:
         # Log webhook receipt with limited data for large payloads
         log_data = str(webhook_data)
-        if len(log_data) > 500:
-            logger.info(f"Received webhook for task {task_id} with large payload ({len(log_data)} chars)")
-            logger.debug(f"Webhook type: {webhook_data.get('type')}, status: {webhook_data.get('status')}")
-        else:
-            logger.info(f"Received webhook for task {task_id}: {webhook_data}")
+        logger.info(f"Received webhook for task {task_id}: {webhook_data}")
         
         await deployment_service.process_webhook(session, task_id, webhook_data)
         return {"status": "received", "task_id": task_id}

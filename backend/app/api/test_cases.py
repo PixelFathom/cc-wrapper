@@ -7,12 +7,15 @@ from datetime import datetime
 import httpx
 import redis.asyncio as redis
 
-from ..deps import get_session, get_redis_client
+from ..deps import get_session, get_redis_client, get_current_user
 from ..models.test_case import (
-    TestCase, TestCaseStatus, TestCaseCreate, TestCaseUpdate, TestCaseRead, 
+    TestCase, TestCaseStatus, TestCaseCreate, TestCaseUpdate, TestCaseRead,
     TestCaseExecutionRequest, TestCaseGenerationRequest, TestCaseGenerationResponse
 )
 from ..models.test_case_hook import TestCaseHook
+from ..models.user import User
+from ..models.task import Task
+from ..models.project import Project
 from ..services.test_case_service import test_case_service
 from ..services.test_generation_service import test_generation_service
 from ..core.settings import get_settings
@@ -20,9 +23,28 @@ from ..core.settings import get_settings
 router = APIRouter()
 
 
+async def verify_task_ownership(task_id: UUID, current_user: User, session: AsyncSession) -> Task:
+    """Verify that the current user owns the task through project ownership."""
+    from fastapi import HTTPException, status
+    task = await session.get(Task, task_id)
+    if not task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+
+    project = await session.get(Project, task.project_id)
+    if not project or project.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You don't have permission to access this task")
+
+    return task
+
+
 @router.get("/tasks/{task_id}/test-cases", response_model=List[TestCaseRead])
-async def get_test_cases(task_id: UUID, session: AsyncSession = Depends(get_session)):
+async def get_test_cases(
+    task_id: UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session)
+):
     """Get all test cases for a task"""
+    await verify_task_ownership(task_id, current_user, session)
     statement = select(TestCase).where(TestCase.task_id == task_id)
     result = await session.exec(statement)
     test_cases = result.all()
@@ -30,8 +52,13 @@ async def get_test_cases(task_id: UUID, session: AsyncSession = Depends(get_sess
 
 
 @router.get("/tasks/{task_id}/test-cases/grouped")
-async def get_test_cases_grouped_by_session(task_id: UUID, session: AsyncSession = Depends(get_session)):
+async def get_test_cases_grouped_by_session(
+    task_id: UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session)
+):
     """Get all test cases for a task grouped by session_id"""
+    await verify_task_ownership(task_id, current_user, session)
     statement = select(TestCase).where(TestCase.task_id == task_id)
     result = await session.exec(statement)
     test_cases = result.all()

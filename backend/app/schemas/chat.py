@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 from uuid import UUID
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Literal
 from app.models.chat import ChatRole
 
 
@@ -30,7 +30,8 @@ class QueryRequest(BaseModel):
     org_name: str
     cwd: str
     webhook_url: Optional[str] = None
-    bypass_mode: Optional[bool] = None
+    bypass_mode: Optional[bool] = None  # Deprecated: use permission_mode instead
+    permission_mode: Optional[Literal["interactive", "bypassPermissions", "plan"]] = None
     agent_name: Optional[str] = None
 
 

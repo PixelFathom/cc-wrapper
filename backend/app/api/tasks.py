@@ -9,8 +9,8 @@ import os
 import tempfile
 from pathlib import Path
 
-from app.deps import get_session
-from app.models import Task, Project, DeploymentHook, SubProject, KnowledgeBaseFile
+from app.deps import get_session, get_current_user
+from app.models import Task, Project, DeploymentHook, SubProject, KnowledgeBaseFile, User
 from app.schemas import TaskCreate, TaskRead, TaskUpdate
 from app.services.deployment_service import deployment_service
 from app.core.settings import get_settings
@@ -20,9 +20,32 @@ settings = get_settings()
 router = APIRouter()
 
 
+async def verify_task_ownership(task_id: UUID, current_user: User, session: AsyncSession) -> Task:
+    """
+    Verify that the current user owns the task through project ownership.
+    Returns the task if authorized, raises HTTPException otherwise.
+    """
+    task = await session.get(Task, task_id)
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task not found"
+        )
+
+    project = await session.get(Project, task.project_id)
+    if not project or project.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to access this task"
+        )
+
+    return task
+
+
 @router.post("/tasks", response_model=TaskRead)
 async def create_task(
     task: TaskCreate,
+    current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session)
 ):
     project = await session.get(Project, task.project_id)
@@ -30,6 +53,13 @@ async def create_task(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Project not found"
+        )
+
+    # Authorization: verify user owns the project
+    if project.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to create tasks in this project"
         )
     
     db_task = Task(**task.dict())
@@ -56,8 +86,23 @@ async def list_tasks(
     project_id: UUID,
     skip: int = 0,
     limit: int = 100,
+    current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session)
 ):
+    # Authorization: verify user owns the project
+    project = await session.get(Project, project_id)
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found"
+        )
+
+    if project.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to access this project's tasks"
+        )
+
     result = await session.execute(
         select(Task)
         .where(Task.project_id == project_id)
@@ -72,14 +117,10 @@ async def list_tasks(
 @router.get("/tasks/{task_id}", response_model=TaskRead)
 async def get_task(
     task_id: UUID,
+    current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session)
 ):
-    task = await session.get(Task, task_id)
-    if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Task not found"
-        )
+    task = await verify_task_ownership(task_id, current_user, session)
     return task
 
 
@@ -87,14 +128,10 @@ async def get_task(
 async def update_task(
     task_id: UUID,
     task_update: TaskUpdate,
+    current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session)
 ):
-    task = await session.get(Task, task_id)
-    if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Task not found"
-        )
+    task = await verify_task_ownership(task_id, current_user, session)
     
     update_data = task_update.dict(exclude_unset=True)
     for field, value in update_data.items():
@@ -109,14 +146,10 @@ async def update_task(
 @router.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_task(
     task_id: UUID,
+    current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session)
 ):
-    task = await session.get(Task, task_id)
-    if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Task not found"
-        )
+    task = await verify_task_ownership(task_id, current_user, session)
     
     await session.delete(task)
     await session.commit()
@@ -126,15 +159,11 @@ async def delete_task(
 async def get_task_deployment_hooks(
     task_id: UUID,
     limit: int = 20,
+    current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session)
 ):
     """Get deployment hooks for a task"""
-    task = await session.get(Task, task_id)
-    if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Task not found"
-        )
+    task = await verify_task_ownership(task_id, current_user, session)
     
     hooks = await deployment_service.get_deployment_hooks(session, task_id, limit)
     return {
@@ -148,15 +177,11 @@ async def get_task_deployment_hooks(
 @router.post("/tasks/{task_id}/retry-deployment")
 async def retry_task_deployment(
     task_id: UUID,
+    current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session)
 ):
     """Retry deployment initialization for a task"""
-    task = await session.get(Task, task_id)
-    if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Task not found"
-        )
+    task = await verify_task_ownership(task_id, current_user, session)
     
     if task.deployment_status == "completed":
         raise HTTPException(
@@ -177,15 +202,11 @@ async def retry_task_deployment(
 @router.get("/tasks/{task_id}/sub-projects")
 async def get_task_sub_projects(
     task_id: UUID,
+    current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session)
 ):
     """Get all sub-projects for a task"""
-    task = await session.get(Task, task_id)
-    if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Task not found"
-        )
+    task = await verify_task_ownership(task_id, current_user, session)
     
     result = await session.execute(
         select(SubProject)
@@ -218,23 +239,14 @@ async def get_task_sub_projects(
 async def upload_to_task_knowledge_base(
     task_id: UUID,
     file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session)
 ):
     """Upload a file to task's .claude knowledge base folder"""
-    # Get task and project details
-    task = await session.get(Task, task_id)
-    if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Task not found"
-        )
-    
+    # Get task and verify ownership
+    task = await verify_task_ownership(task_id, current_user, session)
+
     project = await session.get(Project, task.project_id)
-    if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found"
-        )
     
     # Read file content once and store it
     file_content = await file.read()
@@ -331,23 +343,14 @@ async def upload_to_task_knowledge_base(
 @router.get("/tasks/{task_id}/knowledge-base/files")
 async def list_task_knowledge_base_files(
     task_id: UUID,
+    current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session)
 ):
     """List all files in task's .claude knowledge base folder"""
-    # Get task and project details
-    task = await session.get(Task, task_id)
-    if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Task not found"
-        )
-    
+    # Get task and verify ownership
+    task = await verify_task_ownership(task_id, current_user, session)
+
     project = await session.get(Project, task.project_id)
-    if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found"
-        )
     
     # Get knowledge base files from database
     try:
@@ -381,16 +384,12 @@ async def list_task_knowledge_base_files(
 async def get_task_vscode_link(
     task_id: UUID,
     file_path: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session)
 ):
     """Get VS Code tunnel link for the task"""
-    # Get task and project details
-    task = await session.get(Task, task_id)
-    if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Task not found"
-        )
+    # Get task and verify ownership
+    task = await verify_task_ownership(task_id, current_user, session)
     
     project = await session.get(Project, task.project_id)
     if not project:
@@ -432,15 +431,11 @@ async def get_task_vscode_link(
 @router.get("/tasks/{task_id}/deployment-guide")
 async def get_task_deployment_guide(
     task_id: UUID,
+    current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session)
 ):
     """Get deployment guide for a task"""
-    task = await session.get(Task, task_id)
-    if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Task not found"
-        )
+    task = await verify_task_ownership(task_id, current_user, session)
     
     return {
         "task_id": str(task_id),
@@ -453,15 +448,11 @@ async def get_task_deployment_guide(
 async def update_task_deployment_guide(
     task_id: UUID,
     content_data: dict,
+    current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session)
 ):
     """Update deployment guide for a task"""
-    task = await session.get(Task, task_id)
-    if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Task not found"
-        )
+    task = await verify_task_ownership(task_id, current_user, session)
     
     content = content_data.get('content', '')
     
