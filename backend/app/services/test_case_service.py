@@ -49,7 +49,7 @@ class TestCaseService:
             
             # Generate webhook URL (using webhooks endpoint pattern like chat)
             webhook_url = f"{self.webhook_base_url}/api/webhooks/test-case/{test_case_id}"
-            project_path = f"{project.name}/{task.name}-{task.id}"
+            project_path = f"{project.name}/{task.id}"
             
             # Include deployment guide context if available
             deployment_context = ""

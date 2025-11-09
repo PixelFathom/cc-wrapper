@@ -349,7 +349,7 @@ async def initialize_issue_environment(
                     )
 
             # Build project path as project_name/task_name
-            project_path = f"{project.name}/{task.name}"
+            project_path = f"{project.name}/{task.id}"
 
             # Webhook URL points to deployment webhook for now
             webhook_url = f"{settings.webhook_base_url}/api/webhooks/deployment/{task.id}"

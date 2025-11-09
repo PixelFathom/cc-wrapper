@@ -66,7 +66,7 @@ class ChatService:
             # Generate webhook URL
             webhook_url = f"{self.webhook_base_url}/api/webhooks/chat/{chat_id}"
             
-            project_path = f"{project.name}/{task.name}-{task.id}" if include_task_id else f"{project.name}/{task.name}"
+            project_path = f"{project.name}/{task.id}"
 
             # Determine permission mode
             # Priority: permission_mode parameter > bypass_mode (for backward compatibility) > default to "interactive"
@@ -187,6 +187,8 @@ class ChatService:
                     step_name = "Completed response"
                 elif webhook_type == "thinking":
                     step_name = webhook_data.get("content", "Thinking...")
+                elif webhook_type == "stage_transition":
+                    step_name = f"Stage: {webhook_data.get('from_stage', 'unknown')} → {webhook_data.get('to_stage', 'unknown')}"
                 else:
                     step_name = status.replace("_", " ").title()
             

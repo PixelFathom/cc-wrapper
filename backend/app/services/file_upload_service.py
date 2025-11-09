@@ -45,7 +45,7 @@ class FileUploadService:
                 raise ValueError("Project not found")
             
             # Build the remote path
-            base_path = f"{project.name}/{task.name}-{task.id}"
+            base_path = f"{project.name}/{task.id}"
             if remote_path:
                 full_remote_path = f"{base_path}/{remote_path}/{filename}"
             else:

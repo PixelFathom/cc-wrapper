@@ -255,7 +255,7 @@ async def upload_to_task_knowledge_base(
     form_data = aiohttp.FormData()
     form_data.add_field('file', file_content, filename=file.filename)
     form_data.add_field('organization_name', settings.org_name)
-    form_data.add_field('project_path', f"{project.name}/{task.name}-{task.id}")
+    form_data.add_field('project_path', f"{project.name}/{task.id}")
         
     # For now, skip the external API and use local storage directly
     # This can be uncommented when the external API has the Knowledge Base endpoints
@@ -300,7 +300,7 @@ async def upload_to_task_knowledge_base(
             temp_kb_base.mkdir(exist_ok=True)
             
             # Create the knowledge base structure
-            kb_path = temp_kb_base / settings.org_name / project.name / f"{task.name}-{task.id}" / ".claude"
+            kb_path = temp_kb_base / settings.org_name / project.name / f"{task.id}" / ".claude"
             kb_path.mkdir(parents=True, exist_ok=True)
             
             file_path = kb_path / file.filename
@@ -403,7 +403,7 @@ async def get_task_vscode_link(
         async with aiohttp.ClientSession() as client:
             payload = {
                 "org_name": settings.org_name,
-                "project_name": f"{project.name}/{task.name}-{task.id}"
+                "project_name": f"{project.name}/{task.id}"
             }
             if file_path:
                 payload["file_path"] = file_path

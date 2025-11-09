@@ -55,7 +55,7 @@ class ContestHarvestingService:
             if not project:
                 raise ValueError("Project not found")
             
-            project_path = f"{project.name}/{task.name}-{task.id}"
+            project_path = f"{project.name}/{task.id}"
             
             # Create contest harvesting session first
             session = ContestHarvestingSession(
