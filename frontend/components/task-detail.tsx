@@ -159,6 +159,15 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
     )
   }
 
+  // For issue resolution tasks, render the dedicated issue resolution UI
+  if (task.task_type === 'issue_resolution') {
+    return (
+      <div className="container mx-auto px-4 sm:px-6 py-6 sm:py-8">
+        <IssueResolutionView projectId={projectId} taskId={taskId} />
+      </div>
+    )
+  }
+
   const projectSlug = project?.name.toLowerCase().replace(/\s+/g, '-') || ''
   const taskSlug = task.name.toLowerCase().replace(/\s+/g, '-')
 

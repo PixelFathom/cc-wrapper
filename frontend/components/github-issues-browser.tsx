@@ -96,11 +96,13 @@ export function GitHubIssuesBrowser() {
 
   // Solve issue mutation
   const solveMutation = useMutation({
-    mutationFn: async ({ owner, repo, issueNumber, repoUrl }: {
+    mutationFn: async ({ owner, repo, issueNumber, repoUrl, issueTitle, issueBody }: {
       owner: string;
       repo: string;
       issueNumber: number;
       repoUrl: string;
+      issueTitle: string;
+      issueBody: string;
     }) => {
       // Step 1: Check if project already exists for this repo
       const projects = await api.getProjects()
@@ -118,7 +120,10 @@ export function GitHubIssuesBrowser() {
       }
 
       // Step 3: Solve the issue using the project_id
-      return solveGitHubIssue(project.id, issueNumber, {})
+      return solveGitHubIssue(project.id, issueNumber, {
+        issue_title: issueTitle,
+        issue_body: issueBody
+      })
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['github-repositories'] })
@@ -140,14 +145,16 @@ export function GitHubIssuesBrowser() {
     fetchIssues(repo)
   }
 
-  const handleSolveIssue = (issueNumber: number, issueTitle: string) => {
+  const handleSolveIssue = (issueNumber: number, issueTitle: string, issueBody: string) => {
     if (!selectedRepo) return
     if (confirm(`Create resolution task for issue #${issueNumber}: ${issueTitle}?`)) {
       solveMutation.mutate({
         owner: selectedRepo.owner,
         repo: selectedRepo.name,
         issueNumber,
-        repoUrl: selectedRepo.clone_url || `https://github.com/${selectedRepo.owner}/${selectedRepo.name}.git`
+        repoUrl: selectedRepo.clone_url || `https://github.com/${selectedRepo.owner}/${selectedRepo.name}.git`,
+        issueTitle,
+        issueBody
       })
     }
   }
@@ -364,7 +371,7 @@ export function GitHubIssuesBrowser() {
                           {issue.state === 'open' ? (
                             <Button
                               size="sm"
-                              onClick={() => handleSolveIssue(issue.number, issue.title)}
+                              onClick={() => handleSolveIssue(issue.number, issue.title, issue.body || '')}
                               disabled={solveMutation.isPending}
                               className="bg-cyan-500 hover:bg-cyan-600 text-black font-mono text-xs"
                             >

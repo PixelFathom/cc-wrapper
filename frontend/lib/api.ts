@@ -630,6 +630,30 @@ class ApiClient {
 
 export const api = new ApiClient() as ApiClient & ExtendedApiClient
 
+/**
+ * Helper function to get authentication headers for extended API methods
+ */
+function getAuthHeaders(): HeadersInit {
+  const storedUser = typeof window !== 'undefined' ? localStorage.getItem('github_user') : null
+  if (!storedUser) {
+    throw new Error('User not authenticated. Please log in with GitHub.')
+  }
+
+  try {
+    const user = JSON.parse(storedUser)
+    if (!user.id) {
+      throw new Error('Invalid user data. Please re-authenticate.')
+    }
+
+    return {
+      'Content-Type': 'application/json',
+      'X-User-ID': user.id,
+    }
+  } catch (e) {
+    throw new Error('Failed to parse user data. Please re-authenticate.')
+  }
+}
+
 // Extend api object with additional methods
 Object.assign(api, {
   // Get all messages for a session
@@ -823,4 +847,174 @@ Object.assign(api, {
     if (!response.ok) throw new Error('Failed to skip question')
     return response.json()
   },
+
+  // Four-Stage Issue Resolution Workflow Endpoints
+  getIssueResolutionStageStatus: async (projectId: string, issueNumber: number): Promise<{
+    current_stage: 'deployment' | 'planning' | 'implementation' | 'testing'
+    resolution_state: string
+    stages: {
+      deployment: {
+        complete: boolean
+        started_at?: string
+        completed_at?: string
+      }
+      planning: {
+        complete: boolean
+        approved: boolean
+        session_id?: string
+        chat_id?: string
+        started_at?: string
+        completed_at?: string
+        approved_by?: string
+        approved_at?: string
+      }
+      implementation: {
+        complete: boolean
+        session_id?: string
+        chat_id?: string
+        started_at?: string
+        completed_at?: string
+      }
+      testing: {
+        complete: boolean
+        tests_generated: number
+        tests_passed: number
+        started_at?: string
+        completed_at?: string
+      }
+    }
+    can_transition: boolean
+    next_action: string
+    retry_count: number
+    error_message?: string
+  }> => {
+    const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/issues/${issueNumber}/resolution/stage-status`, {
+      method: 'GET',
+      headers: getAuthHeaders(),
+    })
+    if (!response.ok) throw new Error('Failed to get stage status')
+    return response.json()
+  },
+
+  approvePlanAndStartImplementation: async (
+    projectId: string,
+    issueNumber: number,
+    sessionId: string,
+    notes?: string
+  ): Promise<{
+    stage: string
+    session_id: string
+    chat_id: string
+    task_id: string
+    message: string
+  }> => {
+    const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/issues/${issueNumber}/resolution/approve-plan`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ session_id: sessionId, notes })
+    })
+    if (!response.ok) throw new Error('Failed to approve plan')
+    return response.json()
+  },
+
+  retryIssueResolutionStage: async (projectId: string, issueNumber: number): Promise<{
+    success: boolean
+    message: string
+    result: any
+  }> => {
+    const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/issues/${issueNumber}/resolution/retry-stage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    })
+    if (!response.ok) throw new Error('Failed to retry stage')
+    return response.json()
+  },
+
+  triggerPlanningStage: async (projectId: string, issueNumber: number): Promise<{
+    message: string
+    resolution_id: string
+    current_stage: string
+  }> => {
+    const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/issues/${issueNumber}/resolution/trigger-planning`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    })
+    if (!response.ok) throw new Error('Failed to trigger planning stage')
+    return response.json()
+  },
+
+  // GitHub Issue and Resolution Management
+  getGithubIssue: async (projectId: string, issueNumber: number) => {
+    const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/issues/${issueNumber}`)
+    if (!response.ok) {
+      if (response.status === 404) return null
+      throw new Error('Failed to fetch issue')
+    }
+    return response.json()
+  },
+
+  getIssueResolution: async (projectId: string, issueNumber: number) => {
+    const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/issues/${issueNumber}/resolution`)
+    if (!response.ok) {
+      if (response.status === 404) return null
+      throw new Error('Failed to fetch resolution')
+    }
+    return response.json()
+  },
+
+  triggerIssueResolution: async (projectId: string, data: {
+    issue_number: number
+    issue_title: string
+    issue_body: string
+    github_url: string
+  }) => {
+    const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/issues/resolve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    if (!response.ok) throw new Error('Failed to trigger resolution')
+    return response.json()
+  },
+
+  // Test Case Management for Issue Resolution
+  getTaskTestCases: async (taskId: string) => {
+    const response = await fetch(`${API_BASE_URL}/api/tasks/${taskId}/test-cases`)
+    if (!response.ok) throw new Error('Failed to fetch test cases')
+    return response.json()
+  },
+
+  generateTestCases: async (taskId: string, options: {
+    test_types: string[]
+    auto_execute: boolean
+  }) => {
+    const response = await fetch(`${API_BASE_URL}/api/tasks/${taskId}/generate-test-cases`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(options),
+    })
+    if (!response.ok) throw new Error('Failed to generate test cases')
+    return response.json()
+  },
+
+  // Session and Chat APIs for Workflow
+  getSessionChats: async (sessionId: string) => {
+    const response = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}/chats`)
+    if (!response.ok) throw new Error('Failed to fetch session chats')
+    return response.json()
+  },
+
+  getChatHooks: async (chatId: string) => {
+    const response = await fetch(`${API_BASE_URL}/api/chats/${chatId}/hooks`)
+    if (!response.ok) throw new Error('Failed to fetch chat hooks')
+    return response.json()
+  },
+
+  getTestCaseHooks: async (taskId: string) => {
+    const response = await fetch(`${API_BASE_URL}/api/tasks/${taskId}/test-case-hooks`)
+    if (!response.ok) throw new Error('Failed to fetch test case hooks')
+    return response.json()
+  },
 })
+
+export default api

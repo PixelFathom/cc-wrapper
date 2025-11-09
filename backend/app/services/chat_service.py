@@ -218,7 +218,37 @@ class ChatService:
             )
             
             db.add(hook)
-            
+
+            # Check if this is a completed planning hook and update planning_complete flag
+            if status == "completed" and webhook_type == "status":
+                # Find if this chat is associated with a planning stage
+                from app.models.issue_resolution import IssueResolution
+                stmt = select(IssueResolution).where(
+                    IssueResolution.planning_chat_id == chat_id
+                )
+                result_resolution = await db.execute(stmt)
+                resolution = result_resolution.scalar_one_or_none()
+
+                if resolution:
+                    if resolution.planning_chat_id == chat_id:
+                        resolution.planning_complete = True
+                        resolution.planning_completed_at = datetime.utcnow()  # Use naive datetime for PostgreSQL
+                        db.add(resolution)
+                        logger.info(
+                            f"✅ Marked planning complete | "
+                            f"resolution_id={str(resolution.id)[:8]}... | "
+                            f"chat_id={str(chat_id)[:8]}..."
+                        )
+                    if resolution.implementation_chat_id == chat_id:
+                        resolution.implementation_complete = True
+                        resolution.implementation_completed_at = datetime.utcnow()
+                        db.add(resolution)
+                        logger.info(
+                            f"✅ Marked implementation complete | "
+                            f"resolution_id={str(resolution.id)[:8]}... | "
+                            f"chat_id={str(chat_id)[:8]}..."
+                        )
+
             # If this is a completed or failed message with result/error, update or create assistant chat
             # Check both old format and new ResultMessage format
             is_completion = (

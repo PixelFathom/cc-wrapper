@@ -25,7 +25,7 @@ interface GitHubIssueDetailModalProps {
   projectId: string
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSolveIssue?: (issueNumber: number) => void
+  onSolveIssue?: (issueNumber: number, issueTitle: string, issueBody: string) => void
   solvingIssue?: boolean
 }
 
@@ -173,7 +173,7 @@ export function GitHubIssueDetailModal({
             ) : issue.state === 'open' && onSolveIssue ? (
               <Button
                 onClick={() => {
-                  onSolveIssue(issue.number)
+                  onSolveIssue(issue.number, issue.title, issue.body || '')
                   onOpenChange(false)
                 }}
                 disabled={solvingIssue}

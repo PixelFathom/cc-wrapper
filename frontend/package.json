@@ -29,6 +29,7 @@
     "@tanstack/react-query": "^5.17.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.0.0",
+    "date-fns": "^4.1.0",
     "framer-motion": "^11.18.2",
     "lucide-react": "^0.552.0",
     "next": "^15.4.4",
@@ -40,6 +41,7 @@
     "rehype-raw": "^7.0.0",
     "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1",
+    "sonner": "^2.0.7",
     "tailwind-merge": "^2.2.0",
     "tailwindcss-animate": "^1.0.7"
   },

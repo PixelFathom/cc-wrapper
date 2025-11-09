@@ -3,7 +3,7 @@
 import { ReactNode } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Button } from './button'
-import { AlertTriangleIcon, InfoIcon, TrashIcon } from '@radix-ui/react-icons'
+import { ExclamationTriangleIcon, InfoCircledIcon, TrashIcon } from '@radix-ui/react-icons'
 
 export interface ConfirmationModalProps {
   isOpen: boolean
@@ -27,19 +27,19 @@ const variantStyles = {
     border: 'border-red-500/50',
   },
   warning: {
-    icon: <AlertTriangleIcon className="h-6 w-6 text-yellow-500" />,
+    icon: <ExclamationTriangleIcon className="h-6 w-6 text-yellow-500" />,
     iconBg: 'bg-yellow-500/10',
     confirmButton: 'bg-yellow-500 hover:bg-yellow-600 text-black',
     border: 'border-yellow-500/50',
   },
   info: {
-    icon: <InfoIcon className="h-6 w-6 text-cyan-500" />,
+    icon: <InfoCircledIcon className="h-6 w-6 text-cyan-500" />,
     iconBg: 'bg-cyan-500/10',
     confirmButton: 'bg-cyan-500 hover:bg-cyan-600 text-black',
     border: 'border-cyan-500/50',
   },
   default: {
-    icon: <InfoIcon className="h-6 w-6 text-foreground" />,
+    icon: <InfoCircledIcon className="h-6 w-6 text-foreground" />,
     iconBg: 'bg-foreground/10',
     confirmButton: 'bg-primary hover:bg-primary/90 text-primary-foreground',
     border: 'border-border',
