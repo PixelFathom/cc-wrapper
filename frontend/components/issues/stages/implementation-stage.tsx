@@ -45,7 +45,7 @@ export function ImplementationStage({ taskId, sessionId, chatId, stageData }: Im
   // Fetch chat messages
   const { data: chats } = useQuery({
     queryKey: ['session-chats', sessionId],
-    queryFn: () => sessionId ? api.getSessionChats(sessionId) : Promise.resolve({ chats: [] }),
+    queryFn: () => sessionId ? api.getSessionChat(sessionId) : Promise.resolve({ chats: [] }),
     enabled: !!sessionId,
     refetchInterval: !stageData?.complete ? 3000 : false,
   })

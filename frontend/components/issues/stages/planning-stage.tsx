@@ -43,7 +43,7 @@ export function PlanningStage({ taskId, sessionId, chatId, stageData, onApprove 
   // Fetch chat messages for the planning session
   const { data: chats } = useQuery({
     queryKey: ['session-chats', sessionId],
-    queryFn: () => sessionId ? api.getSessionChats(sessionId) : Promise.resolve({ chats: [] }),
+    queryFn: () => sessionId ? api.getSessionChat(sessionId) : Promise.resolve({ chats: [] }),
     enabled: !!sessionId,
     refetchInterval: !stageData?.complete ? 5000 : false,
   })

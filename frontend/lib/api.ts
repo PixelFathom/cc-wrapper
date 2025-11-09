@@ -998,7 +998,7 @@ Object.assign(api, {
   },
 
   // Session and Chat APIs for Workflow
-  getSessionChats: async (sessionId: string) => {
+  getSessionChat: async (sessionId: string) => {
     const response = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}/chats`)
     if (!response.ok) throw new Error('Failed to fetch session chats')
     return response.json()
