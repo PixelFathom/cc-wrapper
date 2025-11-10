@@ -13,6 +13,7 @@ from app.deps import get_session, get_current_user
 from app.models import Task, Project, DeploymentHook, SubProject, KnowledgeBaseFile, User
 from app.schemas import TaskCreate, TaskRead, TaskUpdate
 from app.services.deployment_service import deployment_service
+from app.core.rate_limiter import RateLimitExceeded
 from app.core.settings import get_settings
 
 settings = get_settings()
@@ -72,6 +73,17 @@ async def create_task(
         print(f"Initializing deployment for task {db_task.id}")
         await deployment_service.initialize_project(session, db_task.id)
         print(f"Deployment initialization completed for task {db_task.id}")
+    except RateLimitExceeded as e:
+        await session.delete(db_task)
+        await session.commit()
+        headers = {}
+        if e.retry_after is not None and e.retry_after > 0:
+            headers["Retry-After"] = str(e.retry_after)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=str(e),
+            headers=headers or None
+        )
     except Exception as e:
         # Log error but don't fail task creation
         print(f"Failed to initialize deployment: {e}")
@@ -192,6 +204,15 @@ async def retry_task_deployment(
     try:
         request_id = await deployment_service.initialize_project(session, task_id)
         return {"status": "initiated", "request_id": request_id}
+    except RateLimitExceeded as e:
+        headers = {}
+        if e.retry_after is not None and e.retry_after > 0:
+            headers["Retry-After"] = str(e.retry_after)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=str(e),
+            headers=headers or None
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

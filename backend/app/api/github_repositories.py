@@ -18,6 +18,8 @@ from app.models.project import Project
 from app.models.task import Task
 from app.services.github_auth_service import GitHubAuthService
 from app.core.settings import get_settings
+from app.core.redis import get_redis
+from app.core.rate_limiter import assert_within_rate_limit, RateLimitExceeded
 
 settings = get_settings()
 router = APIRouter(prefix="/github/repositories", tags=["github-repositories"])
@@ -307,6 +309,12 @@ async def initialize_repository(
 
     # Call external init-project API using task.id
     try:
+        redis_client = await get_redis()
+        await assert_within_rate_limit(
+            redis_client,
+            user_id=current_user.id,
+        )
+
         # Build GitHub URL with auth token embedded
         github_repo_url = repo_data["clone_url"]
         if token and github_repo_url.startswith("https://github.com/"):
@@ -349,6 +357,16 @@ async def initialize_repository(
             message=f"Successfully initialized {repo_data['full_name']} with task: {task.name}"
         )
 
+    except RateLimitExceeded as e:
+        await session.rollback()
+        headers = {}
+        if e.retry_after is not None and e.retry_after > 0:
+            headers["Retry-After"] = str(e.retry_after)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=str(e),
+            headers=headers or None
+        )
     except httpx.HTTPError as e:
         # Rollback on failure
         await session.rollback()

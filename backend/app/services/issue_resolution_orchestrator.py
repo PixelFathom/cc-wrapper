@@ -35,6 +35,8 @@ from app.core.prompts.issue_resolution_prompts import (
     TESTING_SUMMARY_PROMPT
 )
 from app.core.settings import get_settings
+from app.core.redis import get_redis
+from app.core.rate_limiter import assert_within_rate_limit, RateLimitExceeded
 
 logger = logging.getLogger(__name__)
 
@@ -172,12 +174,24 @@ class IssueResolutionOrchestrator:
         await self.db.refresh(chat)
 
         # Send planning query with interactive permission mode
-        response = await self.chat_service.send_query(
-            db=self.db,
-            chat_id=chat.id,
-            prompt=planning_prompt,
-            permission_mode="plan",
-        )
+        try:
+            response = await self.chat_service.send_query(
+                db=self.db,
+                chat_id=chat.id,
+                prompt=planning_prompt,
+                permission_mode="plan",
+            )
+        except RateLimitExceeded as e:
+            logger.warning(
+                "Rate limit exceeded while starting planning for resolution %s: %s",
+                resolution_id,
+                e,
+            )
+            resolution.error_message = str(e)
+            resolution.resolution_state = "failed"
+            self.db.add(resolution)
+            await self.db.commit()
+            raise
 
         # Update resolution with planning session info
         resolution.planning_session_id = response.get("session_id")
@@ -300,15 +314,27 @@ class IssueResolutionOrchestrator:
         await self.db.refresh(chat)
 
         # Send implementation query with bypass permissions
-        response = await self.chat_service.send_query(
-            db=self.db,
-            chat_id=chat.id,
-            prompt=implementation_prompt,
-            session_id=session_id,
-            bypass_mode=True,  # Auto-approve all tools for implementation
-            permission_mode="bypassPermissions",
-            agent_name="issue_resolution_implementer"
-        )
+        try:
+            response = await self.chat_service.send_query(
+                db=self.db,
+                chat_id=chat.id,
+                prompt=implementation_prompt,
+                session_id=session_id,
+                bypass_mode=True,  # Auto-approve all tools for implementation
+                permission_mode="bypassPermissions",
+                agent_name="issue_resolution_implementer"
+            )
+        except RateLimitExceeded as e:
+            logger.warning(
+                "Rate limit exceeded while starting implementation for resolution %s: %s",
+                resolution_id,
+                e,
+            )
+            resolution.error_message = str(e)
+            resolution.resolution_state = "failed"
+            self.db.add(resolution)
+            await self.db.commit()
+            raise
 
         # Update resolution
         resolution.implementation_session_id = response.get("session_id")
@@ -614,6 +640,12 @@ class IssueResolutionOrchestrator:
             # Webhook URL points to deployment webhook
             webhook_url = f"{settings.webhook_base_url}/api/webhooks/deployment/{task.id}"
 
+            redis_client = await get_redis()
+            await assert_within_rate_limit(
+                redis_client,
+                user_id=project.user_id,
+            )
+
             # Prepare init payload with issue branch
             init_payload = {
                 "organization_name": settings.org_name,
@@ -657,6 +689,20 @@ class IssueResolutionOrchestrator:
                     "deployment_task_id": deployment_task_id
                 }
 
+        except RateLimitExceeded as e:
+            logger.warning(
+                "Rate limit exceeded for user %s while starting deployment: %s",
+                project.user_id if project else "unknown",
+                e,
+            )
+            resolution.error_message = str(e)
+            resolution.resolution_state = "failed"
+            task.deployment_status = "failed"
+
+            self.db.add(resolution)
+            self.db.add(task)
+            await self.db.commit()
+            raise
         except Exception as e:
             # Log error and update resolution
             logger.error(f"Failed to initialize issue environment: {e}")

@@ -25,6 +25,8 @@ from app.services.github_api_service import GitHubAPIService
 from app.services.chat_service import chat_service
 from app.services.issue_resolution_orchestrator import IssueResolutionOrchestrator
 from app.core.settings import get_settings
+from app.core.redis import get_redis
+from app.core.rate_limiter import assert_within_rate_limit, RateLimitExceeded
 
 settings = get_settings()
 router = APIRouter(prefix="/projects", tags=["issue-resolution"])
@@ -474,6 +476,12 @@ async def initialize_issue_environment(
             if task.mcp_servers:
                 init_payload["mcp_servers"] = task.mcp_servers
 
+            redis_client = await get_redis()
+            await assert_within_rate_limit(
+                redis_client,
+                user_id=project.user_id,
+            )
+
             # Call init_project on external service
             async with httpx.AsyncClient() as client:
                 init_response = await client.post(
@@ -628,6 +636,23 @@ async def solve_issue(
             resolution_id=str(existing.id),
             project_id=str(project_id),
             message=f"Resolution already exists for issue #{issue_number}"
+        )
+
+    redis_client = await get_redis()
+    try:
+        await assert_within_rate_limit(
+            redis_client,
+            user_id=current_user.id,
+            consume=False,
+        )
+    except RateLimitExceeded as e:
+        headers = {}
+        if e.retry_after is not None and e.retry_after > 0:
+            headers["Retry-After"] = str(e.retry_after)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=str(e),
+            headers=headers or None
         )
 
     issue_title = payload.issue_title
