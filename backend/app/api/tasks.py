@@ -405,20 +405,34 @@ async def list_task_knowledge_base_files(
 async def get_task_vscode_link(
     task_id: UUID,
     file_path: Optional[str] = None,
+    user_name: Optional[str] = None,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session)
 ):
-    """Get VS Code tunnel link for the task"""
+    """
+    Get VS Code tunnel link for the task.
+
+    Args:
+        task_id: UUID of the task
+        file_path: Optional path to a specific file to open
+        user_name: Optional GitHub username for tunnel naming
+
+    Returns:
+        {
+            "tunnel_link": "https://vscode.dev/tunnel/portfolio_325c76d8-1d57-4d97-a7e",
+            "tunnel_name": "portfolio_325c76d8-1d57-4d97-a7e"
+        }
+    """
     # Get task and verify ownership
     task = await verify_task_ownership(task_id, current_user, session)
-    
+
     project = await session.get(Project, task.project_id)
     if not project:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Project not found"
         )
-    
+
     # Call the external VS Code API
     try:
         async with aiohttp.ClientSession() as client:
@@ -426,9 +440,11 @@ async def get_task_vscode_link(
                 "org_name": settings.org_name,
                 "project_name": f"{project.name}/{task.id}"
             }
+            if user_name:
+                payload["user_name"] = user_name
             if file_path:
                 payload["file_path"] = file_path
-                
+
             async with client.post(
                 f"{settings.external_api_url}/vscode/generate-link",
                 json=payload
