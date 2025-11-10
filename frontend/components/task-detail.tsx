@@ -627,6 +627,7 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
                   'application/json': ['.json'],
                   'application/xml': ['.xml'],
                   'application/x-yaml': ['.yaml', '.yml'],
+                  'image/*': ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.tiff', '.heic', '.heif'],
                 }}
               />
             </div>
