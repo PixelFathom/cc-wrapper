@@ -506,13 +506,20 @@ class ApiClient {
       formData.append('file_path', filePath)
     }
 
+    // Get auth headers (but don't set Content-Type for FormData)
+    const authHeaders = this.getAuthHeaders()
+
     const response = await fetch(`${this.baseUrl}/tasks/${taskId}/knowledge-base/upload`, {
       method: 'POST',
+      headers: {
+        'X-User-ID': authHeaders['X-User-ID'] as string,
+      },
       body: formData,
     })
 
     if (!response.ok) {
-      throw new Error(`Knowledge Base upload error: ${response.statusText}`)
+      const errorText = await response.text()
+      throw new Error(`Knowledge Base upload error (${response.status}): ${errorText}`)
     }
 
     return response.json()

@@ -11,15 +11,15 @@ class Settings(BaseSettings):
     
     redis_url: str = "redis://localhost:6379/0"
     
-    backend_host: str = "http://localhost:9000"
+    backend_host: str = "https://code-api.tanmaydeepsharma.com"
     
     # Deployment Service``
     org_name: str = "default"
-    init_project_url: str = "http://host.docker.internal:8001/init-project"
-    webhook_base_url: str = "http://localhost:9000"
-    query_url: str = "http://host.docker.internal:8001/api/query"
+    init_project_url: str = "https://claude.tanmaydeepsharma.com/init-project"
+    webhook_base_url: str = "https://code-api.tanmaydeepsharma.com"
+    query_url: str = "https://claude.tanmaydeepsharma.com/api/query"
     # External API and file storage
-    external_api_url: str = "http://host.docker.internal:8001/api"
+    external_api_url: str = "https://claude.tanmaydeepsharma.com/api"
     # OpenAI Configuration
     openai_api_key: str = ""
     
@@ -28,10 +28,11 @@ class Settings(BaseSettings):
     clerk_secret_key: str = ""
     next_public_clerk_after_sign_out_url: str = "/"
 
+    github_client_id: str = "Ov23liOgTbsMxWYl7m9c"
+    github_client_secret: str = "8694366578ea74ab63651c86cef553daf16f6243"
+
     # GitHub OAuth Configuration
-    github_client_id: str = "Ov23liopoy2CEwpxsNdn"
-    github_client_secret: str = "b6a071f4aa6f7563c4e1c539d66facee69891fdf"
-    github_oauth_callback_url: str = "http://localhost:2000/auth/github/callback"
+    github_oauth_callback_url: str = "https://code.tanmaydeepsharma.com/auth/github/callback"
 
     # Encryption key for token storage (generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
     encryption_key: str = ""
@@ -48,3 +49,4 @@ class Settings(BaseSettings):
 @lru_cache()
 def get_settings():
     return Settings()
+

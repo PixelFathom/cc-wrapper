@@ -38,7 +38,7 @@ services:
     networks:
       - cc-wrapper
   frontend:
-    build: 
+    build:
       context: ./frontend
       dockerfile: Dockerfile.dev
     env_file: .env
@@ -50,7 +50,7 @@ services:
       - cc-wrapper
     volumes:
       - ./frontend:/app
-      - ./frontend/node_modules:/app/node_modules
+      - /app/node_modules
       - /app/.next
 networks:
   cc-wrapper:
