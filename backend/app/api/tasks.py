@@ -11,7 +11,7 @@ from pathlib import Path
 
 from app.deps import get_session, get_current_user
 from app.models import Task, Project, DeploymentHook, SubProject, KnowledgeBaseFile, User
-from app.schemas import TaskCreate, TaskRead, TaskUpdate
+from app.schemas import TaskCreate, TaskRead, TaskUpdate, VSCodeLinkResponse
 from app.services.deployment_service import deployment_service
 from app.core.rate_limiter import RateLimitExceeded
 from app.core.settings import get_settings
@@ -401,7 +401,7 @@ async def list_task_knowledge_base_files(
         )
 
 
-@router.get("/tasks/{task_id}/vscode-link")
+@router.get("/tasks/{task_id}/vscode-link", response_model=VSCodeLinkResponse)
 async def get_task_vscode_link(
     task_id: UUID,
     file_path: Optional[str] = None,
@@ -418,10 +418,23 @@ async def get_task_vscode_link(
         user_name: Optional GitHub username for tunnel naming
 
     Returns:
-        {
+        VSCodeLinkResponse with tunnel information and optional authentication details:
+        - If authentication required:
+          {
             "tunnel_link": "https://vscode.dev/tunnel/portfolio_325c76d8-1d57-4d97-a7e",
-            "tunnel_name": "portfolio_325c76d8-1d57-4d97-a7e"
-        }
+            "tunnel_name": "portfolio_325c76d8-1d57-4d97-a7e",
+            "authentication_required": true,
+            "authentication_url": "https://github.com/login/device",
+            "device_code": "ABCD-1234"
+          }
+        - If already authenticated:
+          {
+            "tunnel_link": "https://vscode.dev/tunnel/portfolio_325c76d8-1d57-4d97-a7e",
+            "tunnel_name": "portfolio_325c76d8-1d57-4d97-a7e",
+            "authentication_required": false,
+            "authentication_url": null,
+            "device_code": null
+          }
     """
     # Get task and verify ownership
     task = await verify_task_ownership(task_id, current_user, session)
@@ -451,7 +464,7 @@ async def get_task_vscode_link(
             ) as response:
                 if response.status == 200:
                     result = await response.json()
-                    return result
+                    return VSCodeLinkResponse(**result)
                 else:
                     error_detail = await response.text()
                     raise HTTPException(

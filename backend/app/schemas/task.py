@@ -31,3 +31,15 @@ class TaskRead(TaskBase):
 
     class Config:
         from_attributes = True
+
+
+class VSCodeLinkResponse(BaseModel):
+    """Response model for VS Code tunnel link generation"""
+    tunnel_link: str
+    tunnel_name: str
+    authentication_required: bool = False
+    authentication_url: Optional[str] = None
+    device_code: Optional[str] = None
+
+    class Config:
+        from_attributes = True

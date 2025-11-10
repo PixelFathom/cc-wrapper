@@ -484,8 +484,17 @@ class ApiClient {
   }
 
   // VS Code (requires authentication)
-  getTaskVSCodeLink = async (taskId: string, filePath?: string): Promise<{ tunnel_link: string; tunnel_name: string }> => {
-    const queryParams = filePath ? `?file_path=${encodeURIComponent(filePath)}` : ''
+  getTaskVSCodeLink = async (taskId: string, filePath?: string, userName?: string): Promise<{
+    tunnel_link: string
+    tunnel_name: string
+    authentication_required: boolean
+    authentication_url?: string
+    device_code?: string
+  }> => {
+    const params = new URLSearchParams()
+    if (filePath) params.append('file_path', filePath)
+    if (userName) params.append('user_name', userName)
+    const queryParams = params.toString() ? `?${params.toString()}` : ''
     return this.authenticatedRequest(`/tasks/${taskId}/vscode-link${queryParams}`)
   }
 

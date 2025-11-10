@@ -27,6 +27,7 @@ import { DeploymentGuideTab } from './deployment-guide-tab'
 import { ContestHarvestingTab } from './contest-harvesting-tab'
 import { IssueResolutionView } from './issue-resolution-view'
 import { MessagesTab } from './messages-tab'
+import { VSCodeLinkModal } from './vscode-link-modal'
 
 interface TaskDetailProps {
   projectId: string
@@ -554,20 +555,15 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
                         return gitInfo ? `${gitInfo.owner}/${gitInfo.repo}` : project.repo_url
                       })()}</span>
                     </a>
-                    <button
-                      onClick={async () => {
-                        try {
-                          const result = await api.getTaskVSCodeLink(taskId)
-                          window.open(result.tunnel_link, '_blank')
-                        } catch (error) {
-                          console.error('Failed to get VS Code link:', error)
-                        }
-                      }}
-                      className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-black/20 hover:bg-black/30 transition-all border border-border/30 text-sm text-purple-400 hover:text-purple-300 group w-full"
-                    >
-                      <CodeIcon className="h-4 w-4 group-hover:scale-110 transition-transform" />
-                      <span>Open in VS Code</span>
-                    </button>
+                    <VSCodeLinkModal
+                      taskId={taskId}
+                      trigger={
+                        <button className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-black/20 hover:bg-black/30 transition-all border border-border/30 text-sm text-purple-400 hover:text-purple-300 group w-full">
+                          <CodeIcon className="h-4 w-4 group-hover:scale-110 transition-transform" />
+                          <span>Open in VS Code</span>
+                        </button>
+                      }
+                    />
                   </div>
                 </motion.div>
               )}
