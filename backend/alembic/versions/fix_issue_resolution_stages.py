@@ -19,6 +19,10 @@ depends_on = None
 
 def upgrade() -> None:
     # Add missing columns only if they don't exist
+    # Add current_stage column to track the four-stage workflow
+    op.add_column('issue_resolutions', sa.Column('current_stage', sqlmodel.sql.sqltypes.AutoString(length=50), nullable=False, server_default='deployment'))
+    op.create_index(op.f('ix_issue_resolutions_current_stage'), 'issue_resolutions', ['current_stage'], unique=False)
+
     # Stage-specific session and chat tracking
     op.add_column('issue_resolutions', sa.Column('planning_session_id', sqlmodel.sql.sqltypes.AutoString(), nullable=True))
     op.add_column('issue_resolutions', sa.Column('planning_chat_id', sqlmodel.sql.sqltypes.GUID(), nullable=True))
@@ -76,6 +80,7 @@ def downgrade() -> None:
     op.drop_constraint(None, 'issue_resolutions', type_='foreignkey')
     op.drop_index(op.f('ix_issue_resolutions_planning_session_id'), table_name='issue_resolutions')
     op.drop_index(op.f('ix_issue_resolutions_implementation_session_id'), table_name='issue_resolutions')
+    op.drop_index(op.f('ix_issue_resolutions_current_stage'), table_name='issue_resolutions')
 
     # Rename columns back
     op.alter_column('issue_resolutions', 'planning_approval_at', new_column_name='plan_approved_at')
@@ -104,3 +109,4 @@ def downgrade() -> None:
     op.drop_column('issue_resolutions', 'implementation_session_id')
     op.drop_column('issue_resolutions', 'planning_chat_id')
     op.drop_column('issue_resolutions', 'planning_session_id')
+    op.drop_column('issue_resolutions', 'current_stage')
