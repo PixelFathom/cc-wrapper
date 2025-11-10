@@ -1,3 +1,16 @@
+// Custom error class for API errors with status code
+export class ApiError extends Error {
+  status: number
+  responseData?: any
+
+  constructor(message: string, status: number, responseData?: any) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.responseData = responseData
+  }
+}
+
 const getApiBaseUrl = () => {
   // Client-side: Use environment variable or fallback
   if (typeof window !== 'undefined') {
@@ -262,6 +275,9 @@ class ApiClient {
     }
   }
 
+  // Note: Keeping this method for potential future use with unauthenticated endpoints
+  // @ts-ignore - Method preserved for future unauthenticated endpoints
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   private async request<T>(path: string, options?: RequestInit): Promise<T> {
     const response = await fetch(`${this.baseUrl}${path}`, {
       ...options,
@@ -272,7 +288,16 @@ class ApiClient {
     })
 
     if (!response.ok) {
-      throw new Error(`API error: ${response.statusText}`)
+      let errorData: any = null
+      try {
+        const text = await response.text()
+        errorData = text ? JSON.parse(text) : null
+      } catch (e) {
+        // If response is not JSON, use status text
+      }
+
+      const errorMessage = errorData?.detail || response.statusText || `API error (${response.status})`
+      throw new ApiError(errorMessage, response.status, errorData)
     }
 
     return response.json()
@@ -288,8 +313,16 @@ class ApiClient {
     })
 
     if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(`API error (${response.status}): ${errorText}`)
+      let errorData: any = null
+      try {
+        const text = await response.text()
+        errorData = text ? JSON.parse(text) : null
+      } catch (e) {
+        // If response is not JSON, use status text
+      }
+
+      const errorMessage = errorData?.detail || response.statusText || `API error (${response.status})`
+      throw new ApiError(errorMessage, response.status, errorData)
     }
 
     return response.json()

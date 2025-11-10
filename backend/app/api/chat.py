@@ -14,6 +14,7 @@ from app.models import Chat, SubProject, Project, Task, ChatHook, User
 from app.schemas import QueryRequest, QueryResponse
 from app.services.cwd import parse_cwd
 from app.services.chat_service import chat_service
+from app.core.rate_limiter import RateLimitExceeded
 
 router = APIRouter()
 
@@ -195,6 +196,15 @@ async def handle_query(
             response_data["task_id"] = task_id
             
         return QueryResponse(**response_data)
+    except RateLimitExceeded as e:
+        headers = {}
+        if e.retry_after is not None and e.retry_after > 0:
+            headers["Retry-After"] = str(e.retry_after)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=str(e),
+            headers=headers or None
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -221,6 +231,15 @@ async def send_chat_query(
     try:
         result = await chat_service.send_query(session, chat_id, prompt, session_id)
         return result
+    except RateLimitExceeded as e:
+        headers = {}
+        if e.retry_after is not None and e.retry_after > 0:
+            headers["Retry-After"] = str(e.retry_after)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=str(e),
+            headers=headers or None
+        )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
@@ -326,6 +345,15 @@ async def get_message_hooks(
             "session_id": message.session_id,
             "hooks": hooks
         }
+    except RateLimitExceeded as e:
+        headers = {}
+        if e.retry_after is not None and e.retry_after > 0:
+            headers["Retry-After"] = str(e.retry_after)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=str(e),
+            headers=headers or None
+        )
     except HTTPException:
         raise
     except Exception as e:

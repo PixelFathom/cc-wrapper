@@ -6,6 +6,8 @@ from sqlalchemy.orm import selectinload
 from uuid import UUID
 from app.models import Task, DeploymentHook, Project
 from app.core.settings import get_settings
+from app.core.redis import get_redis
+from app.core.rate_limiter import assert_within_rate_limit, RateLimitExceeded
 from datetime import datetime
 import logging
 
@@ -28,6 +30,15 @@ class DeploymentService:
 
         await db.refresh(task, ["project"])
         await db.refresh(task.project, ["user"])
+
+        if not task.project or not task.project.user_id:
+            raise ValueError("Task project or project user not found")
+
+        redis_client = await get_redis()
+        await assert_within_rate_limit(
+            redis_client,
+            user_id=task.project.user_id,
+        )
 
         # Get GitHub token if not provided
         if not github_token and task.project.user_id:
@@ -103,6 +114,8 @@ class DeploymentService:
             await db.commit()
             return request_id
             
+        except RateLimitExceeded:
+            raise
         except httpx.HTTPError as e:
             logger.error(f"Failed to initialize project: {e}")
             task.deployment_status = "failed"

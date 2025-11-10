@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { motion, AnimatePresence } from 'framer-motion'
-import { 
+import {
   PaperPlaneIcon, PersonIcon, RocketIcon, UpdateIcon, ChevronRightIcon,
   CodeIcon, GearIcon, CheckCircledIcon, CrossCircledIcon, ClockIcon,
   FileTextIcon, CubeIcon, ChevronDownIcon, DotFilledIcon, CopyIcon,
@@ -16,6 +16,8 @@ import { Textarea } from './ui/textarea'
 import { cn } from '@/lib/utils'
 import { AssistantMessage } from './assistant-message'
 import { TestCaseGenerationModal } from './test-case-generation-modal'
+import { useApiError } from '@/lib/hooks/useApiError'
+import { toast } from 'sonner'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -74,6 +76,7 @@ const AVAILABLE_AGENTS = [
 
 export function SubProjectChat({ projectName, taskName, subProjectId, initialSessionId, taskId }: SubProjectChatProps) {
   const queryClient = useQueryClient()
+  const { handleApiError } = useApiError()
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [chatId, setChatId] = useState<string | null>(null)
@@ -266,6 +269,28 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
       if (data.chat_id) {
         setChatId(data.chat_id)
       }
+    },
+    onError: (error) => {
+      console.error('❌ Query failed:', error)
+
+      // Handle rate limit errors with the banner
+      const wasRateLimitError = handleApiError(error)
+
+      if (wasRateLimitError) {
+        // Also show a toast for immediate feedback
+        toast.error('Rate Limit Exceeded', {
+          description: 'You have exceeded the rate limit. Please check the banner at the top of the page for details.',
+          duration: 5000,
+        })
+      } else {
+        // Handle other errors with a toast notification
+        toast.error('Failed to send message', {
+          description: error instanceof Error ? error.message : 'An unexpected error occurred',
+        })
+      }
+
+      // Remove the processing message if there was an error
+      setMessages(prev => prev.filter(msg => !msg.isProcessing))
     },
   })
 
