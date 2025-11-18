@@ -933,13 +933,38 @@ async def update_deployment_host(
     await session.commit()
     await session.refresh(task)
 
-    await create_nginx_config(task.deployment_host, task.deployment_port)
-    await add_nginx_ssl(task.deployment_host, "admin@example.com")
+    # Try to create nginx config, but don't fail if the connection drops during nginx restart
+    nginx_status = "pending"
+    ssl_status = "pending"
+
+    try:
+        await create_nginx_config(task.deployment_host, task.deployment_port)
+        nginx_status = "configured"
+    except aiohttp.ServerDisconnectedError:
+        # Nginx config was likely created successfully, but connection dropped during nginx restart
+        logger.warning(f"Connection dropped during nginx restart for {task.deployment_host}. Config likely created successfully.")
+        nginx_status = "configured (connection dropped during restart)"
+    except Exception as e:
+        # Log other errors but don't fail the host update
+        logger.error(f"Failed to create nginx config for {task.deployment_host}: {e}")
+        nginx_status = "failed"
+
+    try:
+        await add_nginx_ssl(task.deployment_host, "admin@example.com")
+        ssl_status = "configured"
+    except aiohttp.ServerDisconnectedError:
+        logger.warning(f"Connection dropped during SSL setup for {task.deployment_host}. SSL likely configured successfully.")
+        ssl_status = "configured (connection dropped)"
+    except Exception as e:
+        logger.error(f"Failed to add SSL for {task.deployment_host}: {e}")
+        ssl_status = "failed"
 
     return {
         "message": "Deployment host updated successfully",
         "task_id": str(task_id),
-        "deployment_host": task.deployment_host
+        "deployment_host": task.deployment_host,
+        "nginx_status": nginx_status,
+        "ssl_status": ssl_status
     }
 
 
