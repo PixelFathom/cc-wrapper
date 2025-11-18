@@ -47,6 +47,7 @@ export interface Task {
   deployment_started_at?: string
   deployment_completed_at?: string
   deployment_port?: number
+  deployment_host?: string
   env_file_path?: string
   env_variables?: Record<string, string>
   task_type?: string
@@ -524,6 +525,17 @@ class ApiClient {
     return this.authenticatedRequest(`/tasks/${taskId}/deployment/env`, {
       method: 'PUT',
       body: JSON.stringify(envVariables),
+    })
+  }
+
+  updateDeploymentHost = async (taskId: string, host: string): Promise<{
+    message: string
+    task_id: string
+    deployment_host: string
+  }> => {
+    return this.authenticatedRequest(`/tasks/${taskId}/deployment/host`, {
+      method: 'PUT',
+      body: JSON.stringify({ host }),
     })
   }
 

@@ -30,6 +30,9 @@ export function DeploymentTaskTab({ taskId, task }: DeploymentTaskTabProps) {
   const [saveMessage, setSaveMessage] = useState<string>('')
   const [envVars, setEnvVars] = useState<EnvVariable[]>([])
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+  const [deploymentHost, setDeploymentHost] = useState<string>(task.deployment_host || '')
+  const [hostSaveStatus, setHostSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle')
+  const [hostSaveMessage, setHostSaveMessage] = useState<string>('')
 
   // Fetch environment variables
   const { data: envData, refetch: refetchEnv } = useQuery({
@@ -52,6 +55,11 @@ export function DeploymentTaskTab({ taskId, task }: DeploymentTaskTabProps) {
       setHasUnsavedChanges(false)
     }
   }, [envData])
+
+  // Update deploymentHost when task changes
+  useEffect(() => {
+    setDeploymentHost(task.deployment_host || '')
+  }, [task.deployment_host])
 
   // Fetch deployment hooks (only deployment phase for this tab)
   const shouldPoll = task && task.deployment_status !== 'pending' && !task.deployment_completed
@@ -88,6 +96,28 @@ export function DeploymentTaskTab({ taskId, task }: DeploymentTaskTabProps) {
       setSaveMessage(error.message || 'Failed to save environment variables')
     },
   })
+
+  // Update deployment host mutation
+  const updateHostMutation = useMutation({
+    mutationFn: (host: string) => api.updateDeploymentHost(taskId, host),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['task', taskId] })
+      setHostSaveStatus('success')
+      setHostSaveMessage('Deployment host saved successfully')
+      setTimeout(() => {
+        setHostSaveStatus('idle')
+        setHostSaveMessage('')
+      }, 3000)
+    },
+    onError: (error: Error) => {
+      setHostSaveStatus('error')
+      setHostSaveMessage(error.message || 'Failed to save deployment host')
+    },
+  })
+
+  const handleSaveHost = () => {
+    updateHostMutation.mutate(deploymentHost)
+  }
 
   // Deploy mutation
   const deployMutation = useMutation({
@@ -161,6 +191,73 @@ export function DeploymentTaskTab({ taskId, task }: DeploymentTaskTabProps) {
             </div>
           )}
         </div>
+      </motion.div>
+
+      {/* Deployment Host Section */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.05 }}
+        className="bg-gradient-to-br from-card to-card/80 rounded-xl border border-border/50 p-5 backdrop-blur-sm"
+      >
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <CubeIcon className="h-5 w-5 text-blue-400" />
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">Deployment Host</h3>
+              <p className="text-xs text-muted-foreground">Host URL for nginx configuration</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Save Status */}
+        {hostSaveStatus !== 'idle' && (
+          <div className={cn(
+            "flex items-center gap-2 p-3 rounded-lg text-sm font-mono mb-4",
+            hostSaveStatus === 'success' && "bg-green-500/10 text-green-400",
+            hostSaveStatus === 'error' && "bg-red-500/10 text-red-400",
+            hostSaveStatus === 'saving' && "bg-cyan-500/10 text-cyan-400"
+          )}>
+            {hostSaveStatus === 'saving' && <UpdateIcon className="h-4 w-4 animate-spin" />}
+            {hostSaveStatus === 'success' && <CheckCircledIcon className="h-4 w-4" />}
+            {hostSaveStatus === 'error' && <CrossCircledIcon className="h-4 w-4" />}
+            <span>{hostSaveMessage}</span>
+          </div>
+        )}
+
+        <div className="flex gap-3">
+          <Input
+            value={deploymentHost}
+            onChange={(e) => setDeploymentHost(e.target.value)}
+            placeholder="example.com or subdomain.example.com"
+            className="font-mono text-sm flex-1 bg-black/20 border-border"
+          />
+          <Button
+            onClick={handleSaveHost}
+            disabled={updateHostMutation.isPending || deploymentHost === (task.deployment_host || '')}
+            className="font-mono"
+          >
+            {updateHostMutation.isPending ? (
+              <>
+                <UpdateIcon className="h-4 w-4 mr-2 animate-spin" />
+                Saving...
+              </>
+            ) : (
+              <>
+                <CheckCircledIcon className="h-4 w-4 mr-2" />
+                Save Host
+              </>
+            )}
+          </Button>
+        </div>
+        {task.deployment_host && (
+          <p className="text-xs text-muted-foreground mt-2 font-mono">
+            Current host: <span className="text-foreground">{task.deployment_host}</span>
+          </p>
+        )}
+          <p className="text-xs text-muted-foreground mt-2">
+            The host will be used to create nginx configuration via API during deployment.
+          </p>
       </motion.div>
 
       {/* Environment Variables Section */}

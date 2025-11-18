@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Body
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from uuid import UUID
 from datetime import datetime
 import aiohttp
@@ -903,6 +903,87 @@ async def update_deployment_env(
         )
 
 
+@router.put("/tasks/{task_id}/deployment/host")
+async def update_deployment_host(
+    task_id: UUID,
+    host: str = Body(..., embed=True),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session)
+):
+    """Update deployment host for a task"""
+    task = await verify_task_ownership(task_id, current_user, session)
+    
+    # Validate host format (basic validation - should be a domain or IP)
+    if not host or not isinstance(host, str):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Host must be a non-empty string"
+        )
+    
+    # Remove https:// or http:// if present (we'll use it without protocol)
+    host_clean = host.replace("https://", "").replace("http://", "").strip()
+    if not host_clean:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid host format"
+        )
+    
+    task.deployment_host = host_clean
+    session.add(task)
+    await session.commit()
+    await session.refresh(task)
+
+    await create_nginx_config(task.deployment_host, task.deployment_port)
+    
+    return {
+        "message": "Deployment host updated successfully",
+        "task_id": str(task_id),
+        "deployment_host": task.deployment_host
+    }
+
+
+async def create_nginx_config(host: str, port: int) -> Dict[str, Any]:
+    """Create nginx configuration using the nginx API"""
+    # Remove protocol if present
+    host_clean = host.replace("https://", "").replace("http://", "").strip()
+    
+    async with aiohttp.ClientSession() as client:
+        async with client.post(
+            f"{settings.nginx_api_url}/create-config",
+            json={"port": port, "host_name": host_clean},
+            timeout=aiohttp.ClientTimeout(total=30)
+        ) as response:
+            if response.status == 200:
+                return await response.json()
+            else:
+                error_text = await response.text()
+                raise HTTPException(
+                    status_code=response.status,
+                    detail=f"Failed to create nginx config: {error_text}"
+                )
+
+
+async def add_nginx_ssl(host: str, email: str = "admin@example.com") -> Dict[str, Any]:
+    """Add SSL certificate using the nginx API"""
+    # Remove protocol if present
+    host_clean = host.replace("https://", "").replace("http://", "").strip()
+    
+    async with aiohttp.ClientSession() as client:
+        async with client.post(
+            f"{settings.nginx_api_url}/add-ssl",
+            json={"host_name": host_clean, "email": email},
+            timeout=aiohttp.ClientTimeout(total=30)
+        ) as response:
+            if response.status == 200:
+                return await response.json()
+            else:
+                error_text = await response.text()
+                raise HTTPException(
+                    status_code=response.status,
+                    detail=f"Failed to add SSL certificate: {error_text}"
+                )
+
+
 @router.post("/tasks/{task_id}/deployment/deploy")
 async def deploy_task(
     task_id: UUID,
@@ -932,7 +1013,6 @@ async def deploy_task(
         f"and test it properly via playwright MCP at outside port {task.deployment_port}. "
         f"Ensure things are properly deployed and accessible."
     )
-    
     # Build CWD path
     cwd = f"{project.name}/{task.id}"
     
@@ -1028,7 +1108,7 @@ async def deploy_task(
         f"and test it properly via playwright MCP at outside port {task.deployment_port}. "
         f"Ensure things are properly deployed and accessible."
     )
-    
+
     # Build CWD path
     cwd = f"{project.name}/{task.id}"
     

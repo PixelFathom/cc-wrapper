@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     query_url: str = "http://host.docker.internal:8001/api/query"
     # External API and file storage
     external_api_url: str = "http://host.docker.internal:8001/api"
+    # Nginx API
+    nginx_api_url: str = "http://host.docker.internal:8001/api/nginx"
     # OpenAI Configuration
     openai_api_key: str = ""
 

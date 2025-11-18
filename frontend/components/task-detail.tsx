@@ -72,12 +72,14 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
     refetchInterval: 5000, // Poll every 5 seconds to catch new sub_projects
   })
 
-  // Fetch deployment hooks (poll if deployment is not completed)
+  // Fetch deployment hooks (always poll if deployment is not completed)
+  const shouldPollDeployment = task && task.deployment_status !== 'pending' && !task.deployment_completed
   const { data: deploymentData, refetch: refetchHooks } = useQuery({
     queryKey: ['deployment-hooks', taskId],
     queryFn: () => api.getTaskDeploymentHooks(taskId, 100), // Get more hooks
     enabled: !!task && task.deployment_status !== 'pending', // Fetch hooks if deployment has started
-    refetchInterval: task && !task.deployment_completed ? 3000 : false, // Poll every 3 seconds only if not completed
+    refetchInterval: shouldPollDeployment ? 2000 : false, // Always poll every 2 seconds when deployment is running
+    refetchIntervalInBackground: true, // Continue polling even when tab is not active
   })
 
   // Fetch knowledge base files

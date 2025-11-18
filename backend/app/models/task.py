@@ -32,6 +32,7 @@ class Task(BaseModel, table=True):
     deployment_started_at: Optional[datetime] = Field(default=None)
     deployment_completed_at: Optional[datetime] = Field(default=None)
     deployment_port: Optional[int] = Field(default=None)  # 5-digit port number (10000-99999)
+    deployment_host: Optional[str] = Field(default=None)  # Host URL for nginx configuration
     env_file_path: Optional[str] = Field(default=None)  # Path to uploaded .env file
     env_variables: Optional[Dict[str, str]] = Field(default=None, sa_column=Column(JSONB))  # Parsed key-value pairs from .env
 

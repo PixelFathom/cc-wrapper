@@ -88,6 +88,7 @@ class DeploymentService:
             "project_name": cwd,
             "github_repo_url": github_repo_url,
             "webhook_url": webhook_url,
+            "generate_claude_md": False,
             "branch": f"task/{task.name}",
         }
         
