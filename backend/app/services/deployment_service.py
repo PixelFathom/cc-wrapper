@@ -246,7 +246,7 @@ class DeploymentService:
                         import asyncio
                         asyncio.create_task(trigger_issue_resolution_query(task.id, resolution.id, project.id))
 
-        elif status == "ERROR":
+        elif status == "failed":
             task.deployment_status = "failed"
             # Reset deployment_completed flags to allow retry
             task.deployment_completed = False

@@ -934,7 +934,8 @@ async def update_deployment_host(
     await session.refresh(task)
 
     await create_nginx_config(task.deployment_host, task.deployment_port)
-    
+    await add_nginx_ssl(task.deployment_host, "admin@example.com")
+
     return {
         "message": "Deployment host updated successfully",
         "task_id": str(task_id),
