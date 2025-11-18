@@ -23,10 +23,10 @@ class DeploymentService:
         self.webhook_base_url = settings.webhook_base_url
     
     async def _generate_unique_port(self, db: AsyncSession, task_id: UUID) -> int:
-        """Generate a unique 5-digit port number (10000-99999) for a task"""
+        """Generate a unique port number (9001-65535) for a task"""
         max_attempts = 100
         for _ in range(max_attempts):
-            port = random.randint(10000, 99999)
+            port = random.randint(9001, 65535)
             # Check if port is already assigned to another task
             stmt = select(Task).where(
                 Task.deployment_port == port,
