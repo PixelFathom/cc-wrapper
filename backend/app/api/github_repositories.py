@@ -211,7 +211,12 @@ async def initialize_repository(
                     "Authorization": f"Bearer {token}",
                     "Accept": "application/vnd.github.v3+json",
                 },
-                params={"per_page": 100},
+                params={
+                    "per_page": 500,
+                    "page": 1,
+                    "sort": "updated",
+                    "affiliation": "owner,collaborator,organization_member"
+                },
                 timeout=30.0
             )
             response.raise_for_status()
