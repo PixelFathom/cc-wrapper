@@ -4,7 +4,6 @@ import './globals.css'
 import { Providers } from '@/components/providers'
 import { Navigation } from '@/components/navigation'
 import { ApprovalCenter } from '@/components/approval-center'
-import { ClerkProvider } from '@clerk/nextjs'
 import { Toaster } from 'sonner'
 
 const inter = Inter({ subsets: ['latin'] })
@@ -22,16 +21,14 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark scroll-smooth">
       <body className={`${inter.className} min-h-screen`}>
-        <ClerkProvider>
-          <Providers>
-            <Navigation />
-            <main className="pt-20 pb-10">
-              {children}
-            </main>
-            <ApprovalCenter />
-            <Toaster position="top-right" richColors />
-          </Providers>
-        </ClerkProvider>
+        <Providers>
+          <Navigation />
+          <main className="pt-20 pb-10">
+            {children}
+          </main>
+          <ApprovalCenter />
+          <Toaster position="top-right" richColors />
+        </Providers>
       </body>
     </html>
   )

@@ -14,24 +14,39 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.post("/webhooks/deployment/{task_id}")
+@router.post("/webhooks/deployment/{task_id}/initialization")
+async def receive_initialization_webhook(
+    task_id: UUID,
+    webhook_data: Dict[str, Any],
+    session: AsyncSession = Depends(get_session)
+):
+    """Receive initialization phase webhooks from remote service"""
+    try:
+        logger.info(f"Received initialization webhook for task {task_id}: {webhook_data}")
+        await deployment_service.process_webhook(session, task_id, webhook_data, phase="initialization")
+        return {"status": "received", "task_id": task_id, "phase": "initialization"}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error processing initialization webhook: {e}")
+        raise HTTPException(status_code=500, detail="Failed to process webhook")
+
+
+@router.post("/webhooks/deployment/{task_id}/deployment")
 async def receive_deployment_webhook(
     task_id: UUID,
     webhook_data: Dict[str, Any],
     session: AsyncSession = Depends(get_session)
 ):
-    """Receive deployment status webhooks from remote service"""
+    """Receive deployment phase webhooks from remote service"""
     try:
-        # Log webhook receipt with limited data for large payloads
-        log_data = str(webhook_data)
-        logger.info(f"Received webhook for task {task_id}: {webhook_data}")
-        
-        await deployment_service.process_webhook(session, task_id, webhook_data)
-        return {"status": "received", "task_id": task_id}
+        logger.info(f"Received deployment webhook for task {task_id}: {webhook_data}")
+        await deployment_service.process_webhook(session, task_id, webhook_data, phase="deployment")
+        return {"status": "received", "task_id": task_id, "phase": "deployment"}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Error processing webhook: {e}")
+        logger.error(f"Error processing deployment webhook: {e}")
         raise HTTPException(status_code=500, detail="Failed to process webhook")
 
 

@@ -27,6 +27,9 @@ class TaskRead(TaskBase):
     deployment_completed: bool
     deployment_started_at: Optional[datetime]
     deployment_completed_at: Optional[datetime]
+    deployment_port: Optional[int] = None
+    env_file_path: Optional[str] = None
+    env_variables: Optional[Dict[str, str]] = None
     task_type: Optional[str] = None
 
     class Config:

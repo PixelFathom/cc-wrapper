@@ -1,22 +1,26 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Body
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
-from typing import List, Optional
+from typing import List, Optional, Dict
 from uuid import UUID
 from datetime import datetime
 import aiohttp
 import os
 import tempfile
+import base64
+import logging
 from pathlib import Path
 
 from app.deps import get_session, get_current_user
 from app.models import Task, Project, DeploymentHook, SubProject, KnowledgeBaseFile, User
 from app.schemas import TaskCreate, TaskRead, TaskUpdate, VSCodeLinkResponse
 from app.services.deployment_service import deployment_service
+from app.services.knowledge_base_service import upload_to_knowledge_base
 from app.core.rate_limiter import RateLimitExceeded
 from app.core.settings import get_settings
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -266,98 +270,25 @@ async def upload_to_task_knowledge_base(
     """Upload a file to task's .claude knowledge base folder"""
     # Get task and verify ownership
     task = await verify_task_ownership(task_id, current_user, session)
-
-    project = await session.get(Project, task.project_id)
     
     # Read file content once and store it
     file_content = await file.read()
     
-    # Prepare form data for Knowledge Base API
-    form_data = aiohttp.FormData()
-    form_data.add_field('file', file_content, filename=file.filename)
-    form_data.add_field('organization_name', settings.org_name)
-    form_data.add_field('project_path', f"{project.name}/{task.id}")
-        
-    # For now, skip the external API and use local storage directly
-    # This can be uncommented when the external API has the Knowledge Base endpoints
     try:
-        # Call the external Knowledge Base API
-        async with aiohttp.ClientSession() as client:
-            async with client.post(
-                f"{settings.external_api_url}/knowledge-base/upload",
-                data=form_data
-            ) as response:
-                if response.status == 200:
-                    result = await response.json()
-                    
-                    # Save file details to database
-                    kb_file = KnowledgeBaseFile(
-                        task_id=task_id,
-                        file_name=file.filename,
-                        file_path=result.get('file_path', file.filename),
-                        file_size=result.get('size_bytes', len(file_content)),
-                        content_type=file.content_type
-                    )
-                    session.add(kb_file)
-                    await session.commit()
-                    await session.refresh(kb_file)
-                    
-                    # Add database info to response
-                    result['id'] = str(kb_file.id)
-                    result['uploaded_at'] = kb_file.uploaded_at.isoformat()
-                    
-                    return result
-                else:
-                    error_detail = await response.text()
-                    raise HTTPException(
-                        status_code=response.status,
-                        detail=f"Knowledge Base API error: {error_detail}"
-                    )
-    except aiohttp.ClientError as e:
-        try:
-            # Create a temporary directory for the file
-            temp_dir = tempfile.gettempdir()
-            temp_kb_base = Path(temp_dir) / "cfpj_knowledge_base"
-            temp_kb_base.mkdir(exist_ok=True)
-            
-            # Create the knowledge base structure
-            kb_path = temp_kb_base / settings.org_name / project.name / f"{task.id}" / ".claude"
-            kb_path.mkdir(parents=True, exist_ok=True)
-            
-            file_path = kb_path / file.filename
-            
-            # Save file using the content we already read
-            with open(file_path, "wb") as buffer:
-                buffer.write(file_content)
-            
-            # Save file details to database
-            kb_file = KnowledgeBaseFile(
-                task_id=task_id,
-                file_name=file.filename,
-                file_path=file.filename,  # Simple path for now, can be nested later
-                file_size=file_path.stat().st_size,
-                content_type=file.content_type,
-                temp_path=str(file_path)
-            )
-            session.add(kb_file)
-            await session.commit()
-            await session.refresh(kb_file)
-            
-            return {
-                "id": str(kb_file.id),
-                "file_name": kb_file.file_name,
-                "file_path": kb_file.file_path,
-                "size_bytes": kb_file.file_size,
-                "content_type": kb_file.content_type,
-                "uploaded_at": kb_file.uploaded_at.isoformat(),
-                "status": "uploaded",
-                "message": f"File stored in knowledge base"
-            }
-
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to upload file: {str(e)}"
+        # Use knowledge base service utility (default to .claude folder)
+        result = await upload_to_knowledge_base(
+            session=session,
+            task_id=task_id,
+            file_content=file_content,
+            filename=file.filename,
+            content_type=file.content_type,
+            file_path=None  # None means use default .claude folder
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload file: {str(e)}"
         )
 
 
@@ -520,3 +451,637 @@ async def update_task_deployment_guide(
         "content": task.deployment_guide,
         "updated_at": task.deployment_guide_updated_at.isoformat()
     }
+
+
+def parse_env_content(content: str) -> Dict[str, str]:
+    """Parse .env file content and extract key-value pairs"""
+    env_variables = {}
+    lines = content.split('\n')
+    
+    for line in lines:
+        # Remove leading/trailing whitespace
+        line = line.strip()
+        
+        # Skip empty lines and comments
+        if not line or line.startswith('#'):
+            continue
+        
+        # Check if line contains '='
+        if '=' not in line:
+            continue
+        
+        # Split on first '=' only
+        parts = line.split('=', 1)
+        if len(parts) != 2:
+            continue
+        
+        key = parts[0].strip()
+        value = parts[1].strip()
+        
+        # Remove quotes if present
+        if value.startswith('"') and value.endswith('"'):
+            value = value[1:-1]
+        elif value.startswith("'") and value.endswith("'"):
+            value = value[1:-1]
+        
+        # Handle escaped quotes
+        value = value.replace('\\"', '"').replace("\\'", "'")
+        
+        if key:
+            env_variables[key] = value
+    
+    return env_variables
+
+
+def format_env_content(env_variables: Dict[str, str]) -> str:
+    """Convert key-value pairs to .env file format"""
+    lines = []
+    for key, value in sorted(env_variables.items()):
+        # Escape special characters in value
+        if not value:
+            lines.append(f"{key}=")
+        else:
+            # If value contains spaces or special chars, quote it
+            if ' ' in value or '=' in value or value.startswith('#') or '\n' in value:
+                # Escape quotes and wrap in quotes
+                escaped_value = value.replace('"', '\\"')
+                lines.append(f'{key}="{escaped_value}"')
+            else:
+                lines.append(f"{key}={value}")
+    return '\n'.join(lines)
+
+
+async def read_env_file_from_project(project_path: str) -> Dict[str, str]:
+    """Read .env file from project using read-file API"""
+    try:
+        async with aiohttp.ClientSession() as client:
+            read_params = {
+                'organization_name': settings.org_name,
+                'project_name': project_path,
+                'upload_location': 'main',
+                'file_path': '.env'
+            }
+            
+            read_response = await client.get(
+                f"{settings.external_api_url}/project/read-file-legacy",
+                params=read_params
+            )
+
+            if read_response.status == 404:
+                # File doesn't exist yet, return empty dict
+                return {}
+            
+            if read_response.status != 200:
+                error_detail = await read_response.text()
+                raise HTTPException(
+                    status_code=read_response.status,
+                    detail=f"Failed to read .env file: {error_detail}"
+                )
+            
+            read_result = await read_response.json()
+            base64_content = read_result.get('content', '')
+            
+            if not base64_content:
+                return {}
+            
+            # Decode base64
+            decoded_content = base64.b64decode(base64_content).decode('utf-8')
+            
+            # Parse .env content
+            return parse_env_content(decoded_content)
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to read .env file: {str(e)}"
+        )
+
+
+async def write_env_file_to_project(
+    session: AsyncSession,
+    task_id: UUID,
+    env_variables: Dict[str, str]
+) -> None:
+    """Write .env file to project using knowledge base upload service"""
+    try:
+        # Convert to .env format
+        env_content = format_env_content(env_variables)
+        env_bytes = env_content.encode('utf-8')
+        
+        # Use knowledge base upload service with file_path="/" for root level
+        result = await upload_to_knowledge_base(
+            session=session,
+            task_id=task_id,
+            file_content=env_bytes,
+            filename='.env',
+            content_type='text/plain',
+            file_path="/"  # Root level upload for .env file
+        )
+        
+        logger.info(f"Successfully uploaded .env file: {result.get('file_path')}")
+        
+    except HTTPException as e:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except ValueError as e:
+        # Convert ValueError to HTTPException
+        logger.error(f"Error writing .env file: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to write .env file: {str(e)}"
+        )
+    except Exception as e:
+        # Convert any other exception to HTTPException
+        logger.error(f"Error writing .env file: {e}", exc_info=True)
+        error_msg = str(e)
+        # Check if it's an upload failure
+        if "Upload failed" in error_msg or "does not exist" in error_msg or "Target path" in error_msg or "Failed to upload" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Failed to upload .env file: {error_msg}"
+            )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to write .env file: {str(e)}"
+        )
+
+
+@router.post("/tasks/{task_id}/deployment/env-upload")
+async def upload_deployment_env(
+    task_id: UUID,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session)
+):
+    """Upload .env file for deployment task, then read it back and parse"""
+    task = await verify_task_ownership(task_id, current_user, session)
+    
+    if not file.filename or not file.filename.endswith('.env'):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File must be a .env file"
+        )
+    
+    # Read file content once and store it
+    file_content = await file.read()
+    
+    # Build project path: project_name/task.id
+    project = await session.get(Project, task.project_id)
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found"
+        )
+    
+    project_path = f"{project.name}/{task.id}"
+    
+    try:
+        # Step 1: Upload .env file to knowledge base at root level (file_path="/")
+        upload_result = await upload_to_knowledge_base(
+            session=session,
+            task_id=task_id,
+            file_content=file_content,
+            filename='.env',
+            content_type=file.content_type,
+            file_path="/"  # Root level upload for .env file
+        )
+        
+        logger.info(f"Successfully uploaded .env file: {upload_result.get('file_path')}")
+        
+        # Step 2: Read file back using read-file API to parse it
+        async with aiohttp.ClientSession() as client:
+            read_params = {
+                'organization_name': settings.org_name,
+                'project_name': project_path,
+                'upload_location': 'main',
+                'file_path': '.env'
+            }
+            
+            read_response = await client.get(
+                f"{settings.external_api_url}/project/read-file-legacy",
+                params=read_params
+            )
+            
+            if read_response.status != 200:
+                error_detail = await read_response.text()
+                raise HTTPException(
+                    status_code=read_response.status,
+                    detail=f"Failed to read .env file: {error_detail}"
+                )
+            
+            read_result = await read_response.json()
+            
+            # Step 3: Decode base64 content and parse
+            base64_content = read_result.get('content', '')
+            if not base64_content:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="No content returned from read-file API"
+                )
+            
+            # Decode base64
+            try:
+                decoded_content = base64.b64decode(base64_content).decode('utf-8')
+            except Exception as decode_error:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Failed to decode file content: {str(decode_error)}"
+                )
+            
+            # Parse .env content
+            env_variables = parse_env_content(decoded_content)
+            
+            # Store file path and parsed variables
+            task.env_file_path = '.env'  # Store relative path
+            task.env_variables = env_variables
+            
+            session.add(task)
+            await session.commit()
+            await session.refresh(task)
+            
+            return {
+                "message": "Environment file uploaded and parsed successfully",
+                "task_id": str(task_id),
+                "env_variables": env_variables,
+                "file_path": task.env_file_path
+            }
+            
+    except HTTPException:
+        raise
+    except aiohttp.ClientError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Failed to connect to external service: {str(e)}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process .env file: {str(e)}"
+        )
+
+
+@router.get("/tasks/{task_id}/deployment/env")
+async def get_deployment_env(
+    task_id: UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session)
+):
+    """Get environment variables for a deployment task by reading from .env file"""
+    task = await verify_task_ownership(task_id, current_user, session)
+    
+    project = await session.get(Project, task.project_id)
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found"
+        )
+    
+    # Build project path: project_name/task.id
+    project_path = f"{project.name}/{task.id}"
+    
+    try:
+        # Read .env file from project
+        env_variables = await read_env_file_from_project(project_path)
+        
+        # Update database with current values
+        task.env_variables = env_variables
+        task.env_file_path = ".env"
+        session.add(task)
+        await session.commit()
+        
+        return {
+            "task_id": str(task_id),
+            "env_variables": env_variables,
+            "file_path": ".env",
+            "has_env_file": len(env_variables) > 0
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        # If file doesn't exist or error, return empty
+        return {
+            "task_id": str(task_id),
+            "env_variables": {},
+            "file_path": ".env",
+            "has_env_file": False
+        }
+
+
+@router.put("/tasks/{task_id}/deployment/env")
+async def update_deployment_env(
+    task_id: UUID,
+    env_data: Dict[str, str] = Body(...),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session)
+):
+    """Update environment variables for a deployment task - reads existing .env, merges changes, and writes back"""
+    task = await verify_task_ownership(task_id, current_user, session)
+    
+    project = await session.get(Project, task.project_id)
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found"
+        )
+    
+    # Validate that env_data is a dictionary of string key-value pairs
+    if not isinstance(env_data, dict):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="env_data must be a dictionary of key-value pairs"
+        )
+    
+    # Ensure all values are strings
+    validated_env = {}
+    for key, value in env_data.items():
+        if not isinstance(key, str):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"All keys must be strings, got {type(key).__name__} for key: {key}"
+            )
+        validated_env[key] = str(value) if value is not None else ""
+    
+    # Build project path: project_name/task.id
+    project_path = f"{project.name}/{task.id}"
+    
+    # Ensure project is initialized (this will create the directory structure if needed)
+    if not task.deployment_request_id:
+        try:
+            await deployment_service.initialize_project(session, task_id)
+            await session.refresh(task)
+            # Give it a moment for directory creation (init-project is async)
+            import asyncio
+            await asyncio.sleep(2)  # Wait longer for directory to be created
+        except Exception as e:
+            logger.warning(f"Project initialization warning: {e}")
+            # Continue anyway - we'll try to write the file
+    
+    try:
+        # Step 1: Try to read existing .env file from project (if it exists)
+        existing_env = {}
+        try:
+            existing_env = await read_env_file_from_project(project_path)
+        except HTTPException as e:
+            # If file doesn't exist (404), start with empty dict
+            if e.status_code == 404:
+                existing_env = {}
+            else:
+                # For other errors, log but continue with empty dict
+                logger.warning(f"Could not read existing .env file: {e.detail}")
+                existing_env = {}
+        except Exception as e:
+            # Any other error, start with empty dict
+            logger.warning(f"Error reading .env file: {e}")
+            existing_env = {}
+        
+        # Step 2: Replace existing env with new values (frontend sends complete set)
+        # This allows deletion of variables by not including them in the request
+        final_env = validated_env
+        
+        # Step 3: Try to write .env file back to project
+        # Retry logic in case directory is being created
+        file_written = False
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                await write_env_file_to_project(session, task_id, final_env)
+                file_written = True
+                break
+            except HTTPException as e:
+                # If directory doesn't exist, wait and retry
+                if ("does not exist" in str(e.detail) or "Target path" in str(e.detail) or "Upload failed" in str(e.detail)) and attempt < max_retries - 1:
+                    logger.info(f"Directory not ready yet (attempt {attempt + 1}/{max_retries}), waiting and retrying...")
+                    import asyncio
+                    await asyncio.sleep(1)  # Wait 1 second before retry
+                    continue
+                elif "does not exist" in str(e.detail) or "Target path" in str(e.detail) or "Upload failed" in str(e.detail):
+                    # Final attempt failed, store in DB only
+                    logger.warning(f"Directory not ready after {max_retries} attempts, storing in database only")
+                    file_written = False
+                    break
+                else:
+                    # For other errors, still raise
+                    raise
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"Error writing .env file (attempt {attempt + 1}/{max_retries}): {e}, retrying...")
+                    import asyncio
+                    await asyncio.sleep(1)
+                    continue
+                else:
+                    logger.warning(f"Error writing .env file after {max_retries} attempts: {e}")
+                    file_written = False
+                    break
+        
+        # Step 4: Always update database with final values
+        task.env_variables = final_env
+        task.env_file_path = ".env"
+        session.add(task)
+        await session.commit()
+        await session.refresh(task)
+        
+        message = "Environment variables updated successfully"
+        if not file_written:
+            message += " (stored in database; file will be written when project directory is ready)"
+        
+        return {
+            "message": message,
+            "task_id": str(task_id),
+            "env_variables": final_env,
+            "file_path": task.env_file_path,
+            "file_written": file_written
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update environment variables: {str(e)}"
+        )
+
+
+@router.post("/tasks/{task_id}/deployment/deploy")
+async def deploy_task(
+    task_id: UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session)
+):
+    """Deploy a task with docker setup and testing"""
+    task = await verify_task_ownership(task_id, current_user, session)
+    
+    # Verify task has port number
+    if not task.deployment_port:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Task does not have a port number assigned. Please initialize the task first."
+        )
+    
+    project = await session.get(Project, task.project_id)
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found"
+        )
+    
+    # Construct deployment instruction
+    deployment_instruction = (
+        f"Setup docker if not present, deploy the application, expose it at port {task.deployment_port}, "
+        f"and test it properly via playwright MCP at outside port {task.deployment_port}. "
+        f"Ensure things are properly deployed and accessible."
+    )
+    
+    # Build CWD path
+    cwd = f"{project.name}/{task.id}"
+    
+    # Webhook URL for deployment
+    webhook_url = f"{settings.webhook_base_url}/api/webhooks/deployment/{task.id}/deployment"
+    
+    # Use existing deployment_request_id or generate new session
+    session_id = task.deployment_request_id or None
+    
+    try:
+        # Call query API with deployment instruction
+        async with aiohttp.ClientSession() as client:
+            payload = {
+                "prompt": deployment_instruction,
+                "webhook_url": webhook_url,
+                "organization_name": settings.org_name,
+                "project_path": cwd,
+                "options": {
+                    "permission_mode": "bypassPermissions"
+                }
+            }
+            
+            async with client.post(
+                settings.query_url,
+                json=payload,
+                headers={"Content-Type": "application/json"}
+            ) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    deployment_session_id = result.get("session_id", session_id)
+                    
+                    # Update task deployment status
+                    task.deployment_status = "deploying"
+                    task.deployment_request_id = deployment_session_id
+                    task.deployment_started_at = datetime.utcnow()
+                    
+                    session.add(task)
+                    await session.commit()
+                    await session.refresh(task)
+                    
+                    return {
+                        "message": "Deployment started successfully",
+                        "task_id": str(task_id),
+                        "session_id": deployment_session_id,
+                        "port": task.deployment_port,
+                        "status": task.deployment_status
+                    }
+                else:
+                    error_detail = await response.text()
+                    raise HTTPException(
+                        status_code=response.status,
+                        detail=f"Failed to start deployment: {error_detail}"
+                    )
+    except aiohttp.ClientError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Failed to connect to deployment service: {str(e)}"
+        )
+
+    """Redeploy a task with same port and environment variables"""
+    task = await verify_task_ownership(task_id, current_user, session)
+    
+    # Verify task has port number
+    if not task.deployment_port:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Task does not have a port number assigned."
+        )
+    
+    # Verify task has .env file
+    if not task.env_variables:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Task does not have environment variables. Please upload a .env file first."
+        )
+    
+    project = await session.get(Project, task.project_id)
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found"
+        )
+    
+    # Reset deployment status
+    task.deployment_status = "deploying"
+    task.deployment_completed = False
+    task.deployment_completed_at = None
+    task.deployment_started_at = datetime.utcnow()
+    
+    # Construct deployment instruction (same as deploy)
+    deployment_instruction = (
+        f"Setup docker if not present, deploy the application, expose it at port {task.deployment_port}, "
+        f"and test it properly via playwright MCP at outside port {task.deployment_port}. "
+        f"Ensure things are properly deployed and accessible."
+    )
+    
+    # Build CWD path
+    cwd = f"{project.name}/{task.id}"
+    
+    # Webhook URL for deployment phase
+    webhook_url = f"{settings.webhook_base_url}/api/webhooks/deployment/{task.id}/deployment"
+    
+    # Generate new session ID for redeployment
+    from uuid import uuid4
+    new_session_id = str(uuid4())
+    
+    try:
+        # Call query API with deployment instruction
+        async with aiohttp.ClientSession() as client:
+            payload = {
+                "prompt": deployment_instruction,
+                "org_name": settings.org_name,
+                "cwd": cwd,
+                "webhook_url": webhook_url,
+                "session_id": new_session_id,
+                "permission_mode": "bypassPermissions"
+            }
+            
+            async with client.post(
+                settings.query_url,
+                json=payload,
+                headers={"Content-Type": "application/json"}
+            ) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    deployment_session_id = result.get("session_id", new_session_id)
+                    
+                    # Update task deployment status
+                    task.deployment_request_id = deployment_session_id
+                    
+                    session.add(task)
+                    await session.commit()
+                    await session.refresh(task)
+                    
+                    return {
+                        "message": "Redeployment started successfully",
+                        "task_id": str(task_id),
+                        "session_id": deployment_session_id,
+                        "port": task.deployment_port,
+                        "status": task.deployment_status
+                    }
+                else:
+                    error_detail = await response.text()
+                    raise HTTPException(
+                        status_code=response.status,
+                        detail=f"Failed to start redeployment: {error_detail}"
+                    )
+    except aiohttp.ClientError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Failed to connect to deployment service: {str(e)}"
+        )

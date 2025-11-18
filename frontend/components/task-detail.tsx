@@ -28,6 +28,7 @@ import { ContestHarvestingTab } from './contest-harvesting-tab'
 import { IssueResolutionView } from './issue-resolution-view'
 import { MessagesTab } from './messages-tab'
 import { VSCodeLinkModal } from './vscode-link-modal'
+import { DeploymentTaskTab } from './deployment-task-tab'
 
 interface TaskDetailProps {
   projectId: string
@@ -36,7 +37,7 @@ interface TaskDetailProps {
 
 export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
   // Will be set to 'issue-resolution' for issue tasks after loading
-  const [activeTab, setActiveTab] = useState<'deployment' | 'chat' | 'knowledge-base' | 'test-cases' | 'deployment-guide' | 'contest-harvesting' | 'issue-resolution' | 'messages'>('deployment')
+  const [activeTab, setActiveTab] = useState<'deployment' | 'deployment-task' | 'chat' | 'knowledge-base' | 'test-cases' | 'deployment-guide' | 'contest-harvesting' | 'issue-resolution' | 'messages'>('deployment')
   
   // Helper function to format duration
   const formatDuration = (start: Date, end: Date) => {
@@ -378,6 +379,8 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
             ...(task.task_type !== 'issue_resolution' ? [
               { id: 'deployment', label: 'Summary', icon: <ActivityLogIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
             ] : []),
+            // Show Deployment Task tab for all tasks
+            { id: 'deployment-task', label: 'Deployment Task', icon: <RocketIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
             // Hide Chat tab for issue resolution tasks - they have integrated chat
             ...(task.task_type !== 'issue_resolution' ? [
               { id: 'chat', label: 'Chat', icon: <ChatBubbleIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
@@ -605,8 +608,6 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
             <div className="bg-card rounded-lg border border-border p-6">
               <h4 className="text-sm font-medium mb-4">Upload to Knowledge Base</h4>
               <UploadZone
-                orgName={project?.name || 'default'}
-                cwd={`${project?.name}/${task.name}-${task.id}`}
                 onUpload={async (file) => {
                   try {
                     const result = await api.uploadToKnowledgeBase(taskId, file)
@@ -658,6 +659,10 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
               )}
             </div>
           </motion.div>
+        )}
+
+        {activeTab === 'deployment-task' && task && (
+          <DeploymentTaskTab taskId={taskId} task={task} />
         )}
 
         {activeTab === 'deployment-guide' && (

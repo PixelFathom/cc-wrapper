@@ -46,6 +46,10 @@ export interface Task {
   deployment_completed: boolean
   deployment_started_at?: string
   deployment_completed_at?: string
+  deployment_port?: number
+  env_file_path?: string
+  env_variables?: Record<string, string>
+  task_type?: string
 }
 
 export interface DeploymentHook {
@@ -53,6 +57,7 @@ export interface DeploymentHook {
   task_id: string
   session_id: string
   hook_type: string
+  phase: string  // "initialization" or "deployment"
   status: string
   data: any
   message?: string
@@ -445,27 +450,6 @@ class ApiClient {
     })
   }
 
-  // File upload
-  uploadFile = async (file: File, orgName: string, cwd: string, remotePath?: string): Promise<any> => {
-    const formData = new FormData()
-    formData.append('file', file)
-    formData.append('org_name', orgName)
-    formData.append('cwd', cwd)
-    if (remotePath) {
-      formData.append('remote_path', remotePath)
-    }
-
-    const response = await fetch(`${this.baseUrl}/upload_file`, {
-      method: 'POST',
-      body: formData,
-    })
-
-    if (!response.ok) {
-      throw new Error(`Upload error: ${response.statusText}`)
-    }
-
-    return response.json()
-  }
 
   // SSE for chat streaming
   getEventSource = (sessionId: string): EventSource => {
@@ -480,6 +464,66 @@ class ApiClient {
   retryTaskDeployment = async (taskId: string): Promise<{ status: string; request_id?: string }> => {
     return this.authenticatedRequest(`/tasks/${taskId}/retry-deployment`, {
       method: 'POST',
+    })
+  }
+
+  // Deployment Task APIs
+  uploadDeploymentEnv = async (taskId: string, file: File): Promise<{
+    message: string
+    task_id: string
+    env_variables: Record<string, string>
+    file_path: string
+  }> => {
+    const formData = new FormData()
+    formData.append('file', file)
+
+    const authHeaders = this.getAuthHeaders()
+    delete authHeaders['Content-Type'] // Let browser set Content-Type with boundary for FormData
+
+    const response = await fetch(`${this.baseUrl}/tasks/${taskId}/deployment/env-upload`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: formData,
+    })
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: response.statusText }))
+      throw new Error(error.detail || `Upload error: ${response.statusText}`)
+    }
+
+    return response.json()
+  }
+
+  getDeploymentEnv = async (taskId: string): Promise<{
+    task_id: string
+    env_variables: Record<string, string>
+    file_path: string | null
+    has_env_file: boolean
+  }> => {
+    return this.authenticatedRequest(`/tasks/${taskId}/deployment/env`)
+  }
+
+  deployTask = async (taskId: string): Promise<{
+    message: string
+    task_id: string
+    session_id: string
+    port: number
+    status: string
+  }> => {
+    return this.authenticatedRequest(`/tasks/${taskId}/deployment/deploy`, {
+      method: 'POST',
+    })
+  }
+
+  updateDeploymentEnv = async (taskId: string, envVariables: Record<string, string>): Promise<{
+    message: string
+    task_id: string
+    env_variables: Record<string, string>
+    file_path: string
+  }> => {
+    return this.authenticatedRequest(`/tasks/${taskId}/deployment/env`, {
+      method: 'PUT',
+      body: JSON.stringify(envVariables),
     })
   }
 

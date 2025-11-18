@@ -17,11 +17,8 @@ from app.models.github_repository import GitHubRepository
 from app.models.project import Project
 from app.models.task import Task
 from app.services.github_auth_service import GitHubAuthService
-from app.core.settings import get_settings
-from app.core.redis import get_redis
-from app.core.rate_limiter import assert_within_rate_limit, RateLimitExceeded
-
-settings = get_settings()
+from app.services.deployment_service import deployment_service
+from app.core.rate_limiter import RateLimitExceeded
 router = APIRouter(prefix="/github/repositories", tags=["github-repositories"])
 
 
@@ -305,50 +302,19 @@ async def initialize_repository(
         project_id=project.id
     )
     session.add(task)
-    await session.flush()
+    await session.commit()
+    await session.refresh(task)
 
-    # Call external init-project API using task.id
+    # Initialize deployment using deployment service
     try:
-        redis_client = await get_redis()
-        await assert_within_rate_limit(
-            redis_client,
-            user_id=current_user.id,
-        )
-
-        # Build GitHub URL with auth token embedded
-        github_repo_url = repo_data["clone_url"]
-        if token and github_repo_url.startswith("https://github.com/"):
-            github_repo_url = github_repo_url.replace("https://github.com/", f"https://{token}@github.com/")
-
-        # Build project path as project_name/task.id
-        project_path = f"{project_name}/{task.id}"
-
-        # Webhook URL for task deployment
-        webhook_url = f"{settings.webhook_base_url}/api/webhooks/deployment/{task.id}"
-
-        # Prepare payload matching deployment service format
-        init_payload = {
-            "organization_name": settings.org_name,
-            "project_name": project_path,
-            "github_repo_url": github_repo_url,
-            "webhook_url": webhook_url,
-            "branch": repo_data.get("default_branch", "main"),
-        }
-
-        async with httpx.AsyncClient() as client:
-            init_response = await client.post(
-                settings.init_project_url,
-                json=init_payload,
-                timeout=60.0,
-            )
-            init_response.raise_for_status()
-
-            # Get the task_id from response and update task
-            response_data = init_response.json()
-            if response_data.get("task_id"):
-                task.deployment_request_id = response_data.get("task_id")
-                task.deployment_status = "initializing"
-
+        # The deployment service handles:
+        # - Rate limiting
+        # - Building GitHub URL with token
+        # - Building project path
+        # - Building webhook URL
+        # - Calling init-project API
+        # - Updating task status
+        await deployment_service.initialize_project(session, task.id, github_token=token)
         await session.commit()
 
         return InitializeRepositoryResponse(
@@ -356,18 +322,7 @@ async def initialize_repository(
             task_id=str(task.id),
             message=f"Successfully initialized {repo_data['full_name']} with task: {task.name}"
         )
-
-    except RateLimitExceeded as e:
-        await session.rollback()
-        headers = {}
-        if e.retry_after is not None and e.retry_after > 0:
-            headers["Retry-After"] = str(e.retry_after)
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=str(e),
-            headers=headers or None
-        )
-    except httpx.HTTPError as e:
+    except Exception as e:
         # Rollback on failure
         await session.rollback()
         raise HTTPException(

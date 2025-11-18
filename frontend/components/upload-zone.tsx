@@ -3,16 +3,12 @@
 import { useCallback, useState } from 'react'
 import { useDropzone } from 'react-dropzone'
 import { UploadIcon, CheckCircledIcon, CrossCircledIcon, UpdateIcon } from '@radix-ui/react-icons'
-import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { motion, AnimatePresence } from 'framer-motion'
 
 interface UploadZoneProps {
-  orgName: string
-  cwd: string
-  remotePath?: string
   onUploadComplete?: () => void
-  onUpload?: (file: File) => Promise<any>
+  onUpload: (file: File) => Promise<any>
   acceptedFileTypes?: Record<string, string[]>
 }
 
@@ -23,7 +19,7 @@ interface UploadStatus {
   remotePath?: string
 }
 
-export function UploadZone({ orgName, cwd, remotePath, onUploadComplete, onUpload, acceptedFileTypes }: UploadZoneProps) {
+export function UploadZone({ onUploadComplete, onUpload, acceptedFileTypes }: UploadZoneProps) {
   const [uploadStatuses, setUploadStatuses] = useState<UploadStatus[]>([])
 
   const onDrop = useCallback(
@@ -48,9 +44,7 @@ export function UploadZone({ orgName, cwd, remotePath, onUploadComplete, onUploa
               : status
           ))
 
-          const result = onUpload 
-            ? await onUpload(file)
-            : await api.uploadFile(file, orgName, cwd, remotePath)
+          const result = await onUpload(file)
           
           // Update status to success
           setUploadStatuses(prev => prev.map((status, idx) => 
@@ -79,7 +73,7 @@ export function UploadZone({ orgName, cwd, remotePath, onUploadComplete, onUploa
       }
       onUploadComplete?.()
     },
-    [orgName, cwd, remotePath, uploadStatuses.length, onUploadComplete, onUpload]
+    [uploadStatuses.length, onUploadComplete, onUpload]
   )
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -124,11 +118,6 @@ export function UploadZone({ orgName, cwd, remotePath, onUploadComplete, onUploa
           <div className="font-mono">
             <p className="text-lg mb-2 text-foreground">Drag & drop files here</p>
             <p className="text-sm text-muted-foreground">or click to select files</p>
-            {remotePath && (
-              <p className="text-xs text-cyan-500 mt-2">
-                Remote path: {remotePath}
-              </p>
-            )}
           </div>
         )}
       </div>
