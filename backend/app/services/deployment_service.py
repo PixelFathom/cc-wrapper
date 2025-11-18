@@ -248,6 +248,9 @@ class DeploymentService:
 
         elif status == "ERROR":
             task.deployment_status = "failed"
+            # Reset deployment_completed flags to allow retry
+            task.deployment_completed = False
+            task.deployment_completed_at = None
         elif status == "DEPLOYING":
             task.deployment_status = "deploying"
         elif status == "PROCESSING":
