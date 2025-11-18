@@ -933,9 +933,8 @@ async def update_deployment_host(
     await session.commit()
     await session.refresh(task)
 
-    # Try to create nginx config, but don't fail if the connection drops during nginx restart
+    # Create nginx config only (SSL setup is done separately via different endpoint)
     nginx_status = "pending"
-    ssl_status = "pending"
 
     try:
         await create_nginx_config(task.deployment_host, task.deployment_port)
@@ -949,8 +948,43 @@ async def update_deployment_host(
         logger.error(f"Failed to create nginx config for {task.deployment_host}: {e}")
         nginx_status = "failed"
 
+    return {
+        "message": "Deployment host updated successfully",
+        "task_id": str(task_id),
+        "deployment_host": task.deployment_host,
+        "nginx_status": nginx_status
+    }
+
+
+@router.post("/tasks/{task_id}/deployment/ssl")
+async def setup_ssl_certificate(
+    task_id: UUID,
+    email: str = Body("admin@example.com", embed=True),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session)
+):
+    """Setup SSL certificate for deployment host
+
+    Args:
+        task_id: Task ID
+        email: Email for Let's Encrypt certificate notifications
+
+    Returns:
+        SSL setup status
+    """
+    task = await verify_task_ownership(task_id, current_user, session)
+
+    # Verify deployment host is set
+    if not task.deployment_host:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Deployment host must be set before configuring SSL"
+        )
+
+    ssl_status = "pending"
+
     try:
-        await add_nginx_ssl(task.deployment_host, "admin@example.com")
+        await add_nginx_ssl(task.deployment_host, email)
         ssl_status = "configured"
     except aiohttp.ServerDisconnectedError:
         logger.warning(f"Connection dropped during SSL setup for {task.deployment_host}. SSL likely configured successfully.")
@@ -958,13 +992,17 @@ async def update_deployment_host(
     except Exception as e:
         logger.error(f"Failed to add SSL for {task.deployment_host}: {e}")
         ssl_status = "failed"
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to setup SSL certificate: {str(e)}"
+        )
 
     return {
-        "message": "Deployment host updated successfully",
+        "message": "SSL certificate setup initiated",
         "task_id": str(task_id),
         "deployment_host": task.deployment_host,
-        "nginx_status": nginx_status,
-        "ssl_status": ssl_status
+        "ssl_status": ssl_status,
+        "email": email
     }
 
 

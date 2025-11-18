@@ -532,10 +532,24 @@ class ApiClient {
     message: string
     task_id: string
     deployment_host: string
+    nginx_status: string
   }> => {
     return this.authenticatedRequest(`/tasks/${taskId}/deployment/host`, {
       method: 'PUT',
       body: JSON.stringify({ host }),
+    })
+  }
+
+  setupSSLCertificate = async (taskId: string, email: string = 'admin@example.com'): Promise<{
+    message: string
+    task_id: string
+    deployment_host: string
+    ssl_status: string
+    email: string
+  }> => {
+    return this.authenticatedRequest(`/tasks/${taskId}/deployment/ssl`, {
+      method: 'POST',
+      body: JSON.stringify({ email }),
     })
   }
 

@@ -33,6 +33,8 @@ export function DeploymentTaskTab({ taskId, task }: DeploymentTaskTabProps) {
   const [deploymentHost, setDeploymentHost] = useState<string>(task.deployment_host || '')
   const [hostSaveStatus, setHostSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle')
   const [hostSaveMessage, setHostSaveMessage] = useState<string>('')
+  const [sslStatus, setSslStatus] = useState<'idle' | 'setting_up' | 'success' | 'error'>('idle')
+  const [sslMessage, setSslMessage] = useState<string>('')
 
   // Fetch environment variables
   const { data: envData, refetch: refetchEnv } = useQuery({
@@ -117,6 +119,32 @@ export function DeploymentTaskTab({ taskId, task }: DeploymentTaskTabProps) {
 
   const handleSaveHost = () => {
     updateHostMutation.mutate(deploymentHost)
+  }
+
+  // Setup SSL mutation
+  const setupSslMutation = useMutation({
+    mutationFn: () => api.setupSSLCertificate(taskId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['task', taskId] })
+      setSslStatus('success')
+      setSslMessage('SSL certificate configured successfully')
+      setTimeout(() => {
+        setSslStatus('idle')
+        setSslMessage('')
+      }, 5000)
+    },
+    onError: (error: Error) => {
+      setSslStatus('error')
+      setSslMessage(error.message || 'Failed to setup SSL certificate')
+      setTimeout(() => {
+        setSslStatus('idle')
+        setSslMessage('')
+      }, 5000)
+    },
+  })
+
+  const handleSetupSsl = () => {
+    setupSslMutation.mutate()
   }
 
   // Deploy mutation
@@ -255,9 +283,58 @@ export function DeploymentTaskTab({ taskId, task }: DeploymentTaskTabProps) {
             Current host: <span className="text-foreground">{task.deployment_host}</span>
           </p>
         )}
-          <p className="text-xs text-muted-foreground mt-2">
-            The host will be used to create nginx configuration via API during deployment.
-          </p>
+        <p className="text-xs text-muted-foreground mt-2">
+          The host will be used to create nginx configuration via API during deployment.
+        </p>
+
+        {/* SSL Certificate Setup */}
+        {task.deployment_host && (
+          <div className="mt-4 pt-4 border-t border-border/50">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <LockClosedIcon className="h-4 w-4 text-green-400" />
+                <h4 className="text-sm font-semibold text-foreground">SSL Certificate</h4>
+              </div>
+            </div>
+
+            {/* SSL Status */}
+            {sslStatus !== 'idle' && (
+              <div className={cn(
+                "flex items-center gap-2 p-3 rounded-lg text-sm font-mono mb-3",
+                sslStatus === 'success' && "bg-green-500/10 text-green-400",
+                sslStatus === 'error' && "bg-red-500/10 text-red-400",
+                sslStatus === 'setting_up' && "bg-cyan-500/10 text-cyan-400"
+              )}>
+                {sslStatus === 'setting_up' && <UpdateIcon className="h-4 w-4 animate-spin" />}
+                {sslStatus === 'success' && <CheckCircledIcon className="h-4 w-4" />}
+                {sslStatus === 'error' && <CrossCircledIcon className="h-4 w-4" />}
+                <span>{sslMessage}</span>
+              </div>
+            )}
+
+            <Button
+              onClick={handleSetupSsl}
+              disabled={setupSslMutation.isPending || !task.deployment_host}
+              variant="outline"
+              className="font-mono w-full"
+            >
+              {setupSslMutation.isPending ? (
+                <>
+                  <UpdateIcon className="h-4 w-4 mr-2 animate-spin" />
+                  Setting up SSL...
+                </>
+              ) : (
+                <>
+                  <LockClosedIcon className="h-4 w-4 mr-2" />
+                  Setup SSL Certificate
+                </>
+              )}
+            </Button>
+            <p className="text-xs text-muted-foreground mt-2">
+              Configures Let's Encrypt SSL certificate for HTTPS access.
+            </p>
+          </div>
+        )}
       </motion.div>
 
       {/* Environment Variables Section */}
