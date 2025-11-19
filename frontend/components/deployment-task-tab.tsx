@@ -3,10 +3,10 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
-import { 
-  RocketIcon, ReloadIcon, CheckCircledIcon, 
+import {
+  RocketIcon, ReloadIcon, CheckCircledIcon,
   CrossCircledIcon, UpdateIcon, ClockIcon, FileIcon,
-  CubeIcon, LockClosedIcon, PlusIcon, TrashIcon
+  CubeIcon, LockClosedIcon, PlusIcon, TrashIcon, ExternalLinkIcon
 } from '@radix-ui/react-icons'
 import { api, Task } from '@/lib/api'
 import { Button } from './ui/button'
@@ -353,6 +353,58 @@ export function DeploymentTaskTab({ taskId, task }: DeploymentTaskTabProps) {
           </div>
         )}
       </motion.div>
+
+      {/* Visit Deployed Site - Show only when deployment_host is set */}
+      {task.deployment_host && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.075 }}
+          className="relative group"
+        >
+          {/* Glow effect */}
+          <div className="absolute -inset-0.5 bg-gradient-to-r from-cyan-500 via-blue-500 to-purple-500 rounded-xl blur opacity-30 group-hover:opacity-60 transition duration-300" />
+
+          <a
+            href={`https://${task.deployment_host}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="relative block"
+          >
+            <div className="bg-gradient-to-br from-card to-card/90 rounded-xl border border-border/50 p-6 backdrop-blur-sm hover:border-cyan-500/50 transition-all duration-300">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="relative">
+                    <div className="absolute inset-0 bg-gradient-to-r from-cyan-500 to-blue-500 rounded-xl blur-md opacity-50" />
+                    <div className="relative bg-gradient-to-r from-cyan-500/20 to-blue-500/20 p-3 rounded-xl border border-cyan-500/30">
+                      <ExternalLinkIcon className="h-6 w-6 text-cyan-400" />
+                    </div>
+                  </div>
+
+                  <div>
+                    <h3 className="text-base font-semibold text-foreground mb-1 group-hover:text-cyan-400 transition-colors">
+                      Visit Deployed Site
+                    </h3>
+                    <p className="text-sm font-mono text-cyan-400/90 group-hover:text-cyan-300 transition-colors">
+                      {task.deployment_host}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+
+                  <div className="bg-gradient-to-r from-cyan-500/20 to-blue-500/20 p-2.5 rounded-lg border border-cyan-500/30 group-hover:scale-110 transition-transform">
+                    <ExternalLinkIcon className="h-5 w-5 text-cyan-400" />
+                  </div>
+                </div>
+              </div>
+
+              {/* Decorative bottom border */}
+              <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-cyan-500/0 via-cyan-500/50 to-cyan-500/0 rounded-b-xl opacity-0 group-hover:opacity-100 transition-opacity" />
+            </div>
+          </a>
+        </motion.div>
+      )}
 
       {/* Environment Variables Section */}
       <motion.div
