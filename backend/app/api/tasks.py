@@ -1030,7 +1030,7 @@ async def deploy_task(
     # Construct deployment instruction
     deployment_instruction = (
         f"Deploy the application following Docker best practices:\n\n"
-        f"1. SCOPE: Deploy ONLY the application within the current project directory. Do not modify or deploy unrelated services.\n\n"
+        f"1. SCOPE: Deploy ONLY the application within the current project directory. Do not modify or deploy unrelated services. Use the path in cwd only.\n\n"
         f"2. ENVIRONMENT SETUP:\n"
         f"   - Check for .env.example or similar environment template files\n"
         f"   - Create .env file with required variables if not present\n"
