@@ -16,9 +16,11 @@ interface DeploymentLogsProps {
   isCompleted?: boolean
   status?: string
   showPhaseFilter?: boolean  // Whether to show phase filter tabs (default: true)
+  splitStatusAndQueryHooks?: boolean  // When true, status/query hooks render as standalone rows
 }
 
 interface GroupedHooks {
+  id: string
   stepName: string
   hooks: DeploymentHook[]
   status: 'completed' | 'error' | 'running' | 'pending'
@@ -30,10 +32,162 @@ interface GroupedHooks {
   totalCost?: number
 }
 
-export function DeploymentLogs({ hooks, isCompleted, status, showPhaseFilter = true }: DeploymentLogsProps) {
+interface HookDetailChip {
+  key: string
+  label: string
+  value: string
+}
+
+export function DeploymentLogs({
+  hooks,
+  isCompleted,
+  status,
+  showPhaseFilter = true,
+  splitStatusAndQueryHooks = false,
+}: DeploymentLogsProps) {
   const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set())
   const [expandedHooks, setExpandedHooks] = useState<Set<string>>(new Set())
   const [selectedPhase, setSelectedPhase] = useState<'all' | 'initialization' | 'deployment'>('all')
+
+  const formatDetailLabel = (label: string) =>
+    label
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, char => char.toUpperCase())
+
+  const formatDetailValue = (value: string | number | boolean) => {
+    const stringValue = typeof value === 'string' ? value : String(value)
+    if (stringValue.length > 42) {
+      return `${stringValue.slice(0, 39)}…`
+    }
+    return stringValue
+  }
+
+  const formatLongText = (value?: unknown, fallback = '') => {
+    if (typeof value === 'string') return value
+    if (typeof value === 'object' && value !== null) {
+      try {
+        return JSON.stringify(value)
+      } catch (error) {
+        return fallback
+      }
+    }
+    if (typeof value === 'number') return value.toString()
+    return fallback
+  }
+
+  const getHookSummaryMessage = (hook?: DeploymentHook) => {
+    if (!hook) return ''
+    const truncate = (text: string, limit = 220) =>
+      text.length > limit ? `${text.slice(0, limit)}…` : text
+
+    if (hook.hook_type === 'query') {
+      const messageType = hook.data?.message_type
+      const contentType = hook.data?.content_type
+      const toolName = hook.data?.tool_name
+      const result = formatLongText(hook.data?.result)
+      const toolInput = formatLongText(hook.data?.tool_input)
+
+      if (contentType === 'tool_use') {
+        if (toolInput) {
+          const prefix = toolName ? `${toolName}: ` : ''
+          return truncate(`${prefix}${toolInput}`)
+        }
+        return toolName ? `Using tool ${toolName}` : 'Tool execution started'
+      }
+
+      if (contentType === 'tool_result') {
+        if (result) {
+          const prefix = toolName ? `${toolName} result: ` : 'Tool result: '
+          return truncate(`${prefix}${result}`)
+        }
+        return toolName ? `${toolName} finished running` : 'Tool execution completed'
+      }
+
+      if (messageType === 'SystemMessage') {
+        if (hook.message) return hook.message
+        if (result) return truncate(`System: ${result}`)
+        return 'System update'
+      }
+
+      if (messageType === 'UserMessage') {
+        if (result) return truncate(`User: ${result}`)
+        if (hook.message) return hook.message
+        return 'User input'
+      }
+
+      if (messageType === 'AssistantMessage') {
+        if (result) return truncate(result)
+        if (hook.message) return hook.message
+        return 'Assistant reasoning'
+      }
+
+      if (messageType === 'ResultMessage') {
+        if (result) return truncate(`Result: ${result}`)
+        if (hook.message) return hook.message
+        return 'Result message'
+      }
+    }
+
+    if (hook.message) return hook.message
+    const dataMessageKeys = ['status', 'description', 'summary', 'step_name']
+    for (const key of dataMessageKeys) {
+      const value = hook.data?.[key]
+      if (typeof value === 'string' && value.length > 0) {
+        return value
+      }
+    }
+    return ''
+  }
+
+  const getHookDetailChips = (hook?: DeploymentHook): HookDetailChip[] => {
+    if (!hook) return []
+
+    const chips: HookDetailChip[] = []
+    const seen = new Set<string>()
+    const addChip = (key: string, label: string, rawValue: unknown) => {
+      if (chips.length >= 4 || rawValue === undefined || rawValue === null) return
+      if (typeof rawValue !== 'string' && typeof rawValue !== 'number' && typeof rawValue !== 'boolean') return
+      if (seen.has(key)) return
+      chips.push({ key, label, value: formatDetailValue(rawValue) })
+      seen.add(key)
+    }
+
+    addChip('status', 'Status', hook.status || hook.data?.status)
+    addChip('phase', 'Phase', hook.phase)
+    addChip('hook_type', 'Hook', hook.hook_type)
+    addChip('message_type', 'Message', hook.data?.message_type)
+    addChip('content_type', 'Content', hook.data?.content_type)
+    addChip('tool_name', 'Tool', hook.data?.tool_name)
+
+    const data = hook.data && typeof hook.data === 'object' ? hook.data as Record<string, unknown> : undefined
+    if (!data) return chips
+
+    const priorityKeys = [
+      'branch',
+      'organization_name',
+      'project_name',
+      'github_repo_url',
+      'webhook_url',
+      'deployment_host',
+      'environment',
+      'target',
+      'framework',
+    ]
+
+    priorityKeys.forEach(key => {
+      if (chips.length >= 4) return
+      if (key in data) {
+        addChip(key, formatDetailLabel(key), data[key])
+      }
+    })
+
+    for (const [key, value] of Object.entries(data)) {
+      if (chips.length >= 4) break
+      addChip(key, formatDetailLabel(key), value)
+    }
+
+    return chips
+  }
 
   // Separate hooks by phase
   const hooksByPhase = useMemo(() => {
@@ -49,56 +203,102 @@ export function DeploymentLogs({ hooks, isCompleted, status, showPhaseFilter = t
     return hooks.filter(h => h.phase === selectedPhase)
   }, [hooks, selectedPhase, showPhaseFilter])
 
+  const getQueryStepLabel = (hook: DeploymentHook) => {
+    const messageType = hook.data?.message_type
+    const contentType = hook.data?.content_type
+    const toolName = hook.data?.tool_name
+
+    if (contentType === 'tool_use') {
+      return toolName ? `Tool Use · ${toolName}` : 'Tool Use'
+    }
+    if (contentType === 'tool_result') {
+      return toolName ? `Tool Result · ${toolName}` : 'Tool Result'
+    }
+
+    switch (messageType) {
+      case 'AssistantMessage':
+        return 'Assistant'
+      case 'UserMessage':
+        return 'User'
+      case 'SystemMessage':
+        return 'System'
+      case 'ResultMessage':
+        return 'Result'
+      default:
+        return hook.hook_type || 'Query'
+    }
+  }
+
   // Group hooks by logical steps
   const groupedHooks = useMemo(() => {
     const groups = new Map<string, GroupedHooks>()
     const groupOrder: string[] = []
-    
+
+    const formatLabelTime = (timestamp: string) =>
+      new Date(timestamp).toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      })
+
     // Don't filter out any hooks - we want to see everything
     filteredHooks.forEach(hook => {
+      const isStatusHook = hook.hook_type === 'status'
+      const isQueryHook = hook.hook_type === 'query'
+      const shouldIsolateGroup = splitStatusAndQueryHooks && (isStatusHook || isQueryHook)
+
       // Determine group key based on hook type and data
       let stepName = 'Initialization'
-      
-      if (hook.data?.step_name) {
-        stepName = hook.data.step_name
-      } else if (hook.hook_type === 'query') {
-        // Group query hooks by their message type
-        const messageType = hook.data?.message_type || 'Query'
-        stepName = `AI Processing - ${messageType}`
-      } else if (hook.hook_type === 'status') {
-        stepName = hook.data?.step_name || 'Status Update'
+      const rawStepName = typeof hook.data?.step_name === 'string' ? hook.data.step_name.trim() : ''
+      const normalizedHookType = hook.hook_type?.toLowerCase()
+      const hasDistinctStepName = rawStepName && rawStepName.toLowerCase() !== normalizedHookType
+
+      if (hasDistinctStepName) {
+        stepName = rawStepName
+      } else if (isQueryHook) {
+        stepName = getQueryStepLabel(hook)
+      } else if (isStatusHook) {
+        stepName = hook.message || hook.data?.step_name || 'Status Update'
       } else {
         stepName = hook.hook_type || 'Deployment Step'
       }
-      
-      if (!groups.has(stepName)) {
-        groups.set(stepName, {
+
+      if (shouldIsolateGroup) {
+        stepName = `${stepName} (${formatLabelTime(hook.received_at)})`
+      }
+
+      const groupKey = shouldIsolateGroup ? hook.id : stepName
+
+      if (!groups.has(groupKey)) {
+        groups.set(groupKey, {
+          id: groupKey,
           stepName,
           hooks: [],
           status: 'running',
           startTime: hook.received_at,
-          hookType: hook.hook_type
+          hookType: hook.hook_type,
         })
-        groupOrder.push(stepName)
+        groupOrder.push(groupKey)
       }
-      
-      const group = groups.get(stepName)!
+
+      const group = groups.get(groupKey)
+      if (!group) return
+
       group.hooks.push(hook)
-      
+
       // Update group status based on hook messages and status
-      const hasError = group.hooks.some(h => 
+      const hasError = group.hooks.some(h =>
         h.status === 'ERROR' || h.status === 'FAILED' || h.data?.error
       )
-      
+
       // Check if step is completed - look for completion messages or status
       const hasCompleted = group.hooks.some(h => {
-        // Check explicit completion status
         if (h.status === 'COMPLETED' || h.status === 'completed' || h.is_complete) {
           return true
         }
-        // Check for completion messages in the step
         if (h.message && (
-          h.message.includes('completed') || 
+          h.message.includes('completed') ||
           h.message.includes('succeeded') ||
           h.message.includes('successfully') ||
           h.message.includes('✓')
@@ -107,7 +307,7 @@ export function DeploymentLogs({ hooks, isCompleted, status, showPhaseFilter = t
         }
         return false
       })
-      
+
       if (hasError) {
         group.status = 'error'
         group.endTime = hook.received_at
@@ -117,27 +317,30 @@ export function DeploymentLogs({ hooks, isCompleted, status, showPhaseFilter = t
           group.endTime = hook.received_at
         }
       }
-      
+
       // Calculate total duration and cost for the group
-      const totalDuration = group.hooks.reduce((sum, h) => 
-        sum + (h.data?.duration_ms || 0), 0
+      const totalDuration = group.hooks.reduce(
+        (sum, h) => sum + (h.data?.duration_ms || 0),
+        0
       )
-      const totalCost = group.hooks.reduce((sum, h) => 
-        sum + (h.data?.total_cost_usd || 0), 0
+      const totalCost = group.hooks.reduce(
+        (sum, h) => sum + (h.data?.total_cost_usd || 0),
+        0
       )
-      
+
       if (totalDuration > 0) group.totalDuration = totalDuration
       if (totalCost > 0) group.totalCost = totalCost
     })
-    
+
+    const groupArray = groupOrder
+      .map(name => groups.get(name))
+      .filter((group): group is GroupedHooks => Boolean(group))
+
     // Post-process: Mark previous steps as completed if a new step has started
-    const groupArray = groupOrder.map(name => groups.get(name)!)
     for (let i = 0; i < groupArray.length - 1; i++) {
       const currentGroup = groupArray[i]
       const nextGroup = groupArray[i + 1]
-      
-      // If the next group has started (has hooks) and current is still running, 
-      // mark current as completed
+
       if (nextGroup.hooks.length > 0 && currentGroup.status === 'running') {
         currentGroup.status = 'completed'
         if (!currentGroup.endTime) {
@@ -145,7 +348,7 @@ export function DeploymentLogs({ hooks, isCompleted, status, showPhaseFilter = t
         }
       }
     }
-    
+
     return groupArray
   }, [filteredHooks])
 
@@ -194,12 +397,12 @@ export function DeploymentLogs({ hooks, isCompleted, status, showPhaseFilter = t
     return `${minutes}m ${remainingSeconds}s`
   }
 
-  const toggleStep = (stepName: string) => {
+  const toggleStep = (groupId: string) => {
     const newExpanded = new Set(expandedSteps)
-    if (newExpanded.has(stepName)) {
-      newExpanded.delete(stepName)
+    if (newExpanded.has(groupId)) {
+      newExpanded.delete(groupId)
     } else {
-      newExpanded.add(stepName)
+      newExpanded.add(groupId)
     }
     setExpandedSteps(newExpanded)
   }
@@ -397,15 +600,18 @@ export function DeploymentLogs({ hooks, isCompleted, status, showPhaseFilter = t
         ) : (
           <div className="divide-y divide-border">
             {groupedHooks.map((group, groupIndex) => {
-              const isExpanded = expandedSteps.has(group.stepName)
+              const isExpanded = expandedSteps.has(group.id)
               const isCurrentlyRunning = !isCompleted && group.status === 'running'
+              const primaryHook = group.hooks[group.hooks.length - 1]
+              const summaryMessage = getHookSummaryMessage(primaryHook)
+              const summaryDetails = getHookDetailChips(primaryHook)
               
               return (
-                <div key={group.stepName}>
+                <div key={group.id}>
                   <div className="p-4">
                     {/* Job Header */}
                     <button
-                      onClick={() => toggleStep(group.stepName)}
+                      onClick={() => toggleStep(group.id)}
                       className={cn(
                         "w-full text-left group rounded-lg p-3 transition-all border",
                         group.status === 'completed' 
@@ -447,20 +653,39 @@ export function DeploymentLogs({ hooks, isCompleted, status, showPhaseFilter = t
                               }
                             </div>
                           </div>
-                          <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                            <span className="flex items-center gap-1">
+                          {summaryMessage && (
+                            <p className="text-xs text-muted-foreground line-clamp-2 mb-2">
+                              {summaryMessage}
+                            </p>
+                          )}
+                          <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-muted/40 border border-border/50">
                               <CubeIcon className="h-3 w-3" />
                               {group.hooks.length} {group.hooks.length === 1 ? 'event' : 'events'}
                             </span>
-                            <span className="flex items-center gap-1">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-muted/40 border border-border/50">
                               <ClockIcon className="h-3 w-3" />
                               {formatDuration(group.startTime, group.endTime)}
                             </span>
                             {group.totalCost && group.totalCost > 0 && (
-                              <span className="flex items-center gap-1 text-green-400">
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-muted/40 border border-border/50 text-green-400">
                                 ${group.totalCost.toFixed(4)}
                               </span>
                             )}
+                            {summaryDetails.map(detail => (
+                              <span
+                                key={`${group.id}-${detail.key}`}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-muted/40 border border-border/50"
+                              >
+                                <DotFilledIcon className="h-3 w-3 text-muted-foreground" />
+                                <span className="uppercase tracking-wide text-[10px] text-muted-foreground">
+                                  {detail.label}:
+                                </span>
+                                <span className="text-foreground text-xs font-medium">
+                                  {detail.value}
+                                </span>
+                              </span>
+                            ))}
                           </div>
                         </div>
                       </div>

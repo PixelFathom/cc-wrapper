@@ -64,12 +64,18 @@ export function DeploymentTaskTab({ taskId, task }: DeploymentTaskTabProps) {
   }, [task.deployment_host])
 
   // Fetch deployment hooks (only deployment phase for this tab)
-  const shouldPoll = task && task.deployment_status !== 'pending' && !task.deployment_completed
+  // Poll more aggressively during active deployment, but keep polling even when completed
+  // to catch new deployments without needing to refresh
+  const isActiveDeployment = task && task.deployment_status === 'deploying'
+  const hasDeploymentStarted = task && task.deployment_status !== 'pending'
+
   const { data: deploymentData, refetch: refetchHooks } = useQuery({
     queryKey: ['deployment-hooks', taskId],
     queryFn: () => api.getTaskDeploymentHooks(taskId, 100),
-    enabled: !!task && task.deployment_status !== 'pending',
-    refetchInterval: shouldPoll ? 2000 : false, // Poll every 2 seconds when deployment is active
+    enabled: !!task, // Always fetch if task exists
+    // Poll every 2 seconds during active deployment, every 5 seconds otherwise
+    // This ensures new deployment actions appear automatically
+    refetchInterval: isActiveDeployment ? 2000 : (hasDeploymentStarted ? 5000 : false),
     refetchIntervalInBackground: true, // Continue polling even when tab is not active
   })
 
@@ -191,8 +197,19 @@ export function DeploymentTaskTab({ taskId, task }: DeploymentTaskTabProps) {
   const hasVariables = envVars.length > 0 || Object.keys(envVariables).length > 0
   const canDeploy = task.deployment_port
   const hasDeployed = task.deployment_status !== 'pending' && task.deployment_status !== null
-  const isDeploying = task.deployment_status === 'deploying'
-
+  const hasDeploymentError = useMemo(() =>
+    deploymentPhaseHooks.some(hook => {
+      const status = hook.status?.toLowerCase()
+      return (
+        hook.hook_type === 'error' ||
+        status === 'error' ||
+        hook.data?.error
+      )
+    }),
+    [deploymentPhaseHooks]
+  )
+  const isDeployingWithoutError = task.deployment_status === 'deploying' && !hasDeploymentError
+  const disableDeployButton = !canDeploy || deployMutation.isPending || hasUnsavedChanges || isDeployingWithoutError
   return (
     <div className="space-y-6">
       {/* Port Display */}
@@ -479,7 +496,7 @@ export function DeploymentTaskTab({ taskId, task }: DeploymentTaskTabProps) {
         <div className="flex flex-wrap gap-3">
           <Button
             onClick={() => deployMutation.mutate()}
-            disabled={!canDeploy || deployMutation.isPending || hasUnsavedChanges || isDeploying}
+            disabled={disableDeployButton}
             className="font-mono"
           >
             {deployMutation.isPending ? (
@@ -547,6 +564,7 @@ export function DeploymentTaskTab({ taskId, task }: DeploymentTaskTabProps) {
               isCompleted={task.deployment_completed}
               status={task.deployment_status}
               showPhaseFilter={false}
+              splitStatusAndQueryHooks
             />
           ) : (
             <div className="bg-card rounded-lg border border-border/50 p-12 text-center">

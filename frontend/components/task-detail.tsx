@@ -63,6 +63,9 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
   const { data: task, isLoading, refetch: refetchTask } = useQuery({
     queryKey: ['task', taskId],
     queryFn: () => api.getTask(taskId),
+    // Poll task status to catch deployment state changes
+    refetchInterval: 5000, // Poll every 5 seconds
+    refetchIntervalInBackground: true,
   })
 
   const { data: subProjects, refetch: refetchSubProjects } = useQuery({
@@ -81,6 +84,12 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
     refetchInterval: shouldPollDeployment ? 2000 : false, // Always poll every 2 seconds when deployment is running
     refetchIntervalInBackground: true, // Continue polling even when tab is not active
   })
+
+  // Summary tab should only surface phases not already shown inside Deployment Task (e.g. initialization)
+  const summaryHooks = useMemo(() => {
+    if (!deploymentData?.hooks) return []
+    return deploymentData.hooks.filter((hook) => hook.phase !== 'deployment')
+  }, [deploymentData?.hooks])
 
   // Fetch knowledge base files
   const { data: knowledgeBaseFiles, refetch: refetchKnowledgeBase } = useQuery({
@@ -428,7 +437,7 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
                 </div>
               ) : (
                 <DeploymentLogs 
-                  hooks={deploymentData?.hooks || []} 
+                  hooks={summaryHooks}
                   isCompleted={task.deployment_completed}
                   status={task.deployment_status}
                 />
