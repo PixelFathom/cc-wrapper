@@ -50,16 +50,6 @@ class TestCaseService:
             # Generate webhook URL (using webhooks endpoint pattern like chat)
             webhook_url = f"{self.webhook_base_url}/api/webhooks/test-case/{test_case_id}"
             project_path = f"{project.name}/{task.id}"
-            
-            # Include deployment guide context if available
-            deployment_context = ""
-            if task.deployment_guide:
-                deployment_context = f"""
-
-**DEPLOYMENT & TESTING CONTEXT:**
-{task.deployment_guide}
-
-"""
 
             # Prepare execution query
             execution_query = f"""
@@ -75,7 +65,7 @@ Execute the following test case and verify if it passes:
 **Expected Result:**
 {test_case.expected_result}
 
-{deployment_context}Please execute this test case and provide:
+Please execute this test case and provide:
 1. Whether the test PASSED or FAILED
 2. The actual result obtained
 3. Any fixes needed if the test failed

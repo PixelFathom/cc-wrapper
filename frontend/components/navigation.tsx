@@ -6,7 +6,6 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { CodeIcon, HamburgerMenuIcon, Cross2Icon, RocketIcon, ExitIcon } from '@radix-ui/react-icons'
 import { Button } from './ui/button'
 // Removed Clerk imports as basic auth is used instead
-import { DeploymentGuideModal } from './deployment-guide-modal'
 import { usePathname } from 'next/navigation'
 import { GitHubAuthButton } from './github-auth-button'
 
@@ -64,23 +63,6 @@ export function Navigation() {
 
             {/* GitHub Auth Button */}
             <GitHubAuthButton />
-
-            {/* Deployment Guide Button - Only show on task pages */}
-            {taskId && (
-              <DeploymentGuideModal
-                taskId={taskId}
-                trigger={
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="bg-gradient-to-r from-orange-500/10 to-red-500/10 border-orange-500/30 hover:border-orange-400/50 text-orange-400 hover:text-orange-300 hover:bg-orange-500/20 transition-all duration-200"
-                  >
-                    <RocketIcon className="h-4 w-4 mr-2" />
-                    Deployment Guide
-                  </Button>
-                }
-              />
-            )}
           </div>
 
           {/* Mobile menu button */}
@@ -116,25 +98,6 @@ export function Navigation() {
                 <div className="px-4">
                   <GitHubAuthButton />
                 </div>
-
-                {/* Deployment Guide Button - Mobile */}
-                {taskId && (
-                  <div className="px-4">
-                    <DeploymentGuideModal
-                      taskId={taskId}
-                      trigger={
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="w-full bg-gradient-to-r from-orange-500/10 to-red-500/10 border-orange-500/30 hover:border-orange-400/50 text-orange-400 hover:text-orange-300 hover:bg-orange-500/20 transition-all duration-200"
-                        >
-                          <RocketIcon className="h-4 w-4 mr-2" />
-                          Deployment Guide
-                        </Button>
-                      }
-                    />
-                  </div>
-                )}
               </div>
             </motion.div>
           )}

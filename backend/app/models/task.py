@@ -36,10 +36,6 @@ class Task(BaseModel, table=True):
     env_file_path: Optional[str] = Field(default=None)  # Path to uploaded .env file
     env_variables: Optional[Dict[str, str]] = Field(default=None, sa_column=Column(JSONB))  # Parsed key-value pairs from .env
 
-    # Deployment guide fields
-    deployment_guide: Optional[str] = Field(default=None)
-    deployment_guide_updated_at: Optional[datetime] = Field(default=None)
-
     # Task workflow state fields (required by database schema)
     state: str = Field(default="pending", index=True)  # pending, context_gathering, planning, executing, completed, failed
     task_type: Optional[str] = Field(default=None)

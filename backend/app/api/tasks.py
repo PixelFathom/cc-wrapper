@@ -409,50 +409,6 @@ async def get_task_vscode_link(
         )
 
 
-@router.get("/tasks/{task_id}/deployment-guide")
-async def get_task_deployment_guide(
-    task_id: UUID,
-    current_user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_session)
-):
-    """Get deployment guide for a task"""
-    task = await verify_task_ownership(task_id, current_user, session)
-    
-    return {
-        "task_id": str(task_id),
-        "content": task.deployment_guide or "",
-        "updated_at": task.deployment_guide_updated_at.isoformat() if task.deployment_guide_updated_at else None
-    }
-
-
-@router.put("/tasks/{task_id}/deployment-guide")
-async def update_task_deployment_guide(
-    task_id: UUID,
-    content_data: dict,
-    current_user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_session)
-):
-    """Update deployment guide for a task"""
-    task = await verify_task_ownership(task_id, current_user, session)
-    
-    content = content_data.get('content', '')
-    
-    # Update the task
-    task.deployment_guide = content
-    task.deployment_guide_updated_at = datetime.utcnow()
-    
-    session.add(task)
-    await session.commit()
-    await session.refresh(task)
-    
-    return {
-        "message": "Deployment guide updated successfully",
-        "task_id": str(task_id),
-        "content": task.deployment_guide,
-        "updated_at": task.deployment_guide_updated_at.isoformat()
-    }
-
-
 def parse_env_content(content: str) -> Dict[str, str]:
     """Parse .env file content and extract key-value pairs"""
     env_variables = {}
@@ -1073,9 +1029,30 @@ async def deploy_task(
     
     # Construct deployment instruction
     deployment_instruction = (
-        f"Setup docker if not present, deploy the application, expose it at port {task.deployment_port}, "
-        f"and test it properly via playwright MCP at outside port {task.deployment_port}. "
-        f"Ensure things are properly deployed and accessible."
+        f"Deploy the application following Docker best practices:\n\n"
+        f"1. SCOPE: Deploy ONLY the application within the current project directory. Do not modify or deploy unrelated services.\n\n"
+        f"2. ENVIRONMENT SETUP:\n"
+        f"   - Check for .env.example or similar environment template files\n"
+        f"   - Create .env file with required variables if not present\n"
+        f"   - Ensure all necessary environment variables are set (database URLs, API keys, ports, etc.)\n"
+        f"3. DOCKER DEPLOYMENT:\n"
+        f"   - If Dockerfile exists: Build and run the container\n"
+        f"   - If docker-compose.yml exists: Use 'docker-compose up -d' for orchestration\n"
+        f"   - Ensure proper network configuration and port mapping to {task.deployment_port}\n"
+        f"   - Use volume mounts for data persistence where applicable\n"
+        f"   - Follow the application's documentation for Docker setup if available\n\n"
+        f"4. SERVICE VALIDATION:\n"
+        f"   - Wait for services to be healthy (use health checks if defined)\n"
+        f"   - Verify the application is accessible at localhost:{task.deployment_port}\n"
+        f"   - Check logs for any startup errors: 'docker-compose logs' or 'docker logs <container>'\n\n"
+        f"5. TESTING:\n"
+        f"   - Test the deployed service via playwright MCP at port {task.deployment_port}\n"
+        f"   - Verify all critical endpoints are responding correctly\n"
+        f"   - Confirm the application is fully functional\n\n"
+        f"6. CLEANUP:\n"
+        f"   - Ensure no dangling containers or images are left behind\n"
+        f"   - Document any manual steps required for deployment\n\n"
+        f"IMPORTANT: Deploy only what's in scope. Ensure the service is production-ready, properly configured, and thoroughly tested."
     )
     # Build CWD path
     cwd = f"{project.name}/{task.id}"

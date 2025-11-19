@@ -23,7 +23,6 @@ import { DeploymentLogs } from './deployment-logs'
 import { TestCaseModal } from './test-case-modal'
 import { ExecutionResultModal } from './execution-result-modal'
 import { MarkdownRenderer } from './markdown-renderer'
-import { DeploymentGuideTab } from './deployment-guide-tab'
 import { ContestHarvestingTab } from './contest-harvesting-tab'
 import { IssueResolutionView } from './issue-resolution-view'
 import { MessagesTab } from './messages-tab'
@@ -37,7 +36,7 @@ interface TaskDetailProps {
 
 export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
   // Will be set to 'issue-resolution' for issue tasks after loading
-  const [activeTab, setActiveTab] = useState<'deployment' | 'deployment-task' | 'chat' | 'knowledge-base' | 'test-cases' | 'deployment-guide' | 'contest-harvesting' | 'issue-resolution' | 'messages'>('deployment')
+  const [activeTab, setActiveTab] = useState<'deployment' | 'deployment-task' | 'chat' | 'knowledge-base' | 'test-cases' | 'contest-harvesting' | 'issue-resolution' | 'messages'>('deployment')
   
   // Helper function to format duration
   const formatDuration = (start: Date, end: Date) => {
@@ -399,7 +398,6 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
             { id: 'knowledge-base', label: 'Knowledge Base', icon: <ReaderIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
             { id: 'test-cases', label: 'Test Cases', icon: <PlayIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
             { id: 'contest-harvesting', label: 'Context Harvesting', icon: <QuestionMarkCircledIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
-            { id: 'deployment-guide', label: 'Deployment Guide', icon: <RocketIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -674,10 +672,6 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
 
         {activeTab === 'deployment-task' && task && (
           <DeploymentTaskTab taskId={taskId} task={task} />
-        )}
-
-        {activeTab === 'deployment-guide' && (
-          <DeploymentGuideTab taskId={taskId} />
         )}
 
         {activeTab === 'contest-harvesting' && (

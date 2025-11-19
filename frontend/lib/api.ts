@@ -724,27 +724,6 @@ class ApiClient {
       body: JSON.stringify(data),
     })
   }
-
-  // Deployment Guide (requires authentication)
-  getDeploymentGuide = async (taskId: string): Promise<{
-    content: string
-    task_id: string
-    updated_at: string | null
-  }> => {
-    return this.authenticatedRequest(`/tasks/${taskId}/deployment-guide`)
-  }
-
-  updateDeploymentGuide = async (taskId: string, content: string): Promise<{
-    message: string
-    task_id: string
-    content: string
-    updated_at: string
-  }> => {
-    return this.authenticatedRequest(`/tasks/${taskId}/deployment-guide`, {
-      method: 'PUT',
-      body: JSON.stringify({ content }),
-    })
-  }
 }
 
 export const api = new ApiClient() as ApiClient & ExtendedApiClient
