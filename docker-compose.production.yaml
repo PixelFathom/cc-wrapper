@@ -1,0 +1,188 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:15-alpine
+    env_file: .env
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - cc-wrapper
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    # Optimize PostgreSQL for EC2
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_buffers=128MB"
+      - "-c"
+      - "effective_cache_size=256MB"
+      - "-c"
+      - "maintenance_work_mem=64MB"
+      - "-c"
+      - "checkpoint_completion_target=0.9"
+      - "-c"
+      - "wal_buffers=4MB"
+      - "-c"
+      - "default_statistics_target=100"
+      - "-c"
+      - "random_page_cost=1.1"
+      - "-c"
+      - "effective_io_concurrency=200"
+      - "-c"
+      - "work_mem=4MB"
+      - "-c"
+      - "min_wal_size=1GB"
+      - "-c"
+      - "max_wal_size=4GB"
+      - "-c"
+      - "max_connections=100"
+
+  cache:
+    image: redis:7-alpine
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - cc-wrapper
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    # Optimize Redis for EC2
+    command:
+      - "redis-server"
+      - "--maxmemory"
+      - "200mb"
+      - "--maxmemory-policy"
+      - "allkeys-lru"
+      - "--save"
+      - "60 1000"
+      - "--appendonly"
+      - "yes"
+      - "--tcp-backlog"
+      - "511"
+      - "--timeout"
+      - "300"
+      - "--tcp-keepalive"
+      - "60"
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.production
+      # Enable BuildKit for better caching and performance
+      args:
+        BUILDKIT_INLINE_CACHE: 1
+    image: cfpj-backend:production
+    env_file: .env
+    ports:
+      - "9000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+    environment:
+      - POSTGRES_HOST=db
+      - REDIS_URL=redis://cache:6379/0
+      # Production optimizations
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - cc-wrapper
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+        reservations:
+          cpus: '1.0'
+          memory: 512M
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8000/health\").read()' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.production
+      # Enable BuildKit for better caching and performance
+      args:
+        BUILDKIT_INLINE_CACHE: 1
+    image: cfpj-frontend:production
+    env_file: .env
+    ports:
+      - "2000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      - NODE_ENV=production
+      - NEXT_TELEMETRY_DISABLED=1
+    networks:
+      - cc-wrapper
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/api/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  cc-wrapper:
+    external: true
+
+volumes:
+  db-data:
+    driver: local
+  redis-data:
+    driver: local
