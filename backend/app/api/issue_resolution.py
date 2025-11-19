@@ -459,7 +459,7 @@ async def initialize_issue_environment(
             project_path = f"{project.name}/{task.id}"
 
             # Webhook URL points to deployment webhook for now
-            webhook_url = f"{settings.webhook_base_url}/api/webhooks/deployment/{task.id}"
+            webhook_url = f"{settings.webhook_base_url}/api/webhooks/deployment/{task.id}/initialization"
 
             # Prepare init payload with issue branch
             init_payload = {

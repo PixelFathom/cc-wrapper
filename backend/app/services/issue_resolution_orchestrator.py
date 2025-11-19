@@ -638,7 +638,7 @@ class IssueResolutionOrchestrator:
             project_path = f"{project.name}/{task.id}"
 
             # Webhook URL points to deployment webhook
-            webhook_url = f"{settings.webhook_base_url}/api/webhooks/deployment/{task.id}"
+            webhook_url = f"{settings.webhook_base_url}/api/webhooks/deployment/{task.id}/initialization"
 
             redis_client = await get_redis()
             await assert_within_rate_limit(
