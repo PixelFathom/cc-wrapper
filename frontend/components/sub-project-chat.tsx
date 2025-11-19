@@ -74,6 +74,32 @@ const AVAILABLE_AGENTS = [
   { value: '@agent-backend-architect', label: 'Backend Architect', description: 'Design backend systems and APIs' },
 ]
 
+const TAB_LABEL_MAX_CHARS = 32
+
+const contentToText = (content: any): string => {
+  if (!content) return ''
+  if (typeof content === 'string') return content
+  if (typeof content.text === 'string') return content.text
+  if (typeof content.message === 'string') return content.message
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === 'string') return part
+        if (part && typeof part.text === 'string') return part.text
+        return ''
+      })
+      .filter(Boolean)
+      .join(' ')
+  }
+  return ''
+}
+
+const truncateText = (text: string, maxLength: number = TAB_LABEL_MAX_CHARS) => {
+  if (!text) return ''
+  if (text.length <= maxLength) return text
+  return text.slice(0, maxLength - 3) + '...'
+}
+
 export function SubProjectChat({ projectName, taskName, subProjectId, initialSessionId, taskId }: SubProjectChatProps) {
   const queryClient = useQueryClient()
   const { handleApiError } = useApiError()
@@ -81,7 +107,6 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
   const [input, setInput] = useState('')
   const [chatId, setChatId] = useState<string | null>(null)
   const [sessions, setSessions] = useState<any[]>([])
-  const [showSessions, setShowSessions] = useState(false)
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [expandedHooks, setExpandedHooks] = useState<Set<string>>(new Set())
   // Collapse all hooks by default for cleaner UI
@@ -589,7 +614,6 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
       }))
       setMessages(historyMessages)
       setSessionId(loadSessionId)
-      setShowSessions(false)
       
       // Find the chat ID from the first message
       if (historyMessages.length > 0) {
@@ -610,7 +634,6 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
     setMessages([])
     setSessionId(null)
     setChatId(null)
-    setShowSessions(false)
   }
 
   const handleSubmit = (e: React.FormEvent, forceQueue: boolean = false) => {
@@ -645,6 +668,52 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
       second: '2-digit',
       hour12: false 
     })
+  }
+
+  const sessionTabs = useMemo(() => {
+    const baseSessions = Array.isArray(sessions) ? [...sessions] : []
+    if (sessionId && !baseSessions.some((session) => session.session_id === sessionId)) {
+      const firstUserMessage = messages.find((msg) => msg.role === 'user')
+      const messagePreview = firstUserMessage ? contentToText(firstUserMessage.content) : ''
+      baseSessions.unshift({
+        session_id: sessionId,
+        first_message: messagePreview || 'Active session',
+        message_count: messages.length,
+        created_at: firstUserMessage?.timestamp,
+        isVirtual: true,
+      })
+    }
+    return baseSessions
+  }, [sessions, sessionId, messages])
+
+  const getSessionTabLabel = (session: any, index: number) => {
+    const previewSource = session.first_message ?? session.firstMessage ?? session.preview
+    const previewText = previewSource ? contentToText(previewSource) : ''
+    if (previewText.trim()) {
+      return truncateText(previewText.trim())
+    }
+    if (session.session_id) {
+      return `Session ${session.session_id.slice(0, 6)}`
+    }
+    return `Session ${index + 1}`
+  }
+
+  const getSessionTabTooltip = (session: any) => {
+    const previewSource = session.first_message ?? session.firstMessage ?? session.preview
+    const previewText = previewSource ? contentToText(previewSource) : ''
+    const idText = session.session_id ? ` (#${session.session_id.slice(0, 8)})` : ''
+    const count = session.message_count ?? session.messageCount
+    const countText = typeof count === 'number' ? ` · ${count} messages` : ''
+    if (previewText.trim()) {
+      return `${previewText.trim()}${idText}${countText}`
+    }
+    return `Session${idText}${countText}`
+  }
+
+  const getSessionTabMessageCount = (session: any) => {
+    const count = session.message_count ?? session.messageCount
+    if (typeof count === 'number') return count
+    return 0
   }
 
   // Enhanced scroll detection and management
@@ -1054,24 +1123,6 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                 <span className="hidden sm:inline">Tests</span>
               </Button>
             )}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowSessions(!showSessions)}
-              className="text-xs font-mono h-6 px-1 sm:px-2"
-            >
-              <span className="hidden sm:inline">{sessions.length} sessions</span>
-              <span className="sm:hidden">{sessions.length}</span>
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={startNewSession}
-              className="text-xs font-mono h-6 px-1 sm:px-2"
-            >
-              <span className="hidden sm:inline">+ New</span>
-              <span className="sm:hidden">+</span>
-            </Button>
             {sessionId && (
               <>
                 <span className={cn(
@@ -1090,48 +1141,63 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
           </div>
         </div>
 
-        {/* Sessions Dropdown */}
-        {showSessions && (
-          <div className="absolute top-12 right-2 sm:right-4 z-50 bg-card/95 backdrop-blur-sm border border-border rounded-lg shadow-xl p-2 max-h-64 overflow-y-auto min-w-[280px] sm:min-w-[300px] max-w-[calc(100vw-2rem)]">
-            <div className="text-xs font-mono text-muted-foreground mb-2 px-2">Chat Sessions:</div>
-            {sessions.length === 0 ? (
-              <div className="text-xs text-muted-foreground text-center py-4">No sessions yet</div>
-            ) : (
-              sessions.map((session) => (
-                <button
-                  key={session.session_id}
-                  onClick={() => loadChatHistory(session.session_id)}
-                  className={cn(
-                    "w-full text-left p-2 hover:bg-muted rounded text-xs font-mono mb-1 transition-colors",
-                    session.session_id === sessionId && "bg-muted border border-cyan-500/30"
-                  )}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="text-cyan-400">{session.session_id.slice(0, 8)}...</div>
-                    {session.session_id === sessionId && (
-                      <span className="text-[10px] text-green-500">active</span>
-                    )}
+        {/* Session Tabs */}
+        <div className="border-b border-border/70 bg-card/70 px-2 sm:px-4 py-2">
+          <div className="flex items-center justify-between text-[11px] font-mono uppercase tracking-wide text-muted-foreground">
+            <div className="flex items-center gap-2">
+              <ChatBubbleIcon className="h-3 w-3" />
+              <span>Chat Sessions</span>
+            </div>
+            <span>{sessionTabs.length} open</span>
+          </div>
+          <div className="mt-2">
+            <div className="overflow-x-auto pb-1">
+              <div className="flex items-center gap-2 min-w-max pr-4">
+                {sessionTabs.length === 0 ? (
+                  <div className="px-3 py-1.5 text-xs text-muted-foreground border border-dashed border-border rounded-md bg-card/40">
+                    No sessions yet
                   </div>
-                  <div className="text-muted-foreground truncate">{session.first_message || 'No messages'}</div>
-                  <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span>{session.message_count} messages</span>
-                    <span>{new Date(session.created_at || Date.now()).toLocaleDateString()}</span>
-                  </div>
-                </button>
-              ))
-            )}
-            {sessions.length > 0 && (
-              <div className="border-t border-border mt-2 pt-2">
+                ) : (
+                  sessionTabs.map((session, index) => {
+                    const isActive = session.session_id === sessionId
+                    const shortId = session.session_id ? session.session_id.slice(0, 8) : 'pending'
+                    const messageCount = getSessionTabMessageCount(session)
+                    return (
+                      <button
+                        type="button"
+                        key={session.session_id ?? `session-${index}`}
+                        onClick={() => {
+                          if (!session.session_id || session.session_id === sessionId) return
+                          loadChatHistory(session.session_id)
+                        }}
+                        className={cn(
+                          "flex min-w-[160px] max-w-[240px] flex-col rounded-md border px-3 py-1.5 text-left text-xs font-mono transition-colors duration-200 shrink-0",
+                          isActive
+                            ? "bg-card text-cyan-200 border-cyan-500/40 shadow-lg shadow-cyan-500/20"
+                            : "bg-card/30 text-muted-foreground border-border/40 hover:text-foreground hover:border-border"
+                        )}
+                        title={getSessionTabTooltip(session)}
+                        aria-current={isActive ? 'true' : undefined}
+                      >
+                        <span className="truncate font-semibold">{getSessionTabLabel(session, index)}</span>
+                        <span className="text-[10px] text-muted-foreground">
+                          {shortId} · {messageCount} msg{messageCount === 1 ? '' : 's'}
+                        </span>
+                      </button>
+                    )
+                  })
+                )}
                 <button
+                  type="button"
                   onClick={startNewSession}
-                  className="w-full text-left p-2 hover:bg-muted rounded text-xs font-mono text-cyan-500"
+                  className="shrink-0 rounded-md border border-dashed border-border px-3 py-1.5 text-xs font-mono text-muted-foreground hover:text-cyan-400 hover:border-cyan-500/50 transition-colors"
                 >
-                  + Start New Session
+                  + New Session
                 </button>
               </div>
-            )}
+            </div>
           </div>
-        )}
+        </div>
 
         {/* Messages */}
         <div 
