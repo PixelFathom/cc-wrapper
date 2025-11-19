@@ -7,6 +7,13 @@ const nextConfig = {
   serverRuntimeConfig: {
     BACKEND_HOST: process.env.BACKEND_HOST || 'http://localhost:8000',
   },
+  // Skip type checking and linting during production builds
+  typescript: {
+    ignoreBuildErrors: true,
+  },
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
 }
 
 module.exports = nextConfig

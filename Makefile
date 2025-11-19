@@ -27,42 +27,42 @@ help:
 	@echo "  make stats         - Show resource usage statistics"
 
 build:
-	docker-compose build
+	docker compose build
 
 up:
-	docker-compose up -d
+	docker compose up -d
 
 down:
-	docker-compose down
+	docker compose down
 
 logs:
-	docker-compose logs -f
+	docker compose logs -f
 
 clean:
-	docker-compose down -v
+	docker compose down -v
 	docker system prune -f
 
 dev:
-	docker-compose -f docker-compose.dev.yaml up
+	docker compose -f docker-compose.dev.yaml up
 
 dev-down:
-	docker-compose -f docker-compose.dev.yaml down
+	docker compose -f docker-compose.dev.yaml down
 
 frontend-logs:
-	docker-compose logs -f frontend
+	docker compose logs -f frontend
 
 backend-logs:
-	docker-compose logs -f backend
+	docker compose logs -f backend
 
 db-shell:
-	docker-compose exec db psql -U postgres -d project_mgr
+	docker compose exec db psql -U postgres -d project_mgr
 
 redis-cli:
-	docker-compose exec cache redis-cli
+	docker compose exec cache redis-cli
 
 create-admin:
 	@echo "Creating admin user..."
-	docker-compose -f docker-compose.dev.yaml exec backend python scripts/create_admin.py
+	docker compose -f docker-compose.dev.yaml exec backend python scripts/create_admin.py
 	@echo ""
 	@echo "Admin user setup complete!"
 
@@ -70,41 +70,41 @@ create-admin:
 prod-build:
 	@echo "Building optimized production images..."
 	@echo "Enabling BuildKit for better caching and performance..."
-	DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker-compose -f docker-compose.production.yaml build --no-cache
+	DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker compose -f docker-compose.production.yaml build --no-cache
 	@echo ""
 	@echo "Production images built successfully!"
 
 prod-up:
 	@echo "Starting production containers..."
-	DOCKER_BUILDKIT=1 docker-compose -f docker-compose.production.yaml up -d
+	DOCKER_BUILDKIT=1 docker compose -f docker-compose.production.yaml up -d
 	@echo ""
 	@echo "Waiting for services to be healthy..."
 	@sleep 10
-	@docker-compose -f docker-compose.production.yaml ps
+	@docker compose -f docker-compose.production.yaml ps
 	@echo ""
 	@echo "Production containers started! Check logs with: make prod-logs"
 
 prod-down:
-	docker-compose -f docker-compose.production.yaml down
+	docker compose -f docker-compose.production.yaml down
 
 prod-logs:
-	docker-compose -f docker-compose.production.yaml logs -f
+	docker compose -f docker-compose.production.yaml logs -f
 
 prod-clean:
 	@echo "Cleaning up production containers and volumes..."
-	docker-compose -f docker-compose.production.yaml down -v
+	docker compose -f docker-compose.production.yaml down -v
 	@echo "Pruning unused Docker resources..."
 	docker system prune -f
 	@echo "Cleanup complete!"
 
 prod-restart:
 	@echo "Restarting production containers..."
-	docker-compose -f docker-compose.production.yaml restart
+	docker compose -f docker-compose.production.yaml restart
 	@echo "Containers restarted!"
 
 prod-rebuild:
 	@echo "Rebuilding and restarting production services..."
-	DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker-compose -f docker-compose.production.yaml up -d --build
+	DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker compose -f docker-compose.production.yaml up -d --build
 	@echo "Production services rebuilt and restarted!"
 
 stats:
