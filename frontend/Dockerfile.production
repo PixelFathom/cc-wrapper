@@ -11,10 +11,9 @@ WORKDIR /app
 # Copy package files
 COPY package.json package-lock.json* ./
 
-# Install dependencies with cache mount
+# Install ALL dependencies (including dev dependencies needed for build)
 RUN --mount=type=cache,target=/root/.npm \
-    npm ci --only=production --ignore-scripts && \
-    npm cache clean --force
+    npm ci --ignore-scripts
 
 # Stage 2: Builder
 FROM node:20-alpine AS builder
@@ -23,13 +22,15 @@ WORKDIR /app
 
 # Copy dependencies from deps stage
 COPY --from=deps /app/node_modules ./node_modules
+
+# Copy all source files
 COPY . .
 
 # Set build-time environment variables
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
 
-# Build the application
+# Build the application (Next.js will use standalone output)
 RUN npm run build
 
 # Stage 3: Production runner

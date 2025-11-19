@@ -32,10 +32,11 @@ Dockerfile*
 docker-compose*.yml
 .dockerignore
 
-# Environment
+# Environment (exclude local/dev/test but allow .env for production)
 .env*.local
 .env.development
 .env.test
+!.env
 
 # OS
 .DS_Store
