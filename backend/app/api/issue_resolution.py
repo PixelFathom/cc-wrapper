@@ -468,6 +468,7 @@ async def initialize_issue_environment(
                 "github_repo_url": github_repo_url,
                 "webhook_url": webhook_url,
                 "branch": resolution.resolution_branch,  # Use issue branch instead of default
+                "generate_claude_md": False,
             }
             logger.info(f"Init payload: {init_payload}")
             logger.info(f"Init URL: {settings.init_project_url}")
