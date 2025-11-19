@@ -606,6 +606,9 @@ async def solve_issue(
 
     This endpoint fetches issue details from GitHub (or database) and creates
     a resolution task that will go through the four-stage workflow.
+
+    If the user doesn't have write access to the repository, it will automatically
+    create a fork and work on the forked repository instead.
     """
     # Get project and verify ownership
     stmt = select(Project).where(
@@ -636,6 +639,99 @@ async def solve_issue(
             resolution_id=str(existing.id),
             project_id=str(project_id),
             message=f"Resolution already exists for issue #{issue_number}"
+        )
+
+    # Parse owner and repo from project URL
+    import re
+    repo_url = project.repo_url
+    match = re.search(r'github\.com[:/]([^/]+)/([^/\.]+)', repo_url)
+    if not match:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Could not parse GitHub repository from repo_url"
+        )
+
+    github_owner = match.group(1)
+    github_repo_name = match.group(2)
+
+    # Check if user has write permissions to the repository
+    github_api_service = GitHubAPIService(session, current_user.id)
+    fork_created = False
+    try:
+        permissions = await github_api_service.check_user_permissions(github_owner, github_repo_name)
+        has_push_access = permissions.get("push", False)
+
+        # If user doesn't have push access, create or get fork
+        if not has_push_access:
+            # Get user's GitHub token for fork creation
+            auth_service = GitHubAuthService(session)
+            token = await auth_service.get_user_token(current_user.id)
+
+            if not token:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="GitHub authentication required to fork repository"
+                )
+
+            # Create or get fork
+            fork_data = await github_api_service.get_or_create_fork(github_owner, github_repo_name)
+            fork_owner = fork_data["owner"]["login"]
+            fork_repo_name = fork_data["name"]
+            fork_created = True
+
+            # Check if fork project already exists for this user
+            fork_repo_url = fork_data["clone_url"]
+            stmt = select(Project).where(
+                Project.user_id == current_user.id,
+                Project.is_fork_project == True,
+                Project.original_issue_repo_id == fork_data["parent"]["id"]
+            )
+            result = await session.execute(stmt)
+            fork_project = result.scalar_one_or_none()
+
+            if not fork_project:
+                # Create new project for the fork
+                fork_project = Project(
+                    name=f"{fork_repo_name}-fork",
+                    repo_url=fork_repo_url,
+                    user_id=current_user.id,
+                    github_repo_id=fork_data["id"],
+                    github_owner=fork_owner,
+                    github_repo_name=fork_repo_name,
+                    is_private=fork_data.get("private", False),
+                    is_fork_project=True,
+                    original_issue_repo_id=fork_data["parent"]["id"]
+                )
+                session.add(fork_project)
+                await session.flush()
+
+            # Use fork project instead of original
+            project = fork_project
+            project_id = fork_project.id
+            github_owner = fork_owner
+            github_repo_name = fork_repo_name
+
+            # Re-check for existing resolution in fork project
+            stmt = select(IssueResolution).where(
+                IssueResolution.project_id == project_id,
+                IssueResolution.issue_number == issue_number
+            )
+            result = await session.execute(stmt)
+            existing_in_fork = result.scalar_one_or_none()
+
+            if existing_in_fork:
+                # Return existing resolution from fork
+                return SolveIssueResponse(
+                    task_id=str(existing_in_fork.task_id),
+                    resolution_id=str(existing_in_fork.id),
+                    project_id=str(project_id),
+                    message=f"Resolution already exists for issue #{issue_number} in forked repository"
+                )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to check repository permissions or create fork: {str(e)}"
         )
 
     redis_client = await get_redis()
@@ -694,11 +790,15 @@ async def solve_issue(
         resolution.id
     )
 
+    message = "Issue resolution task created successfully"
+    if fork_created:
+        message = f"Forked repository to work on issue (no write access to original). {message}"
+
     return SolveIssueResponse(
         task_id=str(task.id),
         resolution_id=str(resolution.id),
         project_id=str(project_id),
-        message="Issue resolution task created successfully"
+        message=message
     )
 
 
