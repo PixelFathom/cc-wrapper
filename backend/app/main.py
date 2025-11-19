@@ -77,3 +77,13 @@ app.include_router(issue_resolution.router, prefix="/api", tags=["issue-resoluti
 @app.get("/")
 async def root():
     return {"message": "Project Management API v1.0"}
+
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
+
+
+@app.get("/api/health")
+async def api_health_check():
+    return {"status": "healthy"}
