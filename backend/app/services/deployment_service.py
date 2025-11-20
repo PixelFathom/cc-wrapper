@@ -200,21 +200,24 @@ class DeploymentService:
             "total_cost_usd": webhook_data.get("total_cost_usd")
         }
         
+        status_value = webhook_data.get("status") or "received"
+        status_upper = status_value.upper()
+
         # Create hook record with phase
         hook = DeploymentHook(
             task_id=task.id,
             session_id=webhook_data.get("session_id") or webhook_data.get("task_id") or webhook_data.get("request_id") or str(task.id),
             hook_type=hook_type,
             phase=phase,  # Set phase: initialization or deployment
-            status=webhook_data.get("status", "received"),
+            status=status_value,
             data=structured_data,
             message=message,
-            is_complete=webhook_data.get("complete", False) or webhook_data.get("status") == "COMPLETED"
+            is_complete=webhook_data.get("complete", False) or status_upper == "COMPLETED"
         )
         db.add(hook)
-        
+
         # Update task status based on webhook
-        status = webhook_data.get("status", "").upper()
+        status = status_upper
         task_type = webhook_data.get("task", "")  # e.g., "INIT_PROJECT"
 
         if status == "COMPLETED":
@@ -222,8 +225,8 @@ class DeploymentService:
             task.deployment_completed_at = datetime.utcnow()
             task.deployment_status = "completed"
 
-            # For issue resolution tasks, trigger query after init completes
-            if task_type == "INIT_PROJECT" and task.task_type == "issue_resolution":
+            # For issue resolution tasks, handle based on phase
+            if task.task_type == "issue_resolution":
                 # Import here to avoid circular dependency
                 from app.models.issue_resolution import IssueResolution
                 from app.models.project import Project
@@ -232,19 +235,29 @@ class DeploymentService:
                 stmt = select(IssueResolution).where(IssueResolution.task_id == task.id)
                 result = await db.execute(stmt)
                 resolution = result.scalar_one_or_none()
-                
+
                 if resolution:
-                    # Get project
-                    project = await db.get(Project, task.project_id)
+                    # If initialization completed, trigger planning stage
+                    if task_type == "INIT_PROJECT" and phase == "initialization":
+                        # Get project
+                        project = await db.get(Project, task.project_id)
 
-                    if project:
-                        # Import and trigger query
-                        from app.api.issue_resolution import trigger_issue_resolution_query
+                        if project:
+                            # Import and trigger query
+                            from app.api.issue_resolution import trigger_issue_resolution_query
 
-                        # Trigger in background (fire and forget)
-                        # Pass IDs instead of objects to avoid session conflicts
-                        import asyncio
-                        asyncio.create_task(trigger_issue_resolution_query(task.id, resolution.id, project.id))
+                            # Trigger in background (fire and forget)
+                            # Pass IDs instead of objects to avoid session conflicts
+                            import asyncio
+                            asyncio.create_task(trigger_issue_resolution_query(task.id, resolution.id, project.id))
+
+                    # If deployment phase completed and current stage is "deploy", mark deploy stage complete
+                    elif phase == "deployment" and resolution.current_stage == "deploy":
+                        from app.services.issue_resolution_orchestrator import IssueResolutionOrchestrator
+
+                        # Mark deploy stage complete
+                        orchestrator = IssueResolutionOrchestrator(db)
+                        await orchestrator.mark_deploy_complete(resolution.id)
 
         elif status == "failed":
             task.deployment_status = "failed"

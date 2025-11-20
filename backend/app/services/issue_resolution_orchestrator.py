@@ -1,11 +1,12 @@
 """
 Issue Resolution Orchestrator Service
 
-Manages the four-stage workflow for GitHub issue resolution:
+Manages the five-stage workflow for GitHub issue resolution:
 1. Deployment - Environment setup using init_project
 2. Planning - Analysis and plan creation
 3. Implementation - Executing the approved plan
 4. Testing - Generating and running tests
+5. Deploy - Application deployment with port assignment
 """
 
 from typing import Optional, Dict, Any
@@ -72,8 +73,10 @@ class IssueResolutionOrchestrator:
         valid_transitions = {
             "deployment": ["planning"],
             "planning": ["implementation"],
-            "implementation": ["testing"],
-            "testing": ["completed"]
+            "implementation": ["deploy", "pr"],
+            "testing": ["deploy", "pr"],
+            "deploy": ["testing", "pr", "completed"],
+            "pr": ["completed"]
         }
 
         if resolution.current_stage not in valid_transitions:
@@ -93,6 +96,8 @@ class IssueResolutionOrchestrator:
             resolution.implementation_started_at = datetime.utcnow()
         elif new_stage == "testing":
             resolution.testing_started_at = datetime.utcnow()
+        elif new_stage == "deploy":
+            resolution.deploy_started_at = datetime.utcnow()
 
         # Update resolution state for backward compatibility
         state_mapping = {
@@ -100,6 +105,8 @@ class IssueResolutionOrchestrator:
             "planning": "analyzing",
             "implementation": "implementing",
             "testing": "testing",
+            "deploy": "deploying",
+            "pr": "pr_created",
             "completed": "ready_for_pr"
         }
         resolution.resolution_state = state_mapping.get(new_stage, resolution.resolution_state)
@@ -453,6 +460,137 @@ class IssueResolutionOrchestrator:
             "ready_for_pr": passed_count == len(test_cases)
         }
 
+    async def trigger_deploy_stage(self, resolution_id: UUID) -> Dict[str, Any]:
+        """
+        Trigger deployment stage after implementation (default) or testing.
+        Allocates a port and deploys the application.
+        """
+        resolution = await self.get_resolution_with_relations(resolution_id)
+        settings = get_settings()
+
+        # Validate current stage
+        if resolution.current_stage not in {"implementation", "testing", "deploy"}:
+            raise ValueError(f"Cannot start deploy in stage {resolution.current_stage}")
+
+        if resolution.current_stage == "implementation" and not resolution.implementation_complete:
+            resolution.implementation_complete = True
+            resolution.implementation_completed_at = datetime.utcnow()
+        elif resolution.current_stage == "testing" and not resolution.testing_complete:
+            resolution.testing_complete = True
+            resolution.testing_completed_at = datetime.utcnow()
+
+        # Get task
+        task = await self.db.get(Task, resolution.task_id)
+        if not task:
+            raise ValueError(f"Task {resolution.task_id} not found")
+
+        # Get project
+        project = await self.db.get(Project, resolution.project_id)
+        if not project:
+            raise ValueError(f"Project {resolution.project_id} not found")
+
+        # Allocate port if not already assigned
+        if not task.deployment_port:
+            from app.services.deployment_service import DeploymentService
+            deployment_service = DeploymentService()
+            task.deployment_port = await deployment_service._generate_unique_port(self.db, task.id)
+            logger.info(f"Assigned port {task.deployment_port} to task {task.id}")
+            self.db.add(task)
+
+        # Transition to deploy stage
+        resolution.current_stage = "deploy"
+        resolution.deploy_started_at = datetime.utcnow()
+        resolution.resolution_state = "deploying"
+
+        self.db.add(resolution)
+        await self.db.commit()
+
+        # Construct deployment instruction (same as in tasks.py deploy_task)
+        deployment_instruction = (
+            f"Deploy the application following Docker best practices:\n\n"
+            f"1. SCOPE: Deploy ONLY the application within the current project directory. Do not modify or deploy unrelated services. Use the path in cwd only.\n\n"
+            f"2. ENVIRONMENT SETUP:\n"
+            f"   - Check for .env.example or similar environment template files\n"
+            f"   - Create .env file with required variables if not present\n"
+            f"   - Ensure all necessary environment variables are set (database URLs, API keys, ports, etc.)\n"
+            f"3. DOCKER DEPLOYMENT:\n"
+            f"   - If Dockerfile exists: Build and run the container\n"
+            f"   - If docker-compose.yml exists: Use 'docker-compose up -d' for orchestration\n"
+            f"   - Ensure proper network configuration and port mapping to {task.deployment_port}\n"
+            f"   - Use volume mounts for data persistence where applicable\n"
+            f"   - Follow the application's documentation for Docker setup if available\n\n"
+            f"4. SERVICE VALIDATION:\n"
+            f"   - Wait for services to be healthy (use health checks if defined)\n"
+            f"   - Verify the application is accessible at localhost:{task.deployment_port}\n"
+            f"   - Check logs for any startup errors: 'docker-compose logs' or 'docker logs <container>'\n\n"
+            f"5. TESTING:\n"
+            f"   - Test the deployed service via playwright MCP at port {task.deployment_port}\n"
+            f"   - Verify all critical endpoints are responding correctly\n"
+            f"   - Confirm the application is fully functional\n\n"
+            f"6. CLEANUP:\n"
+            f"   - Ensure no dangling containers or images are left behind\n"
+            f"   - Document any manual steps required for deployment\n\n"
+            f"IMPORTANT: Deploy only what's in scope. Ensure the service is production-ready, properly configured, and thoroughly tested."
+        )
+
+        # Build CWD path
+        cwd = f"{project.name}/{task.id}"
+
+        # Webhook URL for deployment phase
+        webhook_url = f"{settings.webhook_base_url}/api/webhooks/deployment/{task.id}/deployment"
+
+        try:
+            # Call query API with deployment instruction
+            import aiohttp
+            async with aiohttp.ClientSession() as client:
+                payload = {
+                    "prompt": deployment_instruction,
+                    "webhook_url": webhook_url,
+                    "organization_name": settings.org_name,
+                    "project_path": cwd,
+                    "options": {
+                        "permission_mode": "bypassPermissions"
+                    }
+                }
+
+                async with client.post(
+                    settings.query_url,
+                    json=payload,
+                    headers={"Content-Type": "application/json"}
+                ) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        deploy_session_id = result.get("session_id")
+
+                        # Update resolution with deploy session info
+                        resolution.deploy_session_id = deploy_session_id
+                        task.deployment_status = "deploying"
+                        task.deployment_request_id = deploy_session_id
+                        task.deployment_started_at = datetime.utcnow()
+
+                        self.db.add(resolution)
+                        self.db.add(task)
+                        await self.db.commit()
+
+                        logger.info(f"Started deploy stage for issue resolution {resolution_id}")
+                        return {
+                            "stage": "deploy",
+                            "session_id": deploy_session_id,
+                            "task_id": str(task.id),
+                            "port": task.deployment_port,
+                            "status": "deploying"
+                        }
+                    else:
+                        error_detail = await response.text()
+                        raise ValueError(f"Failed to start deployment: {error_detail}")
+        except Exception as e:
+            logger.error(f"Failed to trigger deploy stage: {e}")
+            resolution.error_message = f"Failed to start deployment: {str(e)}"
+            resolution.resolution_state = "failed"
+            self.db.add(resolution)
+            await self.db.commit()
+            raise
+
     async def mark_deployment_complete(self, resolution_id: UUID) -> IssueResolution:
         """Mark deployment stage as complete and transition to planning"""
         resolution = await self.get_resolution_with_relations(resolution_id)
@@ -468,6 +606,26 @@ class IssueResolutionOrchestrator:
 
         # Automatically trigger planning stage
         await self.trigger_planning_stage(resolution_id)
+
+        return resolution
+
+    async def mark_deploy_complete(self, resolution_id: UUID) -> IssueResolution:
+        """Mark deploy stage as complete and transition to completed"""
+        resolution = await self.get_resolution_with_relations(resolution_id)
+
+        if resolution.current_stage != "deploy":
+            raise ValueError(f"Cannot complete deploy in stage {resolution.current_stage}")
+
+        resolution.deploy_complete = True
+        resolution.deploy_completed_at = datetime.utcnow()
+        resolution.current_stage = "completed"
+        resolution.resolution_state = "ready_for_pr"
+        resolution.completed_at = datetime.utcnow()
+
+        self.db.add(resolution)
+        await self.db.commit()
+
+        logger.info(f"Marked deploy stage complete for resolution {resolution_id}")
 
         return resolution
 
@@ -538,6 +696,12 @@ class IssueResolutionOrchestrator:
                     "tests_passed": resolution.test_cases_passed,
                     "started_at": resolution.testing_started_at.isoformat() if resolution.testing_started_at else None,
                     "completed_at": resolution.testing_completed_at.isoformat() if resolution.testing_completed_at else None
+                },
+                "deploy": {
+                    "complete": resolution.deploy_complete,
+                    "session_id": resolution.deploy_session_id,
+                    "started_at": resolution.deploy_started_at.isoformat() if resolution.deploy_started_at else None,
+                    "completed_at": resolution.deploy_completed_at.isoformat() if resolution.deploy_completed_at else None
                 }
             },
             "can_transition": self._can_transition(resolution),
@@ -558,6 +722,8 @@ class IssueResolutionOrchestrator:
             return resolution.implementation_complete
         elif resolution.current_stage == "testing":
             return resolution.testing_complete
+        elif resolution.current_stage == "deploy":
+            return resolution.deploy_complete
         return False
 
     def _get_next_action(self, resolution: IssueResolution) -> str:
@@ -574,15 +740,18 @@ class IssueResolutionOrchestrator:
             return "Planning in progress"
         elif resolution.current_stage == "implementation":
             if resolution.implementation_complete:
-                return "Start testing"
+                if resolution.deploy_started_at:
+                    return "Deployment is starting"
+                return "Preparing deployment"
             return "Implementation in progress"
         elif resolution.current_stage == "testing":
             if resolution.testing_complete:
-                if resolution.test_cases_passed == resolution.test_cases_generated:
-                    return "Ready to create pull request"
-                else:
-                    return "Fix failing tests and retry"
+                return "Start application deployment"
             return "Testing in progress"
+        elif resolution.current_stage == "deploy":
+            if resolution.deploy_complete:
+                return "Ready to create pull request"
+            return "Deploying application"
         return "Unknown"
 
 
@@ -653,6 +822,7 @@ class IssueResolutionOrchestrator:
                 "github_repo_url": github_repo_url,
                 "webhook_url": webhook_url,
                 "branch": resolution.resolution_branch,  # Use issue branch instead of default
+                "generate_claude_md": False,
             }
             logger.info(f"Init payload: {init_payload}")
             logger.info(f"Init URL: {settings.init_project_url}")
@@ -738,6 +908,9 @@ class IssueResolutionOrchestrator:
         elif resolution.current_stage == "testing":
             resolution.testing_complete = False
             resolution.testing_started_at = datetime.utcnow()
+        elif resolution.current_stage == "deploy":
+            resolution.deploy_complete = False
+            resolution.deploy_started_at = datetime.utcnow()
 
         self.db.add(resolution)
         await self.db.commit()
@@ -751,5 +924,7 @@ class IssueResolutionOrchestrator:
             return {"message": "Implementation stage retry not yet implemented"}
         elif resolution.current_stage == "testing":
             return {"message": "Testing stage retry not yet implemented"}
+        elif resolution.current_stage == "deploy":
+            return await self.trigger_deploy_stage(resolution_id)
 
         return {"message": "Stage retried"}

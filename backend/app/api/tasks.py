@@ -1041,6 +1041,7 @@ async def deploy_task(
         f"   - Ensure proper network configuration and port mapping to {task.deployment_port}\n"
         f"   - Use volume mounts for data persistence where applicable\n"
         f"   - Follow the application's documentation for Docker setup if available\n\n"
+        f"   - Run migrations if necessary or seed data if necessary"
         f"4. SERVICE VALIDATION:\n"
         f"   - Wait for services to be healthy (use health checks if defined)\n"
         f"   - Verify the application is accessible at localhost:{task.deployment_port}\n"

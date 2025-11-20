@@ -1,35 +1,35 @@
 "use client"
 
-import { useQuery } from "@tanstack/react-query"
+import { useState, useMemo } from "react"
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { format } from "date-fns"
 import {
   FileText,
   CheckCircle,
   Clock,
-  AlertCircle,
   Loader2,
-  MessageSquare,
-  Target,
-  Shield,
-  TestTube,
-  ChevronRight,
-  User,
-  Calendar,
-  ThumbsUp,
+  Terminal,
+  FileEdit,
   Eye,
-  Sparkles
+  Sparkles,
+  ThumbsUp,
+  Lightbulb,
+  MessageCircle,
+  Send,
+  Activity
 } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Separator } from "@/components/ui/separator"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Textarea } from "@/components/ui/textarea"
 import api from "@/lib/api"
-import { cn } from "@/lib/utils"
-import ReactMarkdown from 'react-markdown'
 import { motion } from "framer-motion"
+import { toast } from "sonner"
+import {
+  StageSummaryCard,
+  StageHooksSection,
+  StageMetadata
+} from "./shared-stage-components"
 
 interface PlanningStageProps {
   taskId: string
@@ -37,9 +37,13 @@ interface PlanningStageProps {
   chatId?: string
   stageData: any
   onApprove: () => void
+  canApprove?: boolean
 }
 
-export function PlanningStage({ taskId, sessionId, chatId, stageData, onApprove }: PlanningStageProps) {
+export function PlanningStage({ taskId, sessionId, chatId, stageData, onApprove, canApprove = true }: PlanningStageProps) {
+  const queryClient = useQueryClient()
+  const [feedbackMessage, setFeedbackMessage] = useState("")
+
   // Fetch chat messages for the planning session
   const { data: chats } = useQuery({
     queryKey: ['session-chats', sessionId],
@@ -48,295 +52,302 @@ export function PlanningStage({ taskId, sessionId, chatId, stageData, onApprove 
     refetchInterval: !stageData?.complete ? 5000 : false,
   })
 
-  // Parse the plan from chat messages
-  const getPlanContent = () => {
+  const { data: planningHooksData, refetch: refetchPlanningHooks, isRefetching: isPlanningRefetching } = useQuery({
+    queryKey: ['planning-chat-hooks', chatId],
+    queryFn: () => chatId ? api.getChatHooks(chatId) : Promise.resolve({ hooks: [] }),
+    enabled: !!chatId,
+    refetchInterval: !stageData?.complete ? 4000 : false,
+  })
+
+  const planningHooks = planningHooksData?.hooks || []
+
+  // Extract ONLY the final completed plan result
+  const planContent = useMemo(() => {
+    // First try to get from completed status hooks (final plan)
+    if (planningHooks && planningHooks.length > 0) {
+      const completedStatusHooks = planningHooks.filter(
+        (hook: any) => hook.hook_type === 'status' && hook.status === 'completed' && (hook.data?.result || hook.message)
+      )
+
+      if (completedStatusHooks.length > 0) {
+        const latestCompletedHook = completedStatusHooks[completedStatusHooks.length - 1]
+        const result = latestCompletedHook.data?.result || latestCompletedHook.message
+        if (result && result.length > 200) {
+          return result
+        }
+      }
+    }
+
+    // Fallback to chat messages
     if (!chats?.chats) return null
     const assistantMessages = chats.chats.filter((chat: any) => chat.role === 'assistant')
     return assistantMessages[assistantMessages.length - 1]?.content?.text || null
-  }
-
-  const planContent = getPlanContent()
-
-  // Extract plan sections (if the AI response is structured)
-  const extractPlanSections = (content: string) => {
-    const sections = {
-      analysis: '',
-      approach: '',
-      risks: '',
-      testing: '',
-      effort: ''
-    }
-
-    if (!content) return sections
-
-    // Try to extract sections based on markdown headers
-    const analysisMatch = content.match(/##?\s*(?:Issue\s*)?Analysis[\s\S]*?(?=##|$)/i)
-    const approachMatch = content.match(/##?\s*(?:Proposed\s*)?Solution[\s\S]*?(?=##|$)/i)
-    const risksMatch = content.match(/##?\s*Risk\s*Assessment[\s\S]*?(?=##|$)/i)
-    const testingMatch = content.match(/##?\s*Testing\s*Strategy[\s\S]*?(?=##|$)/i)
-    const effortMatch = content.match(/##?\s*Estimated\s*Effort[\s\S]*?(?=##|$)/i)
-
-    sections.analysis = analysisMatch?.[0] || ''
-    sections.approach = approachMatch?.[0] || ''
-    sections.risks = risksMatch?.[0] || ''
-    sections.testing = testingMatch?.[0] || ''
-    sections.effort = effortMatch?.[0] || ''
-
-    return sections
-  }
-
-  const planSections = planContent ? extractPlanSections(planContent) : null
+  }, [planningHooks, chats])
 
   const isWaitingForPlan = !stageData?.complete && !planContent
   const isPlanReady = stageData?.complete && !stageData?.approved
   const isPlanApproved = stageData?.approved
 
+  // Transform all hooks for display
+  const allHooks = useMemo(() => {
+    if (!planningHooks) return []
+
+    return planningHooks.map((hook: any) => {
+      let icon = Activity
+      let iconColor = 'text-muted-foreground'
+      let bgColor = 'bg-muted'
+      let title = hook.message || 'Activity'
+      let details: any = {}
+
+      if (hook.tool_name === 'Edit' || hook.tool_name === 'Write') {
+        icon = FileEdit
+        iconColor = 'text-blue-600'
+        bgColor = 'bg-blue-100 dark:bg-blue-900/30'
+        title = `${hook.tool_name}: ${hook.tool_input?.file_path?.split('/').pop() || 'file'}`
+        details = {
+          filePath: hook.tool_input?.file_path,
+          oldString: hook.tool_input?.old_string,
+          newString: hook.tool_input?.new_string,
+        }
+      } else if (hook.tool_name === 'Bash') {
+        icon = Terminal
+        iconColor = 'text-green-600'
+        bgColor = 'bg-green-100 dark:bg-green-900/30'
+        title = 'Shell Command'
+        details = { command: hook.tool_input?.command }
+      } else if (hook.tool_name === 'Read') {
+        icon = Eye
+        iconColor = 'text-purple-600'
+        bgColor = 'bg-purple-100 dark:bg-purple-900/30'
+        title = `Read: ${hook.tool_input?.file_path?.split('/').pop() || 'file'}`
+        details = { filePath: hook.tool_input?.file_path }
+      } else if (hook.hook_type === 'status') {
+        icon = Sparkles
+        iconColor = 'text-purple-600'
+        bgColor = 'bg-purple-100 dark:bg-purple-900/30'
+        title = hook.message || 'Status Update'
+        details = { result: hook.data?.result }
+      }
+
+      return {
+        id: hook.id,
+        icon,
+        iconColor,
+        bgColor,
+        title,
+        details,
+        timestamp: hook.received_at || hook.created_at,
+        status: hook.status,
+        toolName: hook.tool_name,
+        hookType: hook.hook_type,
+        message: hook.message,
+      }
+    }).reverse()
+  }, [planningHooks])
+
+  // Metadata items
+  const metadataItems = useMemo(() => {
+    const items = []
+
+    if (stageData?.started_at) {
+      items.push({
+        label: 'Started',
+        value: format(new Date(stageData.started_at), 'MMM d, HH:mm'),
+        icon: Clock
+      })
+    }
+
+    if (stageData?.completed_at) {
+      items.push({
+        label: 'Completed',
+        value: format(new Date(stageData.completed_at), 'MMM d, HH:mm'),
+        icon: Clock
+      })
+    }
+
+    if (stageData?.approved_at) {
+      items.push({
+        label: 'Approved',
+        value: format(new Date(stageData.approved_at), 'MMM d, HH:mm'),
+        icon: CheckCircle
+      })
+    }
+
+    if (sessionId) {
+      items.push({
+        label: 'Session ID',
+        value: sessionId.slice(0, 8)
+      })
+    }
+
+    return items
+  }, [stageData, sessionId])
+
+  const feedbackMutation = useMutation({
+    mutationFn: async (message: string) => {
+      if (!chatId || !sessionId) throw new Error('Missing session context')
+      return api.sendChatQuery(chatId, { prompt: message, session_id: sessionId })
+    },
+    onSuccess: () => {
+      toast.success('Feedback sent to planning session')
+      setFeedbackMessage("")
+      if (sessionId) {
+        queryClient.invalidateQueries({ queryKey: ['session-chats', sessionId] })
+      }
+      if (chatId) {
+        queryClient.invalidateQueries({ queryKey: ['planning-chat-hooks', chatId] })
+      }
+    },
+    onError: () => {
+      toast.error('Unable to send feedback. Please retry.')
+    }
+  })
+
+  const handleSendFeedback = () => {
+    if (!feedbackMessage.trim()) return
+    feedbackMutation.mutate(feedbackMessage.trim())
+  }
+
   return (
-    <div className="space-y-4">
-      {/* Stage Info */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="space-y-1">
-          <p className="text-xs text-muted-foreground">Status</p>
-          <Badge
-            variant={
-              isPlanApproved ? "success" :
-              isPlanReady ? "warning" :
-              stageData?.complete ? "default" :
-              "secondary"
-            }
-          >
-            {isPlanApproved ? 'Approved' :
-             isPlanReady ? 'Awaiting Approval' :
-             stageData?.complete ? 'Complete' :
-             'In Progress'}
-          </Badge>
-        </div>
-        <div className="space-y-1">
-          <p className="text-xs text-muted-foreground">Started</p>
-          <p className="text-sm font-medium">
-            {stageData?.started_at
-              ? format(new Date(stageData.started_at), 'MMM d, HH:mm')
-              : '-'}
-          </p>
-        </div>
-        <div className="space-y-1">
-          <p className="text-xs text-muted-foreground">Completed</p>
-          <p className="text-sm font-medium">
-            {stageData?.completed_at
-              ? format(new Date(stageData.completed_at), 'MMM d, HH:mm')
-              : '-'}
-          </p>
-        </div>
-        <div className="space-y-1">
-          <p className="text-xs text-muted-foreground">Session</p>
-          <p className="text-sm font-mono text-muted-foreground">
-            {sessionId ? sessionId.slice(0, 8) : '-'}
-          </p>
-        </div>
-      </div>
-
-      <Separator />
-
-      {/* Approval Status Card */}
+    <div className="space-y-6">
+      {/* Approval Status Banner */}
       {isPlanReady && (
         <motion.div
-          initial={{ opacity: 0, y: 10 }}
+          initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3 }}
         >
-          <Alert className="border-amber-200 bg-amber-50 dark:bg-amber-950/20">
-            <AlertCircle className="h-4 w-4 text-amber-600" />
-            <AlertTitle>Plan Ready for Review</AlertTitle>
-            <AlertDescription className="mt-2">
-              <p className="mb-3">The AI has completed the analysis and planning. Please review the plan below and approve to proceed with implementation.</p>
-              <Button onClick={onApprove} className="w-full sm:w-auto">
+          <Alert className="border-amber-500/50 bg-gradient-to-br from-amber-50 via-yellow-50 to-orange-50 dark:from-amber-950/20 dark:via-yellow-950/20 dark:to-orange-950/20">
+            <Lightbulb className="h-5 w-5 text-amber-600" />
+            <AlertTitle className="text-lg font-bold">Plan Ready for Review</AlertTitle>
+            <AlertDescription className="mt-3">
+              <p className="text-sm mb-4 font-medium">Review the implementation plan below and approve to begin implementation.</p>
+              <Button onClick={onApprove} disabled={!canApprove} size="lg" className="font-semibold shadow-md">
                 <ThumbsUp className="h-4 w-4 mr-2" />
-                Review & Approve Plan
+                Approve & Start Implementation
               </Button>
+              {!canApprove && (
+                <p className="mt-3 text-xs text-muted-foreground">
+                  Awaiting planning session metadata…
+                </p>
+              )}
             </AlertDescription>
           </Alert>
         </motion.div>
       )}
 
-      {/* Approved Status */}
+      {/* Approved Status Banner */}
       {isPlanApproved && (
-        <Alert className="border-green-200 bg-green-50 dark:bg-green-950/20">
-          <CheckCircle className="h-4 w-4 text-green-600" />
-          <AlertTitle>Plan Approved</AlertTitle>
-          <AlertDescription>
-            <div className="mt-2 space-y-1">
-              {stageData?.approved_by && (
-                <div className="flex items-center gap-2 text-sm">
-                  <User className="h-3 w-3" />
-                  <span>Approved by: User</span>
-                </div>
-              )}
-              {stageData?.approved_at && (
-                <div className="flex items-center gap-2 text-sm">
-                  <Calendar className="h-3 w-3" />
-                  <span>Approved at: {format(new Date(stageData.approved_at), 'MMM d, HH:mm')}</span>
-                </div>
-              )}
-            </div>
-          </AlertDescription>
-        </Alert>
+        <motion.div
+          initial={{ opacity: 0, scale: 0.98 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.3 }}
+        >
+          <Alert className="border-green-500/50 bg-gradient-to-br from-green-50 via-emerald-50 to-teal-50 dark:from-green-950/20 dark:via-emerald-950/20 dark:to-teal-950/20">
+            <CheckCircle className="h-5 w-5 text-green-600" />
+            <AlertTitle className="text-lg font-bold">Plan Approved</AlertTitle>
+            <AlertDescription className="mt-3">
+              <div className="flex flex-wrap items-center gap-4 text-sm font-medium">
+                {stageData?.approved_at && (
+                  <span className="flex items-center gap-2 bg-white/60 dark:bg-black/20 px-3 py-1.5 rounded-full">
+                    <Clock className="h-4 w-4" />
+                    {format(new Date(stageData.approved_at), 'MMM d, HH:mm')}
+                  </span>
+                )}
+              </div>
+            </AlertDescription>
+          </Alert>
+        </motion.div>
       )}
 
       {/* Loading State */}
       {isWaitingForPlan && (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground mb-4" />
-            <p className="text-sm text-muted-foreground">Analyzing issue and creating plan...</p>
-            <p className="text-xs text-muted-foreground mt-2">This may take a few moments</p>
+        <Card className="border-dashed">
+          <CardContent className="flex flex-col items-center justify-center py-20">
+            <div className="relative mb-4">
+              <Loader2 className="h-10 w-10 animate-spin text-purple-500" />
+            </div>
+            <p className="text-base font-semibold">Analyzing issue and creating plan...</p>
+            <p className="text-sm text-muted-foreground mt-1">This may take a few moments</p>
           </CardContent>
         </Card>
       )}
 
-      {/* Plan Content */}
+      {/* Summary Section */}
       {planContent && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold flex items-center gap-2">
-              <Sparkles className="h-4 w-4" />
-              Implementation Plan
-            </h3>
-            <Badge variant="outline">AI Generated</Badge>
-          </div>
+        <StageSummaryCard
+          title="Implementation Plan"
+          description="AI-generated analysis and implementation strategy"
+          content={planContent}
+          icon={Sparkles}
+          accentColor="purple"
+          badge="AI Generated"
+        />
+      )}
 
-          <Tabs defaultValue="overview" className="w-full">
-            <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="overview">Overview</TabsTrigger>
-              <TabsTrigger value="details">Full Plan</TabsTrigger>
-              <TabsTrigger value="chat">Chat History</TabsTrigger>
-            </TabsList>
+      {/* Hooks Section */}
+      {allHooks.length > 0 && (
+        <StageHooksSection
+          hooks={allHooks}
+          accentColor="purple"
+          title="All Activity"
+          description={`Complete execution log with ${allHooks.length} events`}
+          onRefresh={refetchPlanningHooks}
+          isRefreshing={isPlanningRefetching}
+        />
+      )}
 
-            {/* Overview Tab */}
-            <TabsContent value="overview" className="space-y-4">
-              {planSections && (
-                <>
-                  {/* Analysis Section */}
-                  {planSections.analysis && (
-                    <Card>
-                      <CardHeader>
-                        <CardTitle className="text-sm flex items-center gap-2">
-                          <Eye className="h-4 w-4" />
-                          Issue Analysis
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <ScrollArea className="h-32 w-full">
-                          <div className="prose prose-sm dark:prose-invert max-w-none">
-                            <ReactMarkdown>{planSections.analysis}</ReactMarkdown>
-                          </div>
-                        </ScrollArea>
-                      </CardContent>
-                    </Card>
-                  )}
+      {/* Metadata Section */}
+      {metadataItems.length > 0 && (
+        <StageMetadata
+          items={metadataItems}
+          title="Stage Metadata"
+          accentColor="purple"
+        />
+      )}
 
-                  {/* Solution Approach */}
-                  {planSections.approach && (
-                    <Card>
-                      <CardHeader>
-                        <CardTitle className="text-sm flex items-center gap-2">
-                          <Target className="h-4 w-4" />
-                          Solution Approach
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <ScrollArea className="h-32 w-full">
-                          <div className="prose prose-sm dark:prose-invert max-w-none">
-                            <ReactMarkdown>{planSections.approach}</ReactMarkdown>
-                          </div>
-                        </ScrollArea>
-                      </CardContent>
-                    </Card>
-                  )}
-
-                  {/* Risk Assessment */}
-                  {planSections.risks && (
-                    <Card>
-                      <CardHeader>
-                        <CardTitle className="text-sm flex items-center gap-2">
-                          <Shield className="h-4 w-4" />
-                          Risk Assessment
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <ScrollArea className="h-32 w-full">
-                          <div className="prose prose-sm dark:prose-invert max-w-none">
-                            <ReactMarkdown>{planSections.risks}</ReactMarkdown>
-                          </div>
-                        </ScrollArea>
-                      </CardContent>
-                    </Card>
-                  )}
-
-                  {/* Testing Strategy */}
-                  {planSections.testing && (
-                    <Card>
-                      <CardHeader>
-                        <CardTitle className="text-sm flex items-center gap-2">
-                          <TestTube className="h-4 w-4" />
-                          Testing Strategy
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <ScrollArea className="h-32 w-full">
-                          <div className="prose prose-sm dark:prose-invert max-w-none">
-                            <ReactMarkdown>{planSections.testing}</ReactMarkdown>
-                          </div>
-                        </ScrollArea>
-                      </CardContent>
-                    </Card>
-                  )}
-                </>
-              )}
-            </TabsContent>
-
-            {/* Full Plan Tab */}
-            <TabsContent value="details">
-              <Card>
-                <CardContent className="pt-6">
-                  <ScrollArea className="h-96 w-full">
-                    <div className="prose prose-sm dark:prose-invert max-w-none">
-                      <ReactMarkdown>{planContent}</ReactMarkdown>
-                    </div>
-                  </ScrollArea>
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-            {/* Chat History Tab */}
-            <TabsContent value="chat">
-              <Card>
-                <CardContent className="pt-6">
-                  <ScrollArea className="h-96 w-full">
-                    <div className="space-y-4">
-                      {chats?.chats?.map((chat: any, index: number) => (
-                        <div key={chat.id} className="space-y-2">
-                          <div className="flex items-center gap-2">
-                            <Badge variant={chat.role === 'user' ? 'default' : 'secondary'}>
-                              {chat.role}
-                            </Badge>
-                            <span className="text-xs text-muted-foreground">
-                              {format(new Date(chat.created_at), 'HH:mm:ss')}
-                            </span>
-                          </div>
-                          <div className="text-sm pl-4 border-l-2 border-muted">
-                            <ReactMarkdown>
-                              {chat.content?.text || JSON.stringify(chat.content)}
-                            </ReactMarkdown>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </ScrollArea>
-                </CardContent>
-              </Card>
-            </TabsContent>
-          </Tabs>
-        </div>
+      {/* Feedback Section */}
+      {sessionId && chatId && !isPlanApproved && planContent && (
+        <Card className="border-blue-200 dark:border-blue-800 overflow-hidden">
+          <div className="absolute top-0 right-0 w-48 h-48 bg-gradient-to-bl from-blue-500/5 to-transparent rounded-full blur-2xl" />
+          <CardHeader className="relative">
+            <CardTitle className="text-sm font-bold flex items-center gap-2">
+              <MessageCircle className="h-4 w-4" />
+              Provide Feedback
+            </CardTitle>
+            <CardDescription className="text-xs">
+              Send feedback to refine the plan
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4 relative">
+            <Textarea
+              placeholder="Request changes, ask for clarifications, or add missing context..."
+              value={feedbackMessage}
+              onChange={(e) => setFeedbackMessage(e.target.value)}
+              className="min-h-[100px] resize-none"
+            />
+            <div className="flex justify-end">
+              <Button
+                size="default"
+                onClick={handleSendFeedback}
+                disabled={feedbackMutation.isPending || !feedbackMessage.trim()}
+                className="font-semibold"
+              >
+                {feedbackMutation.isPending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Sending...
+                  </>
+                ) : (
+                  <>
+                    <Send className="h-4 w-4 mr-2" />
+                    Send Feedback
+                  </>
+                )}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       )}
     </div>
   )

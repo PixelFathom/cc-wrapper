@@ -113,6 +113,7 @@ export default function IssueResolutionPage() {
             issueNumber={issueNumber}
             issueTitle={issue?.title || resolution.issue_title || `Issue #${issueNumber}`}
             issueBody={issue?.body || resolution.issue_body}
+            issueUrl={issue?.html_url}
             resolution={resolution}
           />
         ) : (

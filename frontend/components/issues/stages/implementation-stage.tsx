@@ -1,36 +1,36 @@
 "use client"
 
+import { useMemo } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { format } from "date-fns"
 import {
   Code,
-  FileCode,
   GitCommit,
   GitBranch,
   Activity,
   Clock,
   CheckCircle,
-  AlertCircle,
   Loader2,
   FileEdit,
   Terminal,
-  Zap,
-  MessageSquare,
-  ChevronDown,
-  ChevronUp,
-  Sparkles
+  Eye,
+  Sparkles,
+  BarChart3
 } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
-import { Progress } from "@/components/ui/progress"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Separator } from "@/components/ui/separator"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { Separator } from "@/components/ui/separator"
+import { Progress } from "@/components/ui/progress"
 import api from "@/lib/api"
-import { cn } from "@/lib/utils"
 import { motion } from "framer-motion"
-import ReactMarkdown from "react-markdown"
-import { useMemo, useState } from "react"
+import { ChevronDown } from "lucide-react"
+import { cn } from "@/lib/utils"
+import {
+  StageSummaryCard,
+  StageHooksSection,
+  StageMetadata
+} from "./shared-stage-components"
 
 interface ImplementationStageProps {
   taskId: string
@@ -40,18 +40,8 @@ interface ImplementationStageProps {
 }
 
 export function ImplementationStage({ taskId, sessionId, chatId, stageData }: ImplementationStageProps) {
-  const [isToolsExpanded, setIsToolsExpanded] = useState(false)
-
-  // Fetch chat messages
-  const { data: chats } = useQuery({
-    queryKey: ['session-chats', sessionId],
-    queryFn: () => sessionId ? api.getSessionChat(sessionId) : Promise.resolve({ chats: [] }),
-    enabled: !!sessionId,
-    refetchInterval: !stageData?.complete ? 3000 : false,
-  })
-
   // Fetch chat hooks for activity
-  const { data: hooks } = useQuery({
+  const { data: hooks, refetch: refetchHooks, isRefetching } = useQuery({
     queryKey: ['chat-hooks', chatId],
     queryFn: () => chatId ? api.getChatHooks(chatId) : Promise.resolve({ hooks: [] }),
     enabled: !!chatId,
@@ -59,7 +49,7 @@ export function ImplementationStage({ taskId, sessionId, chatId, stageData }: Im
   })
 
   // Extract activity metrics
-  const getActivityMetrics = () => {
+  const metrics = useMemo(() => {
     if (!hooks?.hooks) return { filesModified: 0, commits: 0, toolCalls: 0 }
 
     const filesModified = new Set(
@@ -76,276 +66,236 @@ export function ImplementationStage({ taskId, sessionId, chatId, stageData }: Im
     const toolCalls = hooks.hooks.filter((h: any) => h.tool_name).length
 
     return { filesModified, commits, toolCalls }
-  }
-
-  const metrics = getActivityMetrics()
-
-  // Get recent activity items
-  const getRecentActivity = () => {
-    if (!hooks?.hooks) return []
-
-    return hooks.hooks
-      .filter((h: any) => h.tool_name || h.message)
-      .slice(-10)
-      .reverse()
-      .map((hook: any) => {
-        let icon = Activity
-        let color = 'text-muted-foreground'
-        let description = hook.message || 'Activity'
-
-        if (hook.tool_name === 'Edit' || hook.tool_name === 'Write') {
-          icon = FileEdit
-          color = 'text-blue-600'
-          description = `Modified ${hook.tool_input?.file_path?.split('/').pop() || 'file'}`
-        } else if (hook.tool_name === 'Bash') {
-          icon = Terminal
-          color = 'text-green-600'
-          const cmd = hook.tool_input?.command || ''
-          if (cmd.includes('git commit')) {
-            icon = GitCommit
-            description = 'Created commit'
-          } else if (cmd.includes('git')) {
-            icon = GitBranch
-            description = 'Git operation'
-          } else {
-            description = `Command: ${cmd.slice(0, 50)}...`
-          }
-        } else if (hook.tool_name === 'Read') {
-          icon = FileCode
-          color = 'text-purple-600'
-          description = `Reading ${hook.tool_input?.file_path?.split('/').pop() || 'file'}`
-        }
-
-        return {
-          id: hook.id,
-          icon,
-          color,
-          description,
-          timestamp: hook.received_at
-        }
-      })
-  }
-
-  const recentActivity = getRecentActivity()
+  }, [hooks])
 
   // Get implementation progress
-  const getProgress = () => {
+  const progress = useMemo(() => {
     if (stageData?.complete) return 100
     if (!hooks?.hooks) return 0
-
-    // Estimate based on activity
-    const totalExpected = 20 // Expected number of operations
+    const totalExpected = 20
     const current = Math.min(hooks.hooks.length, totalExpected)
     return Math.round((current / totalExpected) * 100)
-  }
-
-  const progress = getProgress()
-
-  // Extract the final completed implementation hook
-  const completedImplementationHook = useMemo(() => {
-    if (!hooks?.hooks || !stageData?.complete) return null
-
-    // Find the last hook with completed status and significant content
-    const completedHooks = hooks.hooks
-      .filter((hook: any) => {
-        const fullResult = hook.data?.result || hook.result
-        const message = hook.message
-        const isCompleted = hook.status === 'completed' || hook.hook_type === 'completed'
-
-        // Check if it has substantial content
-        const hasContent = (fullResult && fullResult.length >= 200) ||
-                          (message && message.length >= 200)
-
-        return isCompleted && hasContent
-      })
-      .sort((a: any, b: any) => {
-        const timeA = new Date(a.received_at || a.created_at).getTime()
-        const timeB = new Date(b.received_at || b.created_at).getTime()
-        return timeB - timeA // Most recent first
-      })
-
-    return completedHooks[0] || null
   }, [hooks, stageData])
 
-  // Get the final result content
-  const finalResultContent = useMemo(() => {
-    if (!completedImplementationHook) return null
+  // Extract ONLY the final completed implementation result
+  const finalResult = useMemo(() => {
+    if (!hooks?.hooks) return null
 
-    const fullResult = completedImplementationHook.data?.result || completedImplementationHook.result
-    const message = completedImplementationHook.message
+    // Look for completed status hook with result
+    const completedStatusHooks = hooks.hooks.filter(
+      (hook: any) =>
+        hook.hook_type === 'status' &&
+        hook.status === 'completed' &&
+        (hook.data?.result || hook.message)
+    )
 
-    return fullResult || message
-  }, [completedImplementationHook])
+    if (completedStatusHooks.length > 0) {
+      const latestHook = completedStatusHooks[completedStatusHooks.length - 1]
+      const result = latestHook.data?.result || latestHook.message
+      // Return result if it exists and has meaningful content
+      if (result && typeof result === 'string' && result.trim().length > 0) {
+        return result
+      }
+    }
+
+    return null
+  }, [hooks])
+
+  // Transform all hooks for display
+  const allHooks = useMemo(() => {
+    if (!hooks?.hooks) return []
+
+    return hooks.hooks.map((hook: any) => {
+      let icon = Activity
+      let iconColor = 'text-muted-foreground'
+      let bgColor = 'bg-muted'
+      let title = hook.message || 'Activity'
+      let details: any = {}
+
+      if (hook.tool_name === 'Edit' || hook.tool_name === 'Write') {
+        icon = FileEdit
+        iconColor = 'text-blue-600'
+        bgColor = 'bg-blue-100 dark:bg-blue-900/30'
+        title = `${hook.tool_name}: ${hook.tool_input?.file_path?.split('/').pop() || 'file'}`
+        details = {
+          filePath: hook.tool_input?.file_path,
+          oldString: hook.tool_input?.old_string,
+          newString: hook.tool_input?.new_string,
+        }
+      } else if (hook.tool_name === 'Bash') {
+        icon = Terminal
+        iconColor = 'text-green-600'
+        bgColor = 'bg-green-100 dark:bg-green-900/30'
+        const cmd = hook.tool_input?.command || ''
+        if (cmd.includes('git commit')) {
+          icon = GitCommit
+          title = 'Git Commit'
+        } else if (cmd.includes('git')) {
+          icon = GitBranch
+          title = 'Git Command'
+        } else {
+          title = 'Shell Command'
+        }
+        details = { command: cmd }
+      } else if (hook.tool_name === 'Read') {
+        icon = Eye
+        iconColor = 'text-purple-600'
+        bgColor = 'bg-purple-100 dark:bg-purple-900/30'
+        title = `Read: ${hook.tool_input?.file_path?.split('/').pop() || 'file'}`
+        details = { filePath: hook.tool_input?.file_path }
+      } else if (hook.hook_type === 'status') {
+        icon = Sparkles
+        iconColor = 'text-emerald-600'
+        bgColor = 'bg-emerald-100 dark:bg-emerald-900/30'
+        title = hook.message || 'Status Update'
+        details = { result: hook.data?.result }
+      }
+
+      return {
+        id: hook.id,
+        icon,
+        iconColor,
+        bgColor,
+        title,
+        details,
+        timestamp: hook.received_at || hook.created_at,
+        status: hook.status,
+        toolName: hook.tool_name,
+        hookType: hook.hook_type,
+        message: hook.message,
+      }
+    }).reverse()
+  }, [hooks])
+
+  // Metadata items
+  const metadataItems = useMemo(() => {
+    const items = []
+
+    if (stageData?.started_at) {
+      items.push({
+        label: 'Started',
+        value: format(new Date(stageData.started_at), 'MMM d, HH:mm'),
+        icon: Clock
+      })
+    }
+
+    if (stageData?.completed_at) {
+      items.push({
+        label: 'Completed',
+        value: format(new Date(stageData.completed_at), 'MMM d, HH:mm'),
+        icon: Clock
+      })
+    }
+
+    if (sessionId) {
+      items.push({
+        label: 'Session ID',
+        value: sessionId.slice(0, 8)
+      })
+    }
+
+    items.push({
+      label: 'Files Modified',
+      value: metrics.filesModified.toString(),
+      icon: FileEdit
+    })
+
+    items.push({
+      label: 'Commits',
+      value: metrics.commits.toString(),
+      icon: GitCommit
+    })
+
+    items.push({
+      label: 'Tool Calls',
+      value: metrics.toolCalls.toString(),
+      icon: Terminal
+    })
+
+    return items
+  }, [stageData, sessionId, metrics])
 
   return (
-    <div className="space-y-4">
-      {/* Stage Info */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="space-y-1">
-          <p className="text-xs text-muted-foreground">Status</p>
-          <Badge variant={stageData?.complete ? "success" : "default"}>
-            {stageData?.complete ? 'Complete' : 'In Progress'}
-          </Badge>
-        </div>
-        <div className="space-y-1">
-          <p className="text-xs text-muted-foreground">Started</p>
-          <p className="text-sm font-medium">
-            {stageData?.started_at
-              ? format(new Date(stageData.started_at), 'MMM d, HH:mm')
-              : '-'}
-          </p>
-        </div>
-        <div className="space-y-1">
-          <p className="text-xs text-muted-foreground">Completed</p>
-          <p className="text-sm font-medium">
-            {stageData?.completed_at
-              ? format(new Date(stageData.completed_at), 'MMM d, HH:mm')
-              : '-'}
-          </p>
-        </div>
-        <div className="space-y-1">
-          <p className="text-xs text-muted-foreground">Mode</p>
-          <Badge variant="outline" className="text-xs">
-            <Zap className="h-3 w-3 mr-1" />
-            Auto-Execute
-          </Badge>
-        </div>
-      </div>
-
-      <Separator />
-
-      {/* Progress Bar */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <p className="text-sm font-medium">Implementation Progress</p>
-          <span className="text-sm text-muted-foreground">{progress}%</span>
-        </div>
-        <Progress value={progress} className="h-2" />
-      </div>
-
-      {/* Activity Metrics */}
-      <div className="grid grid-cols-3 gap-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <FileEdit className="h-4 w-4" />
-              Files Modified
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-bold">{metrics.filesModified}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <GitCommit className="h-4 w-4" />
-              Commits
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-bold">{metrics.commits}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <Terminal className="h-4 w-4" />
-              Tool Calls
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-bold">{metrics.toolCalls}</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Final Implementation Result */}
-      {finalResultContent && (
-        <>
-          <Separator />
-          <Card className="border-emerald-200 bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/20">
-            <CardHeader>
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Sparkles className="h-5 w-5 text-emerald-600" />
-                Implementation Summary
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="prose prose-sm prose-emerald max-w-none dark:prose-invert">
-                <ReactMarkdown>{finalResultContent}</ReactMarkdown>
+    <div className="space-y-6">
+      {/* Status Banner */}
+      {stageData?.complete ? (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.98 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.3 }}
+        >
+          <Alert className="border-emerald-500/50 bg-gradient-to-br from-emerald-50 via-green-50 to-teal-50 dark:from-emerald-950/20 dark:via-green-950/20 dark:to-teal-950/20">
+            <CheckCircle className="h-5 w-5 text-emerald-600" />
+            <AlertTitle className="text-lg font-bold">Implementation Complete</AlertTitle>
+            <AlertDescription className="mt-3">
+              <div className="flex flex-wrap items-center gap-4 text-sm font-medium">
+                {stageData?.completed_at && (
+                  <span className="flex items-center gap-2 bg-white/60 dark:bg-black/20 px-3 py-1.5 rounded-full">
+                    <Clock className="h-4 w-4" />
+                    {format(new Date(stageData.completed_at), 'MMM d, HH:mm')}
+                  </span>
+                )}
+                <span className="flex items-center gap-2 bg-white/60 dark:bg-black/20 px-3 py-1.5 rounded-full">
+                  <FileEdit className="h-4 w-4" />
+                  {metrics.filesModified} files
+                </span>
+                <span className="flex items-center gap-2 bg-white/60 dark:bg-black/20 px-3 py-1.5 rounded-full">
+                  <GitCommit className="h-4 w-4" />
+                  {metrics.commits} commits
+                </span>
               </div>
-            </CardContent>
-          </Card>
-        </>
+            </AlertDescription>
+          </Alert>
+        </motion.div>
+      ) : (
+        <Card className="border-dashed">
+          <CardContent className="pt-6">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Loader2 className="h-5 w-5 animate-spin text-emerald-600" />
+                  <p className="font-semibold">Implementation in Progress</p>
+                </div>
+                <span className="text-sm font-mono text-muted-foreground">{progress}%</span>
+              </div>
+              <Progress value={progress} className="h-2.5" />
+            </div>
+          </CardContent>
+        </Card>
       )}
 
-      {/* Collapsible Tool Executions */}
-      <Collapsible open={isToolsExpanded} onOpenChange={setIsToolsExpanded}>
-        <Card>
-          <CollapsibleTrigger asChild>
-            <CardHeader className="cursor-pointer hover:bg-muted/50 transition-colors">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-sm flex items-center gap-2">
-                  <Terminal className="h-4 w-4" />
-                  Tool Executions
-                  {hooks?.hooks && (
-                    <Badge variant="secondary" className="ml-2">
-                      {hooks.hooks.length} operations
-                    </Badge>
-                  )}
-                </CardTitle>
-                {isToolsExpanded ? (
-                  <ChevronUp className="h-4 w-4 text-muted-foreground" />
-                ) : (
-                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                )}
-              </div>
-            </CardHeader>
-          </CollapsibleTrigger>
-          <CollapsibleContent>
-            <CardContent>
-              <ScrollArea className="h-96 w-full">
-                {recentActivity.length > 0 ? (
-                  <div className="space-y-3">
-                    {recentActivity.map((item, index) => {
-                      const Icon = item.icon
-                      return (
-                        <motion.div
-                          key={item.id}
-                          initial={{ opacity: 0, x: -10 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          transition={{ delay: index * 0.05 }}
-                          className="flex items-start gap-3 pb-3 border-b last:border-0"
-                        >
-                          <div className={cn(
-                            "flex h-8 w-8 items-center justify-center rounded-full bg-muted",
-                            item.color
-                          )}>
-                            <Icon className="h-4 w-4" />
-                          </div>
-                          <div className="flex-1 space-y-1">
-                            <p className="text-sm">{item.description}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {format(new Date(item.timestamp), 'HH:mm:ss')}
-                            </p>
-                          </div>
-                        </motion.div>
-                      )
-                    })}
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center justify-center py-8">
-                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground mb-2" />
-                    <p className="text-sm text-muted-foreground">Waiting for activity...</p>
-                  </div>
-                )}
-              </ScrollArea>
-            </CardContent>
-          </CollapsibleContent>
-        </Card>
-      </Collapsible>
+      {/* Summary Section */}
+      {finalResult && (
+        <StageSummaryCard
+          title="Implementation Summary"
+          description="Final result and changes made"
+          content={finalResult}
+          icon={Sparkles}
+          accentColor="emerald"
+          badge="Completed"
+        />
+      )}
 
+      {/* Hooks Section */}
+      {allHooks.length > 0 && (
+        <StageHooksSection
+          hooks={allHooks}
+          accentColor="emerald"
+          title="All Activity"
+          description={`Complete execution log with ${allHooks.length} events`}
+          onRefresh={refetchHooks}
+          isRefreshing={isRefetching}
+        />
+      )}
+
+      {/* Metadata Section */}
+      {metadataItems.length > 0 && (
+        <StageMetadata
+          items={metadataItems}
+          title="Stage Metadata"
+          accentColor="emerald"
+        />
+      )}
     </div>
   )
 }

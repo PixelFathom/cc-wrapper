@@ -38,18 +38,19 @@ class IssueResolution(BaseModel, table=True):
         index=True
     )  # pending, initializing, analyzing, implementing, testing, ready_for_pr, pr_created, completed, failed
 
-    # Four-stage workflow tracking
+    # Five-stage workflow tracking
     current_stage: str = Field(
         default="deployment",
         max_length=50,
         index=True
-    )  # deployment, planning, implementation, testing
+    )  # deployment, planning, implementation, testing, deploy
 
     # Stage-specific session and chat tracking
     planning_session_id: Optional[str] = Field(default=None, max_length=255, index=True)
     planning_chat_id: Optional[UUID] = Field(default=None, foreign_key="chats.id")
     implementation_session_id: Optional[str] = Field(default=None, max_length=255, index=True)
     implementation_chat_id: Optional[UUID] = Field(default=None, foreign_key="chats.id")
+    deploy_session_id: Optional[str] = Field(default=None, max_length=255, index=True)
 
     # Stage approval tracking
     planning_approved: bool = Field(default=False)
@@ -61,6 +62,7 @@ class IssueResolution(BaseModel, table=True):
     planning_complete: bool = Field(default=False)
     implementation_complete: bool = Field(default=False)
     testing_complete: bool = Field(default=False)
+    deploy_complete: bool = Field(default=False)
 
     # Resolution branch and PR info
     resolution_branch: Optional[str] = Field(default=None, max_length=255)
@@ -91,6 +93,8 @@ class IssueResolution(BaseModel, table=True):
     implementation_completed_at: Optional[datetime] = Field(default=None)
     testing_started_at: Optional[datetime] = Field(default=None)
     testing_completed_at: Optional[datetime] = Field(default=None)
+    deploy_started_at: Optional[datetime] = Field(default=None)
+    deploy_completed_at: Optional[datetime] = Field(default=None)
 
     # Legacy timestamps (kept for backward compatibility)
     analyzing_started_at: Optional[datetime] = Field(default=None)

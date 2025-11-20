@@ -159,6 +159,8 @@ class ChatService:
         webhook_data: Dict[str, Any]
     ):
         """Process incoming webhook from remote service"""        
+        auto_start_deploy = False
+
         try:
             # Get the original chat to find the correct session_id and sub_project_id
             chat = await db.get(Chat, chat_id)
@@ -227,7 +229,7 @@ class ChatService:
             
             db.add(hook)
 
-            # Check if this is a completed planning hook and update planning_complete flag
+            # Check if this is a completed planning hook and update planning metadata
             if status == "completed" and webhook_type == "status":
                 # Find if this chat is associated with a planning stage
                 from app.models.issue_resolution import IssueResolution
@@ -241,6 +243,10 @@ class ChatService:
                     if resolution.planning_chat_id == chat_id:
                         resolution.planning_complete = True
                         resolution.planning_completed_at = datetime.utcnow()  # Use naive datetime for PostgreSQL
+                        # Persist the final planning session_id if provided by the webhook
+                        final_session_id = webhook_data.get("session_id")
+                        if final_session_id:
+                            resolution.planning_session_id = final_session_id
                         db.add(resolution)
                         logger.info(
                             f"✅ Marked planning complete | "
@@ -250,6 +256,12 @@ class ChatService:
                     if resolution.implementation_chat_id == chat_id:
                         resolution.implementation_complete = True
                         resolution.implementation_completed_at = datetime.utcnow()
+                        # Persist the final implementation session as well when available
+                        final_impl_session_id = webhook_data.get("session_id")
+                        if final_impl_session_id:
+                            resolution.implementation_session_id = final_impl_session_id
+                        if resolution.current_stage == "implementation" and not resolution.deploy_started_at:
+                            auto_start_deploy = True
                         db.add(resolution)
                         logger.info(
                             f"✅ Marked implementation complete | "
@@ -384,6 +396,18 @@ class ChatService:
             
             await db.commit()
             await db.refresh(hook)
+
+            if auto_start_deploy and resolution:
+                try:
+                    from app.services.issue_resolution_orchestrator import IssueResolutionOrchestrator
+                    orchestrator = IssueResolutionOrchestrator(db)
+                    await orchestrator.trigger_deploy_stage(resolution.id)
+                except Exception as auto_error:
+                    logger.error(
+                        f"🚨 Failed to auto-start deploy stage | "
+                        f"resolution_id={str(resolution.id)[:8]}... | "
+                        f"error={auto_error}"
+                    )
             
             # Special handling for completed status webhook to ensure webhook_session_id is stored
             # Publish to Redis for real-time updates

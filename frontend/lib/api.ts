@@ -406,6 +406,8 @@ class ApiClient {
   sendChatQuery = async (chatId: string, data: {
     prompt: string
     session_id?: string
+    bypass_mode?: boolean
+    permission_mode?: 'interactive' | 'bypassPermissions' | 'plan'
   }): Promise<{ session_id: string; assistant_response: string }> => {
     return this.authenticatedRequest(`/chats/${chatId}/query`, {
       method: 'POST',
@@ -946,9 +948,9 @@ Object.assign(api, {
     return response.json()
   },
 
-  // Four-Stage Issue Resolution Workflow Endpoints
+  // Five-Stage Issue Resolution Workflow Endpoints
   getIssueResolutionStageStatus: async (projectId: string, issueNumber: number): Promise<{
-    current_stage: 'deployment' | 'planning' | 'implementation' | 'testing'
+    current_stage: 'deployment' | 'planning' | 'implementation' | 'testing' | 'deploy'
     resolution_state: string
     stages: {
       deployment: {
@@ -977,6 +979,12 @@ Object.assign(api, {
         complete: boolean
         tests_generated: number
         tests_passed: number
+        started_at?: string
+        completed_at?: string
+      }
+      deploy: {
+        complete: boolean
+        session_id?: string
         started_at?: string
         completed_at?: string
       }
@@ -1041,6 +1049,36 @@ Object.assign(api, {
     return response.json()
   },
 
+  triggerDeployStage: async (projectId: string, issueNumber: number): Promise<{
+    message: string
+    resolution_id: string
+    current_stage: string
+  }> => {
+    const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/issues/${issueNumber}/resolution/trigger-deploy`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    })
+    if (!response.ok) throw new Error('Failed to trigger deploy stage')
+    return response.json()
+  },
+
+  createIssueResolutionPR: async (
+    projectId: string,
+    issueNumber: number,
+    data: { title?: string; body?: string; branch?: string }
+  ): Promise<{ pr_number: number; pr_url: string; message: string }> => {
+    const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/issues/${issueNumber}/resolution/create-pr`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data)
+    })
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Failed to create pull request' }))
+      throw new Error(error.detail || 'Failed to create pull request')
+    }
+    return response.json()
+  },
+
   // GitHub Issue and Resolution Management
   getGithubIssue: async (projectId: string, issueNumber: number) => {
     const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/issues/${issueNumber}`)
@@ -1097,7 +1135,7 @@ Object.assign(api, {
 
   // Session and Chat APIs for Workflow
   getSessionChat: async (sessionId: string) => {
-    const response = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}/chats`)
+    const response = await fetch(`${API_BASE_URL}/api/chats/session/${sessionId}`)
     if (!response.ok) throw new Error('Failed to fetch session chats')
     return response.json()
   },

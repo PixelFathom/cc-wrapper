@@ -6,11 +6,12 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query, Background
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from uuid import UUID, uuid4
 from datetime import datetime
 import httpx
 import json
+import re
 
 from app.deps import get_session, get_current_user
 from app.models.user import User
@@ -158,6 +159,33 @@ def _serialize_resolution_status(resolution: IssueResolution) -> IssueResolution
         started_at=resolution.started_at,
         completed_at=resolution.completed_at,
     )
+
+
+def _extract_repo_info(project: Project) -> Tuple[str, str]:
+    if project.github_owner and project.github_repo_name:
+        return project.github_owner, project.github_repo_name
+
+    if project.repo_url:
+        match = re.search(r'github\.com[:/]([^/]+)/([^/.]+)', project.repo_url)
+        if match:
+            return match.group(1), match.group(2)
+
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Unable to determine GitHub repository for this project."
+    )
+
+
+async def _determine_base_branch(project: Project, session: AsyncSession, explicit_branch: Optional[str] = None) -> str:
+    if explicit_branch:
+        return explicit_branch
+
+    if project.github_repository_id:
+        repo = await session.get(GitHubRepository, project.github_repository_id)
+        if repo and repo.default_branch:
+            return repo.default_branch
+
+    return "main"
 
 
 @router.get("/{project_id}/issues", response_model=IssueListResponse)
@@ -978,6 +1006,8 @@ async def get_issue_resolution(
         "implementation_chat_id": str(resolution.implementation_chat_id) if resolution.implementation_chat_id else None,
         "pr_number": resolution.pr_number,
         "pr_url": resolution.pr_url,
+        "pr_state": resolution.pr_state,
+        "pr_created_at": resolution.pr_created_at.isoformat() if resolution.pr_created_at else None,
         "error_message": resolution.error_message
     }
 
@@ -1030,6 +1060,19 @@ async def get_stage_status(
             "tests_passed": resolution.test_cases_passed,
             "started_at": resolution.testing_started_at.isoformat() if resolution.testing_started_at else None,
             "completed_at": resolution.testing_completed_at.isoformat() if resolution.testing_completed_at else None
+        },
+        "deploy": {
+            "complete": resolution.deploy_complete,
+            "session_id": resolution.deploy_session_id,
+            "started_at": resolution.deploy_started_at.isoformat() if resolution.deploy_started_at else None,
+            "completed_at": resolution.deploy_completed_at.isoformat() if resolution.deploy_completed_at else None
+        },
+        "pr": {
+            "complete": bool(resolution.pr_number),
+            "pr_number": resolution.pr_number,
+            "pr_url": resolution.pr_url,
+            "started_at": resolution.pr_created_at.isoformat() if resolution.pr_created_at else None,
+            "completed_at": resolution.pr_created_at.isoformat() if resolution.pr_created_at else None
         }
     }
 
@@ -1048,7 +1091,23 @@ async def get_stage_status(
         next_action = "Implementing the approved solution"
     elif resolution.current_stage == "testing" and not resolution.testing_complete:
         next_action = "Running automated tests"
-    elif resolution.testing_complete:
+    elif resolution.current_stage == "testing" and resolution.testing_complete:
+        next_action = "Start application deployment"
+        can_transition = True
+    elif resolution.current_stage == "deploy":
+        if resolution.deploy_complete and not resolution.pr_number:
+            next_action = "Create a pull request"
+            can_transition = True
+        elif resolution.deploy_complete and resolution.pr_number:
+            next_action = "Pull request created"
+        else:
+            next_action = "Deploying application"
+    elif resolution.current_stage == "pr":
+        if resolution.pr_number:
+            next_action = "Pull request created"
+        else:
+            next_action = "Create a pull request"
+    elif resolution.deploy_complete and resolution.pr_number:
         next_action = "Resolution workflow complete"
 
     return StageStatusResponse(
@@ -1176,3 +1235,136 @@ async def trigger_planning(
         "resolution_id": str(resolution.id),
         "current_stage": resolution.current_stage
     }
+
+
+@router.post("/{project_id}/issues/{issue_number}/resolution/trigger-deploy")
+async def trigger_deploy(
+    project_id: UUID,
+    issue_number: int,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session)
+):
+    """Trigger the deploy stage for an issue resolution."""
+    stmt = select(IssueResolution).where(
+        IssueResolution.project_id == project_id,
+        IssueResolution.issue_number == issue_number
+    )
+    result = await session.execute(stmt)
+    resolution = result.scalar_one_or_none()
+
+    if not resolution:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Resolution not found"
+        )
+
+    if resolution.current_stage not in {"implementation", "testing", "deploy"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot trigger deploy from stage {resolution.current_stage}. Must be in implementation or testing stage."
+        )
+
+    # Trigger deploy stage in background
+    orchestrator = IssueResolutionOrchestrator(session)
+    background_tasks.add_task(
+        orchestrator.trigger_deploy_stage,
+        resolution.id
+    )
+
+    return {
+        "message": "Deploy stage triggered successfully",
+        "resolution_id": str(resolution.id),
+        "current_stage": "deploy"
+    }
+
+
+@router.post("/{project_id}/issues/{issue_number}/resolution/create-pr", response_model=CreatePRResponse)
+async def create_pull_request_endpoint(
+    project_id: UUID,
+    issue_number: int,
+    payload: CreatePRRequest,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session)
+):
+    """Create a pull request for the resolved issue."""
+
+    # Load project and ensure ownership
+    stmt = select(Project).where(
+        Project.id == project_id,
+        Project.user_id == current_user.id
+    )
+    result = await session.execute(stmt)
+    project = result.scalar_one_or_none()
+
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+
+    # Load resolution
+    stmt = select(IssueResolution).where(
+        IssueResolution.project_id == project_id,
+        IssueResolution.issue_number == issue_number
+    )
+    result = await session.execute(stmt)
+    resolution = result.scalar_one_or_none()
+
+    if not resolution:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resolution not found")
+
+    # Ensure prerequisites met (deployment + planning approval + implementation complete)
+    if not (
+        resolution.deployment_complete and
+        resolution.planning_approved and
+        resolution.implementation_complete
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Complete deployment, planning approval, and implementation before creating a PR."
+        )
+
+    if not resolution.resolution_branch:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Resolution branch not available for pull request."
+        )
+
+    owner, repo_name = _extract_repo_info(project)
+    base_branch = await _determine_base_branch(project, session, payload.branch)
+    title = payload.title or f"Fix issue #{issue_number}: {resolution.issue_title}"
+    body_lines = [payload.body] if payload.body else []
+    if not body_lines:
+        body_lines = [
+            f"Resolves #{issue_number}",
+            "",
+            "This pull request was generated from the automated issue-resolution workflow.",
+        ]
+    body = "\n".join(filter(None, body_lines))
+
+    github_service = GitHubAPIService(session, current_user.id)
+    try:
+        pr_data = await github_service.create_pull_request(
+            owner=owner,
+            repo=repo_name,
+            title=title,
+            body=body,
+            head=resolution.resolution_branch,
+            base=base_branch,
+        )
+    except httpx.HTTPStatusError as exc:
+        detail = exc.response.text
+        raise HTTPException(status_code=exc.response.status_code, detail=detail)
+
+    resolution.pr_number = pr_data.get("number")
+    resolution.pr_url = pr_data.get("html_url")
+    resolution.pr_state = pr_data.get("state")
+    resolution.pr_created_at = datetime.utcnow()
+    resolution.current_stage = "pr"
+    resolution.resolution_state = "pr_created"
+    session.add(resolution)
+    await session.commit()
+
+    return CreatePRResponse(
+        pr_number=resolution.pr_number,
+        pr_url=resolution.pr_url,
+        message="Pull request created successfully",
+    )
