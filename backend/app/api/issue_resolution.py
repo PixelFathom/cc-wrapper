@@ -595,21 +595,6 @@ async def trigger_issue_resolution_query(
 
 # Four-Stage Workflow Endpoints
 
-class TriggerResolutionRequest(BaseModel):
-    """Request to trigger issue resolution."""
-    issue_number: int
-    issue_title: str
-    issue_body: Optional[str] = None
-    github_url: str
-
-
-class TriggerResolutionResponse(BaseModel):
-    """Response after triggering resolution."""
-    task_id: str
-    resolution_id: str
-    message: str
-
-
 class StageStatusResponse(BaseModel):
     """Current stage status of issue resolution."""
     current_stage: str
@@ -828,94 +813,6 @@ async def solve_issue(
         resolution_id=str(resolution.id),
         project_id=str(project_id),
         message=message
-    )
-
-
-@router.post("/{project_id}/issues/resolve", response_model=TriggerResolutionResponse)
-async def trigger_issue_resolution(
-    project_id: UUID,
-    payload: TriggerResolutionRequest,
-    background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_session)
-):
-    """Trigger the four-stage resolution workflow for a GitHub issue."""
-    # Get project
-    stmt = select(Project).where(
-        Project.id == project_id,
-        Project.user_id == current_user.id
-    )
-    result = await session.execute(stmt)
-    project = result.scalar_one_or_none()
-
-    if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found"
-        )
-
-    # Check for existing resolution
-    stmt = select(IssueResolution).where(
-        IssueResolution.project_id == project_id,
-        IssueResolution.issue_number == payload.issue_number
-    )
-    result = await session.execute(stmt)
-    existing = result.scalar_one_or_none()
-
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Resolution already exists for issue #{payload.issue_number}"
-        )
-
-    # Create task
-    task = Task(
-        name=f"issue-{payload.issue_number}",
-        project_id=project_id,
-        state="pending",
-        initial_description=f"Resolve issue #{payload.issue_number}: {payload.issue_title}",
-        task_type="issue_resolution"
-    )
-    session.add(task)
-    await session.flush()
-
-    # Create resolution (without github_issue_id for now)
-    resolution = IssueResolution(
-        task_id=task.id,
-        project_id=project_id,
-        issue_number=payload.issue_number,
-        issue_title=payload.issue_title,
-        issue_body=payload.issue_body,
-        resolution_state="pending",
-        current_stage="deployment",
-        resolution_branch=f"fix/issue-{payload.issue_number}",
-        started_at=datetime.utcnow(),
-        deployment_started_at=datetime.utcnow()
-    )
-    session.add(resolution)
-    await session.commit()
-    await session.refresh(resolution)
-
-    # Mark deployment as complete immediately for testing
-    # In production, this would be called by the deployment webhook
-    resolution.deployment_complete = True
-    resolution.deployment_completed_at = datetime.utcnow()
-    resolution.current_stage = "planning"
-    resolution.resolution_state = "planning"
-    session.add(resolution)
-    await session.commit()
-
-    # Trigger planning stage in background
-    orchestrator = IssueResolutionOrchestrator(session)
-    background_tasks.add_task(
-        orchestrator.trigger_planning_stage,
-        resolution.id
-    )
-
-    return TriggerResolutionResponse(
-        task_id=str(task.id),
-        resolution_id=str(resolution.id),
-        message="Issue resolution workflow started"
     )
 
 

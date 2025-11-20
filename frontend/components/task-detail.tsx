@@ -2,8 +2,9 @@
 
 import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
-import { 
-  ChatBubbleIcon, FileIcon, RocketIcon, ActivityLogIcon, 
+import { useSearchParams } from 'next/navigation'
+import {
+  ChatBubbleIcon, FileIcon, RocketIcon, ActivityLogIcon,
   UploadIcon, ReloadIcon, LockClosedIcon, ClockIcon,
   CheckCircledIcon, CrossCircledIcon, DotFilledIcon,
   PlayIcon, StopIcon, DownloadIcon, CommitIcon,
@@ -35,8 +36,18 @@ interface TaskDetailProps {
 }
 
 export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
+  const searchParams = useSearchParams()
+  const tabParam = searchParams.get('tab')
+
   // Will be set to 'issue-resolution' for issue tasks after loading
   const [activeTab, setActiveTab] = useState<'deployment' | 'deployment-task' | 'chat' | 'knowledge-base' | 'test-cases' | 'contest-harvesting' | 'issue-resolution' | 'messages'>('deployment')
+
+  // Set tab from URL parameter if provided
+  useEffect(() => {
+    if (tabParam && ['deployment', 'deployment-task', 'chat', 'knowledge-base', 'test-cases', 'contest-harvesting', 'issue-resolution', 'messages'].includes(tabParam)) {
+      setActiveTab(tabParam as any)
+    }
+  }, [tabParam])
   
   // Helper function to format duration
   const formatDuration = (start: Date, end: Date) => {
@@ -172,7 +183,11 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
   }
 
   // For issue resolution tasks, render the dedicated issue resolution UI
-  if (task.task_type === 'issue_resolution') {
+  // UNLESS a specific tab is requested (to allow access to normal task features)
+  const allowedNormalTabs = ['chat', 'deployment-task', 'knowledge-base', 'test-cases', 'deployment', 'contest-harvesting']
+  const requestsNormalTab = tabParam && allowedNormalTabs.includes(tabParam)
+
+  if (task.task_type === 'issue_resolution' && !requestsNormalTab) {
     return (
       <div className="container mx-auto px-4 sm:px-6 py-6 sm:py-8">
         <IssueResolutionView projectId={projectId} taskId={taskId} />
@@ -377,22 +392,22 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
       <div className="bg-card/50 backdrop-blur-sm rounded-lg sm:rounded-xl border border-border/50 p-1 mb-6 sm:mb-8 overflow-x-auto">
         <div className="flex space-x-1 min-w-max">
           {[
-            // Show Issue Resolution tab first for issue tasks
-            ...(task.task_type === 'issue_resolution' ? [
+            // Show Issue Resolution tab first for issue tasks (only if not viewing normal tabs)
+            ...(task.task_type === 'issue_resolution' && !requestsNormalTab ? [
               { id: 'issue-resolution', label: 'Issue Resolution', icon: <FileTextIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
             ] : []),
-            // Show Messages tab for issue resolution tasks
-            ...(task.task_type === 'issue_resolution' ? [
+            // Show Messages tab for issue resolution tasks (only if not viewing normal tabs)
+            ...(task.task_type === 'issue_resolution' && !requestsNormalTab ? [
               { id: 'messages', label: 'Messages', icon: <ChatBubbleIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
             ] : []),
-            // Show deployment tab for non-issue tasks
-            ...(task.task_type !== 'issue_resolution' ? [
+            // Show deployment tab for non-issue tasks OR when explicitly viewing normal tabs
+            ...(task.task_type !== 'issue_resolution' || requestsNormalTab ? [
               { id: 'deployment', label: 'Summary', icon: <ActivityLogIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
             ] : []),
             // Show Deployment Task tab for all tasks
             { id: 'deployment-task', label: 'Deployment Task', icon: <RocketIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
-            // Hide Chat tab for issue resolution tasks - they have integrated chat
-            ...(task.task_type !== 'issue_resolution' ? [
+            // Show Chat tab for non-issue tasks OR when explicitly viewing normal tabs
+            ...(task.task_type !== 'issue_resolution' || requestsNormalTab ? [
               { id: 'chat', label: 'Chat', icon: <ChatBubbleIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
             ] : []),
             { id: 'knowledge-base', label: 'Knowledge Base', icon: <ReaderIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
@@ -583,7 +598,7 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
           </motion.div>
         )}
 
-        {activeTab === 'chat' && task.task_type !== 'issue_resolution' && (
+        {activeTab === 'chat' && (task.task_type !== 'issue_resolution' || requestsNormalTab) && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}

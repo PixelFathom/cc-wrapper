@@ -24,3 +24,4 @@ def downgrade() -> None:
     # Remove deployment_host field from tasks table
     op.drop_column('tasks', 'deployment_host')
 
+

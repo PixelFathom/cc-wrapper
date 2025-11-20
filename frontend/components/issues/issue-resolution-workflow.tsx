@@ -21,7 +21,8 @@ import {
   RefreshCw,
   ChevronRight,
   Info,
-  Calendar
+  Calendar,
+  MessageSquare
 } from "lucide-react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
@@ -38,7 +39,6 @@ import { ImplementationStage } from "./stages/implementation-stage"
 import { TestingStage } from "./stages/testing-stage"
 import { DeployStage } from "./stages/deploy-stage"
 import { PRStage } from "./stages/pr-stage"
-import { IssueResolutionChatProper } from "./issue-resolution-chat-proper"
 import { StageKey } from "./stage-progress-rail"
 import { format } from "date-fns"
 import { toast } from "sonner"
@@ -635,15 +635,47 @@ export function IssueResolutionWorkflow({
                 </div>
               )}
 
-              {/* Chat Interface - Only show in deploy phase when in progress or completed
-                   Uses proper session-based architecture with session listing */}
+              {/* Task UI Links */}
               {activeStage === 'deploy' && (activeStageData?.started_at || activeStageData?.complete) && (
-                <IssueResolutionChatProper
-                  taskId={taskId}
-                  projectId={projectId}
-                  currentStage={activeStage}
-                  initialSessionId={activeStageData?.session_id}
-                />
+                <div className="space-y-4">
+                  {/* Normal Chat Link */}
+                  <Link href={`/p/${projectId}/t/${taskId}?tab=chat`}>
+                    <div className="rounded-2xl border bg-gradient-to-br from-cyan-500/5 to-blue-500/5 p-6 hover:border-cyan-500/30 transition-all cursor-pointer group">
+                      <div className="flex items-start gap-3 mb-4">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-500/10 group-hover:bg-cyan-500/20 transition-colors">
+                          <MessageSquare className="h-5 w-5 text-cyan-500" />
+                        </div>
+                        <div className="flex-1">
+                          <h3 className="font-bold mb-1 group-hover:text-cyan-500 transition-colors">Normal Chat Mode</h3>
+                          <p className="text-xs text-muted-foreground">Standard task chat interface</p>
+                        </div>
+                        <ChevronRight className="h-5 w-5 text-muted-foreground group-hover:text-cyan-500 group-hover:translate-x-1 transition-all" />
+                      </div>
+                      <p className="text-sm text-muted-foreground leading-relaxed">
+                        Open the regular chat interface for this task with full conversational AI support.
+                      </p>
+                    </div>
+                  </Link>
+
+                  {/* Full Task View Link */}
+                  <Link href={`/p/${projectId}/t/${taskId}`}>
+                    <div className="rounded-2xl border bg-gradient-to-br from-primary/5 to-transparent p-6 hover:border-primary/30 transition-all cursor-pointer group">
+                      <div className="flex items-start gap-3 mb-4">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 group-hover:bg-primary/20 transition-colors">
+                          <Rocket className="h-5 w-5 text-primary" />
+                        </div>
+                        <div className="flex-1">
+                          <h3 className="font-bold mb-1 group-hover:text-primary transition-colors">Full Task View</h3>
+                          <p className="text-xs text-muted-foreground">Complete task interface</p>
+                        </div>
+                        <ChevronRight className="h-5 w-5 text-muted-foreground group-hover:text-primary group-hover:translate-x-1 transition-all" />
+                      </div>
+                      <p className="text-sm text-muted-foreground leading-relaxed">
+                        Access all task features: deployment logs, test cases, knowledge base, and more.
+                      </p>
+                    </div>
+                  </Link>
+                </div>
               )}
             </div>
           </div>

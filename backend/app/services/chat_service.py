@@ -253,6 +253,13 @@ class ChatService:
                             f"resolution_id={str(resolution.id)[:8]}... | "
                             f"chat_id={str(chat_id)[:8]}..."
                         )
+                else:
+                    stmt = select(IssueResolution).where(
+                        IssueResolution.implementation_chat_id == chat_id
+                    )
+                    result_resolution = await db.execute(stmt)
+                    resolution = result_resolution.scalar_one_or_none()
+
                     if resolution.implementation_chat_id == chat_id:
                         resolution.implementation_complete = True
                         resolution.implementation_completed_at = datetime.utcnow()

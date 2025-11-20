@@ -11,15 +11,11 @@ import {
   User,
   Copy,
   Check,
-  ChevronDown,
-  Terminal,
-  Clock
+  Terminal
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import api from "@/lib/api"
 import { toast } from "sonner"
@@ -63,25 +59,8 @@ export function IssueResolutionChatProper({
   // Construct cwd (required for backend) - use projectId for issue resolution workspace
   const cwd = `${projectId}/issue-resolution/${currentStage}`
 
-  // Fetch sessions for this task
-  const { data: sessionsData } = useQuery({
-    queryKey: ['issue-resolution-sessions', taskId],
-    queryFn: async () => {
-      // Get task to find sub_project_id
-      const task = await api.getTask(taskId)
-      if (task.sub_projects && task.sub_projects.length > 0) {
-        const subProjectId = task.sub_projects[0].id
-        return api.getSubProjectSessions(subProjectId)
-      }
-      return { sessions: [] }
-    },
-    refetchInterval: 15000,
-  })
-
-  const sessions = sessionsData?.sessions || []
-
   // Fetch messages for current session
-  const { data: sessionMessages } = useQuery({
+  const { data: sessionMessages, isLoading } = useQuery({
     queryKey: ['chats', 'session', sessionId],
     queryFn: () => api.getSessionChats(sessionId!),
     enabled: !!sessionId,
@@ -122,7 +101,6 @@ export function IssueResolutionChatProper({
 
       // Invalidate queries to refresh
       queryClient.invalidateQueries({ queryKey: ['chats', 'session', data.session_id] })
-      queryClient.invalidateQueries({ queryKey: ['issue-resolution-sessions', taskId] })
     },
     onError: (error: any) => {
       toast.error(error?.message || 'Failed to send message')
@@ -160,11 +138,6 @@ export function IssueResolutionChatProper({
     setTimeout(() => setCopiedMessageId(null), 2000)
   }
 
-  const switchSession = (newSessionId: string) => {
-    setSessionId(newSessionId)
-    setMessages([])
-  }
-
   const isWaitingForResponse = messages.some(msg =>
     msg.role === 'assistant' && msg.isProcessing
   ) || sendMutation.isPending
@@ -187,32 +160,14 @@ export function IssueResolutionChatProper({
         )}
       </div>
 
-      {/* Session Tabs */}
-      {sessions.length > 0 && (
-        <div className="border-b bg-muted/30">
-          <ScrollArea className="w-full whitespace-nowrap">
-            <div className="flex gap-2 p-2">
-              {sessions.map((session: any) => (
-                <Button
-                  key={session.session_id}
-                  variant={sessionId === session.session_id ? "default" : "ghost"}
-                  size="sm"
-                  onClick={() => switchSession(session.session_id)}
-                  className="shrink-0"
-                >
-                  <Clock className="h-3 w-3 mr-1" />
-                  {session.first_message_preview?.slice(0, 20)}...
-                </Button>
-              ))}
-            </div>
-          </ScrollArea>
-        </div>
-      )}
-
       {/* Messages Area */}
       <ScrollArea className="flex-1 p-4" ref={scrollRef}>
         <div className="space-y-4">
-          {messages.length === 0 && !isWaitingForResponse ? (
+          {isLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : messages.length === 0 && !isWaitingForResponse ? (
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-primary/10 mb-4">
                 <Terminal className="h-8 w-8 text-primary" />

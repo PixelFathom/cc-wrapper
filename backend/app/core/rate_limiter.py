@@ -6,7 +6,7 @@ from uuid import UUID
 
 import redis.asyncio as redis
 
-DEFAULT_LIMIT = 20
+DEFAULT_LIMIT = 200
 DEFAULT_WINDOW_SECONDS = 24 * 60 * 60  # 24 hours
 
 

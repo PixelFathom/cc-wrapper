@@ -812,7 +812,7 @@ Object.assign(api, {
   }> => {
     const response = await fetch(`${API_BASE_URL}/api/chats/toggle-auto-continuation`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ session_id: sessionId, enabled })
     })
     if (!response.ok) throw new Error('Failed to toggle auto-continuation')
@@ -827,7 +827,7 @@ Object.assign(api, {
   }> => {
     const response = await fetch(`${API_BASE_URL}/api/chats/toggle-bypass-mode`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ session_id: sessionId, enabled })
     })
     if (!response.ok) throw new Error('Failed to toggle bypass mode')
@@ -842,7 +842,7 @@ Object.assign(api, {
   }> => {
     const response = await fetch(`${API_BASE_URL}/api/tasks/${taskId}/contest-harvesting/start`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify(data || {})
     })
     if (!response.ok) throw new Error('Failed to start contest harvesting')
@@ -920,7 +920,7 @@ Object.assign(api, {
   }> => {
     const response = await fetch(`${API_BASE_URL}/api/contest-harvesting/questions/${questionId}/answer`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify(data)
     })
     if (!response.ok) throw new Error('Failed to answer question')
@@ -941,7 +941,7 @@ Object.assign(api, {
   }> => {
     const response = await fetch(`${API_BASE_URL}/api/contest-harvesting/questions/${questionId}/skip`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ reason })
     })
     if (!response.ok) throw new Error('Failed to skip question')
@@ -1030,7 +1030,7 @@ Object.assign(api, {
   }> => {
     const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/issues/${issueNumber}/resolution/retry-stage`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
     })
     if (!response.ok) throw new Error('Failed to retry stage')
     return response.json()
@@ -1098,21 +1098,6 @@ Object.assign(api, {
     return response.json()
   },
 
-  triggerIssueResolution: async (projectId: string, data: {
-    issue_number: number
-    issue_title: string
-    issue_body: string
-    github_url: string
-  }) => {
-    const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/issues/resolve`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    })
-    if (!response.ok) throw new Error('Failed to trigger resolution')
-    return response.json()
-  },
-
   // Test Case Management for Issue Resolution
   getTaskTestCases: async (taskId: string) => {
     const response = await fetch(`${API_BASE_URL}/api/tasks/${taskId}/test-cases`)
@@ -1126,7 +1111,7 @@ Object.assign(api, {
   }) => {
     const response = await fetch(`${API_BASE_URL}/api/tasks/${taskId}/generate-test-cases`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify(options),
     })
     if (!response.ok) throw new Error('Failed to generate test cases')

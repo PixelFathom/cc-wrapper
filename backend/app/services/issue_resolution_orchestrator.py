@@ -14,7 +14,7 @@ from datetime import datetime
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy import String
-from uuid import UUID
+from uuid import UUID, uuid4
 import logging
 import json
 import httpx
@@ -162,10 +162,12 @@ class IssueResolutionOrchestrator:
             self.db.add(sub_project)
             await self.db.flush()
 
+        session_id = str(uuid4())
 
         # Create planning chat session with correct format
         chat = Chat(
             sub_project_id=sub_project.id,
+            session_id=session_id,
             role="user",
             content={
                 "text": planning_prompt,
@@ -202,6 +204,10 @@ class IssueResolutionOrchestrator:
 
         # Update resolution with planning session info
         resolution.planning_session_id = response.get("session_id")
+        chat.session_id = response.get("session_id")
+        self.db.add(chat)
+        await self.db.commit()
+        await self.db.refresh(chat)
         resolution.planning_chat_id = chat.id
         resolution.current_stage = "planning"
         resolution.planning_started_at = datetime.utcnow()

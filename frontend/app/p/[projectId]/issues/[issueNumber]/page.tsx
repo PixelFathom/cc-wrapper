@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { IssueResolutionWorkflow } from "@/components/issues/issue-resolution-workflow"
 import api from "@/lib/api"
+import { solveGitHubIssue } from "@/lib/api/issue-resolution"
 import { toast } from "sonner"
 
 export default function IssueResolutionPage() {
@@ -33,11 +34,9 @@ export default function IssueResolutionPage() {
   // Handle triggering resolution if not started
   const handleStartResolution = async () => {
     try {
-      await api.triggerIssueResolution(projectId, {
-        issue_number: issueNumber,
+      await solveGitHubIssue(projectId, issueNumber, {
         issue_title: issue?.title || `Issue #${issueNumber}`,
-        issue_body: issue?.body || '',
-        github_url: issue?.html_url || `https://github.com/${projectId}/issues/${issueNumber}`
+        issue_body: issue?.body || ''
       })
       toast.success("Issue resolution workflow started!")
       refetchResolution()
