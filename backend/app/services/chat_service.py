@@ -260,7 +260,7 @@ class ChatService:
                     result_resolution = await db.execute(stmt)
                     resolution = result_resolution.scalar_one_or_none()
 
-                    if resolution.implementation_chat_id == chat_id:
+                    if resolution and resolution.implementation_chat_id == chat_id:
                         resolution.implementation_complete = True
                         resolution.implementation_completed_at = datetime.utcnow()
                         # Persist the final implementation session as well when available

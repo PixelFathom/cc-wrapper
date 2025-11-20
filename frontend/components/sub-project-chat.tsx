@@ -1153,6 +1153,13 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
           <div className="mt-2">
             <div className="overflow-x-auto pb-1">
               <div className="flex items-center gap-2 min-w-max pr-4">
+                <button
+                  type="button"
+                  onClick={startNewSession}
+                  className="shrink-0 rounded-md border border-dashed border-border px-3 py-1.5 text-xs font-mono text-muted-foreground hover:text-cyan-400 hover:border-cyan-500/50 transition-colors"
+                >
+                  + New Session
+                </button>
                 {sessionTabs.length === 0 ? (
                   <div className="px-3 py-1.5 text-xs text-muted-foreground border border-dashed border-border rounded-md bg-card/40">
                     No sessions yet
@@ -1187,13 +1194,6 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                     )
                   })
                 )}
-                <button
-                  type="button"
-                  onClick={startNewSession}
-                  className="shrink-0 rounded-md border border-dashed border-border px-3 py-1.5 text-xs font-mono text-muted-foreground hover:text-cyan-400 hover:border-cyan-500/50 transition-colors"
-                >
-                  + New Session
-                </button>
               </div>
             </div>
           </div>
