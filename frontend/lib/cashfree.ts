@@ -48,12 +48,12 @@ export async function initializeCashfree() {
 
 /**
  * Open Cashfree checkout for payment
- * Uses redirect-based flow which works without JavaScript SDK
+ * Uses Cashfree Drop SDK for seamless checkout experience
  *
  * @param sessionId - Payment session ID from backend
  * @param orderId - Order ID from backend
- * @param onSuccess - Callback function on payment success (not used in redirect flow)
- * @param onFailure - Callback function on payment failure (not used in redirect flow)
+ * @param onSuccess - Callback function on payment success
+ * @param onFailure - Callback function on payment failure
  */
 export async function openCashfreeCheckout({
   sessionId,
@@ -67,28 +67,71 @@ export async function openCashfreeCheckout({
   onFailure?: (data: any) => void;
 }) {
   try {
-    // Use Cashfree's redirect-based payment flow
-    // This doesn't require the JavaScript SDK and works reliably across all environments
-    const returnUrl = `${window.location.origin}/payment/success?order_id=${orderId}`;
+    // Try to use SDK if available, otherwise fall back to redirect
+    if (window.Cashfree) {
+      console.log("Using Cashfree SDK for checkout");
 
-    // Construct Cashfree payment URL
-    const paymentUrl = CASHFREE_ENV === "production"
-      ? `https://payments.cashfree.com/order/#/checkout?order_token=${sessionId}`
-      : `https://payments-test.cashfree.com/order/#/checkout?order_token=${sessionId}`;
+      const cashfree = await initializeCashfree();
 
-    // Add return URL as query parameter
-    const fullPaymentUrl = `${paymentUrl}&return_url=${encodeURIComponent(returnUrl)}`;
+      const checkoutOptions = {
+        paymentSessionId: sessionId,
+        returnUrl: `${window.location.origin}/payment/success?order_id=${orderId}`,
+      };
 
-    // Log for debugging
-    console.log("Redirecting to Cashfree payment page:", {
-      orderId,
-      sessionId,
-      environment: CASHFREE_ENV
-    });
+      cashfree.checkout(checkoutOptions).then((result: any) => {
+        if (result.error) {
+          console.error("Cashfree checkout error:", result.error);
+          if (onFailure) {
+            onFailure(result.error);
+          } else {
+            window.location.href = `/payment/failure?order_id=${orderId}&error=${encodeURIComponent(result.error.message || "Payment failed")}`;
+          }
+        }
 
-    // Redirect to Cashfree payment page
-    window.location.href = fullPaymentUrl;
+        if (result.redirect) {
+          console.log("Payment redirect initiated");
+        }
 
+        if (result.paymentDetails) {
+          console.log("Payment completed:", result.paymentDetails);
+          if (onSuccess) {
+            onSuccess(result.paymentDetails);
+          } else {
+            window.location.href = `/payment/success?order_id=${orderId}`;
+          }
+        }
+      });
+    } else {
+      // Fallback: Use Cashfree's hosted checkout page (redirect)
+      console.log("Cashfree SDK not available, using hosted checkout redirect");
+
+      const returnUrl = `${window.location.origin}/payment/success?order_id=${orderId}`;
+
+      // Use Cashfree's hosted checkout page
+      const hostedCheckoutUrl = CASHFREE_ENV === "production"
+        ? `https://payments.cashfree.com/order/pay`
+        : `https://payments-test.cashfree.com/order/pay`;
+
+      // Create a form to POST the session ID to Cashfree
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = hostedCheckoutUrl;
+
+      const sessionInput = document.createElement('input');
+      sessionInput.type = 'hidden';
+      sessionInput.name = 'payment_session_id';
+      sessionInput.value = sessionId;
+      form.appendChild(sessionInput);
+
+      const returnUrlInput = document.createElement('input');
+      returnUrlInput.type = 'hidden';
+      returnUrlInput.name = 'return_url';
+      returnUrlInput.value = returnUrl;
+      form.appendChild(returnUrlInput);
+
+      document.body.appendChild(form);
+      form.submit();
+    }
   } catch (error) {
     console.error("Failed to open Cashfree checkout:", error);
     throw error;
