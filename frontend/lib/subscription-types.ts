@@ -4,9 +4,7 @@
 
 export enum SubscriptionTier {
   FREE = "free",
-  TIER_1 = "tier_1",
-  TIER_2 = "tier_2",
-  TIER_3 = "tier_3",
+  PREMIUM = "premium",
 }
 
 export enum Feature {
@@ -80,51 +78,27 @@ export const TIER_CONFIGS: Record<SubscriptionTier, TierConfig> = {
       { name: "Context Harvesting", included: false },
     ],
   },
-  [SubscriptionTier.TIER_1]: {
-    name: "Starter",
-    price: 19,
-    coins: 5,
-    description: "Perfect for individual developers",
-    features: [
-      { name: "Everything in Free, plus:", included: true },
-      { name: "5 coins per month", included: true },
-      { name: "Deployment Host", included: true },
-      { name: "VS Code Access", included: true },
-      { name: "Email support", included: true },
-      { name: "Test Cases", included: false },
-      { name: "GitHub Issues", included: false },
-      { name: "Context Harvesting", included: false },
-    ],
-  },
-  [SubscriptionTier.TIER_2]: {
-    name: "Professional",
-    price: 99,
-    coins: 20,
-    popular: true,
-    description: "For professional developers and teams",
-    features: [
-      { name: "Everything in Starter, plus:", included: true },
-      { name: "20 coins per month", included: true },
-      { name: "AI-powered Test Cases", included: true },
-      { name: "Context Harvesting", included: true },
-      { name: "Priority support", included: true },
-      { name: "Advanced analytics", included: true },
-      { name: "GitHub Issues", included: false },
-    ],
-  },
-  [SubscriptionTier.TIER_3]: {
-    name: "Enterprise",
+  [SubscriptionTier.PREMIUM]: {
+    name: "Premium",
     price: null,
-    coins: "Unlimited",
-    description: "For large teams with custom needs",
+    coins: "Variable",
+    popular: true,
+    description: "Active when you have credits",
     features: [
-      { name: "Everything in Professional, plus:", included: true },
-      { name: "Unlimited coins", included: true },
-      { name: "GitHub Issues Integration", included: true },
-      { name: "Custom SLA", included: true },
-      { name: "Dedicated account manager", included: true },
-      { name: "SSO & Advanced security", included: true },
-      { name: "Custom integrations", included: true },
+      { name: "All credits from your purchases", included: true },
+      { name: "Chat messages", included: true },
+      { name: "Project management", included: true },
+      { name: "Deployment Host", included: true },
+      { name: "Test Cases", included: true },
+      { name: "VS Code Access", included: true },
+      { name: "Context Harvesting", included: true },
+      { name: "GitHub Issues", included: false },
+    ],
+    benefits: [
+      "All premium features unlocked",
+      "Credits valid for 30 days",
+      "Purchase multiple packages",
+      "Auto-activated with credits",
     ],
   },
 };
@@ -146,7 +120,7 @@ export const FEATURE_CONFIGS: Record<Feature, {
       "Custom domains",
       "SSL certificates",
     ],
-    requiredTier: SubscriptionTier.TIER_1,
+    requiredTier: SubscriptionTier.PREMIUM,
   },
   [Feature.TEST_CASES]: {
     name: "Test Cases",
@@ -158,7 +132,7 @@ export const FEATURE_CONFIGS: Record<Feature, {
       "Track test results over time",
       "AI-powered test suggestions",
     ],
-    requiredTier: SubscriptionTier.TIER_2,
+    requiredTier: SubscriptionTier.PREMIUM,
   },
   [Feature.VSCODE_ACCESS]: {
     name: "VS Code Access",
@@ -170,19 +144,19 @@ export const FEATURE_CONFIGS: Record<Feature, {
       "Collaborative editing",
       "Persistent workspaces",
     ],
-    requiredTier: SubscriptionTier.TIER_1,
+    requiredTier: SubscriptionTier.PREMIUM,
   },
   [Feature.GITHUB_ISSUES]: {
     name: "GitHub Issues",
     icon: "🐛",
-    description: "Seamless GitHub issues integration",
+    description: "Seamless GitHub issues integration (Coming Soon)",
     benefits: [
       "Auto-sync GitHub issues to tasks",
       "Generate tasks from issues",
       "Track issue resolution progress",
       "Automatic PR creation",
     ],
-    requiredTier: SubscriptionTier.TIER_3,
+    requiredTier: SubscriptionTier.PREMIUM, // Not currently available
   },
   [Feature.CONTEXT_HARVESTING]: {
     name: "Context Harvesting",
@@ -194,6 +168,6 @@ export const FEATURE_CONFIGS: Record<Feature, {
       "Question-answer collection",
       "Context-aware AI responses",
     ],
-    requiredTier: SubscriptionTier.TIER_2,
+    requiredTier: SubscriptionTier.PREMIUM,
   },
 };

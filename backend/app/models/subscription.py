@@ -7,9 +7,7 @@ from enum import Enum
 class SubscriptionTier(str, Enum):
     """User subscription tiers with associated pricing and coin allocations."""
     FREE = "free"
-    TIER_1 = "tier_1"
-    TIER_2 = "tier_2"
-    TIER_3 = "tier_3"
+    PREMIUM = "premium"  # Auto-activated when user has credits
 
 
 class Feature(str, Enum):
@@ -21,44 +19,52 @@ class Feature(str, Enum):
     CONTEXT_HARVESTING = "context_harvesting"
 
 
-# Tier configuration: price, coins, and enabled features
+# Credit packages (one-time purchases)
+CREDIT_PACKAGES = {
+    "basic": {
+        "id": "basic",
+        "name": "Basic Package",
+        "price": 19,
+        "credits": 3,
+        "currency": "USD",
+        "validity_days": 30,
+    },
+    "standard": {
+        "id": "standard",
+        "name": "Standard Package",
+        "price": 39,
+        "credits": 10,
+        "currency": "USD",
+        "validity_days": 30,
+    },
+    "pro": {
+        "id": "pro",
+        "name": "Pro Package",
+        "price": 99,
+        "credits": 30,
+        "currency": "USD",
+        "validity_days": 30,
+    },
+}
+
+# Tier configuration: coins and enabled features
 TIER_CONFIG = {
     SubscriptionTier.FREE: {
         "price": 0,
-        "coins": 2,
-        "name": "Free Tier",
+        "coins": 0,  # No coins for free tier
+        "name": "Free",
         "enabled_features": set(),  # All features disabled
     },
-    SubscriptionTier.TIER_1: {
-        "price": 19,
-        "coins": 5,
-        "name": "Starter",
-        "enabled_features": {
-            Feature.DEPLOYMENT_HOST,
-            Feature.VSCODE_ACCESS,
-        },
-    },
-    SubscriptionTier.TIER_2: {
-        "price": 99,
-        "coins": 20,
-        "name": "Professional",
+    SubscriptionTier.PREMIUM: {
+        "price": None,  # No fixed price, buy credits
+        "coins": None,  # Variable based on credit purchase
+        "name": "Premium",
         "enabled_features": {
             Feature.DEPLOYMENT_HOST,
             Feature.TEST_CASES,
             Feature.VSCODE_ACCESS,
             Feature.CONTEXT_HARVESTING,
-        },
-    },
-    SubscriptionTier.TIER_3: {
-        "price": None,  # Custom pricing
-        "coins": None,  # Unlimited or custom
-        "name": "Enterprise",
-        "enabled_features": {
-            Feature.DEPLOYMENT_HOST,
-            Feature.GITHUB_ISSUES,
-            Feature.TEST_CASES,
-            Feature.VSCODE_ACCESS,
-            Feature.CONTEXT_HARVESTING,
+            # Note: GITHUB_ISSUES is not available in any plan
         },
     },
 }
@@ -86,3 +92,19 @@ def get_tier_price(tier: SubscriptionTier) -> int:
     if not config:
         return 0
     return config.get("price", 0)
+
+
+def get_credit_package(package_id: str) -> dict:
+    """Get credit package details by ID."""
+    return CREDIT_PACKAGES.get(package_id, {})
+
+
+def get_all_credit_packages() -> dict:
+    """Get all available credit packages."""
+    return CREDIT_PACKAGES
+
+
+def calculate_credit_expiry_date(purchase_date, validity_days: int = 30):
+    """Calculate when credits will expire."""
+    from datetime import timedelta
+    return purchase_date + timedelta(days=validity_days)

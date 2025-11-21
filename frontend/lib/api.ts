@@ -1243,7 +1243,7 @@ Object.assign(api, {
   },
 
   // Payment Management (Cashfree)
-  createPaymentOrder: async (data: { tier: string; return_url?: string; cancel_url?: string }) => {
+  createPaymentOrder: async (data: { package_id: string; return_url?: string; cancel_url?: string }) => {
     const response = await fetch(`${API_BASE_URL}/api/payments/create-order`, {
       method: 'POST',
       headers: getAuthHeaders(),
@@ -1252,6 +1252,17 @@ Object.assign(api, {
     if (!response.ok) {
       const error = await response.json()
       throw new Error(error.detail || 'Failed to create payment order')
+    }
+    return response.json()
+  },
+
+  getCreditPackages: async () => {
+    const response = await fetch(`${API_BASE_URL}/api/payments/credit-packages`, {
+      method: 'GET',
+      headers: getAuthHeaders(),
+    })
+    if (!response.ok) {
+      throw new Error('Failed to fetch credit packages')
     }
     return response.json()
   },

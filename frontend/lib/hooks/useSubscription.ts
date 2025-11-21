@@ -27,9 +27,10 @@ export function useSubscription() {
         throw err;
       }
     },
-    staleTime: 30000, // 30 seconds
+    staleTime: 5000, // 5 seconds - more aggressive revalidation for payment updates
     retry: 2,
     enabled: typeof window !== 'undefined' && !!localStorage.getItem('github_user'),
+    refetchOnWindowFocus: true, // Refetch when user returns to tab
   });
 
   return {

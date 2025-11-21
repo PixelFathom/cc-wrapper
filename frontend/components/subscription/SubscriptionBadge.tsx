@@ -17,16 +17,12 @@ import { Coins, Crown, ChevronDown, History, CreditCard } from "lucide-react";
 
 const TIER_COLORS = {
   [SubscriptionTier.FREE]: "bg-gray-500",
-  [SubscriptionTier.TIER_1]: "bg-blue-500",
-  [SubscriptionTier.TIER_2]: "bg-purple-500",
-  [SubscriptionTier.TIER_3]: "bg-gradient-to-r from-yellow-500 to-orange-500",
+  [SubscriptionTier.PREMIUM]: "bg-gradient-to-r from-purple-500 to-pink-500",
 };
 
 const TIER_NAMES = {
   [SubscriptionTier.FREE]: "Free",
-  [SubscriptionTier.TIER_1]: "Starter",
-  [SubscriptionTier.TIER_2]: "Professional",
-  [SubscriptionTier.TIER_3]: "Enterprise",
+  [SubscriptionTier.PREMIUM]: "Premium",
 };
 
 export function SubscriptionBadge() {
@@ -51,7 +47,7 @@ export function SubscriptionBadge() {
   const tierKey = tier as SubscriptionTier;
   const tierColor = TIER_COLORS[tierKey] || TIER_COLORS[SubscriptionTier.FREE];
   const tierName = TIER_NAMES[tierKey] || "Free";
-  const isNotEnterprise = tierKey !== SubscriptionTier.TIER_3;
+  const showUpgradeOption = tierKey === SubscriptionTier.FREE; // Show upgrade only for free users
 
   return (
     <div className="flex items-center gap-2">
@@ -99,7 +95,7 @@ export function SubscriptionBadge() {
             </Link>
           </DropdownMenuItem>
 
-          {isNotEnterprise && (
+          {showUpgradeOption && (
             <>
               <DropdownMenuSeparator />
               <DropdownMenuItem asChild>
@@ -109,7 +105,7 @@ export function SubscriptionBadge() {
                   onClick={() => setIsOpen(false)}
                 >
                   <CreditCard className="h-4 w-4 mr-2" />
-                  Upgrade Plan
+                  Buy Credits
                 </Link>
               </DropdownMenuItem>
             </>

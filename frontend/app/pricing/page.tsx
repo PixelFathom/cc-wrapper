@@ -1,43 +1,52 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useSubscription } from "@/lib/hooks/useSubscription";
-import { SubscriptionTier, TIER_CONFIGS } from "@/lib/subscription-types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Check, X, Loader2, Sparkles } from "lucide-react";
+import { Check, Loader2, Clock, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import { openCashfreeCheckout } from "@/lib/cashfree";
 
+interface CreditPackage {
+  id: string;
+  name: string;
+  price: number;
+  credits: number;
+  currency: string;
+  validity_days: number;
+}
+
 export default function PricingPage() {
   const router = useRouter();
   const { tier: currentTier, isLoading: subscriptionLoading } = useSubscription();
-  const [selectedTier, setSelectedTier] = useState<SubscriptionTier | null>(null);
+  const [packages, setPackages] = useState<CreditPackage[]>([]);
+  const [selectedPackage, setSelectedPackage] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isLoadingPackages, setIsLoadingPackages] = useState(true);
 
-  const handleUpgrade = async (tier: SubscriptionTier) => {
-    if (tier === SubscriptionTier.TIER_3) {
-      // For enterprise, redirect to contact sales
-      toast.info("Redirecting to contact sales...");
-      router.push("/contact");
-      return;
-    }
+  // Fetch credit packages on mount
+  useEffect(() => {
+    const fetchPackages = async () => {
+      try {
+        const response = await api.getCreditPackages();
+        setPackages(response.packages || []);
+      } catch (error) {
+        console.error("Failed to fetch credit packages:", error);
+        toast.error("Failed to load credit packages");
+      } finally {
+        setIsLoadingPackages(false);
+      }
+    };
 
-    if (tier === currentTier) {
-      toast.info("You're already on this plan");
-      return;
-    }
+    fetchPackages();
+  }, []);
 
-    if (tier === SubscriptionTier.FREE) {
-      // Downgrade to free - use cancel subscription flow
-      toast.info("To downgrade to free tier, please cancel your subscription from your account settings.");
-      return;
-    }
-
-    setSelectedTier(tier);
+  const handlePurchase = async (packageId: string) => {
+    setSelectedPackage(packageId);
     setIsProcessing(true);
 
     try {
@@ -45,7 +54,7 @@ export default function PricingPage() {
       toast.loading("Initializing payment...");
 
       const orderData = await api.createPaymentOrder({
-        tier: tier,
+        package_id: packageId,
         return_url: `${window.location.origin}/payment/success`,
         cancel_url: `${window.location.origin}/payment/failure`,
       });
@@ -66,7 +75,7 @@ export default function PricingPage() {
           // Payment failed
           toast.error(error.message || "Payment failed. Please try again.");
           setIsProcessing(false);
-          setSelectedTier(null);
+          setSelectedPackage(null);
         },
       });
 
@@ -75,19 +84,19 @@ export default function PricingPage() {
       toast.dismiss();
 
       if (error.message.includes("Email is required")) {
-        toast.error("Please update your email in profile settings before upgrading.");
+        toast.error("Please update your email in profile settings before purchasing.");
       } else if (error.message.includes("Phone number is required")) {
-        toast.error("Please update your phone number in profile settings before upgrading.");
+        toast.error("Please update your phone number in profile settings before purchasing.");
       } else {
         toast.error(error.message || "Failed to initiate payment. Please try again.");
       }
 
       setIsProcessing(false);
-      setSelectedTier(null);
+      setSelectedPackage(null);
     }
   };
 
-  if (subscriptionLoading) {
+  if (subscriptionLoading || isLoadingPackages) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <Loader2 className="h-8 w-8 animate-spin" />
@@ -95,154 +104,144 @@ export default function PricingPage() {
     );
   }
 
+  // Determine which package is recommended
+  const recommendedPackageId = "standard";
+
   return (
     <div className="container mx-auto px-4 py-12">
       <div className="text-center mb-12">
         <h1 className="text-4xl font-bold mb-4">
-          Choose Your Plan
+          Buy Credits
         </h1>
         <p className="text-xl text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
-          Select the perfect plan for your needs. Upgrade or downgrade anytime.
+          Purchase credits to access premium features. Credits are valid for 30 days.
         </p>
+        {currentTier === "premium" && (
+          <Badge className="mt-4 bg-purple-500 text-white">
+            <Sparkles className="h-3 w-3 mr-1 inline" />
+            Premium Active
+          </Badge>
+        )}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 max-w-7xl mx-auto">
-        {Object.entries(TIER_CONFIGS).map(([tierKey, config]) => {
-          const tier = tierKey as SubscriptionTier;
-          const isCurrentPlan = tier === currentTier;
-          const isPopular = config.popular;
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+        {packages.map((pkg) => {
+          const isRecommended = pkg.id === recommendedPackageId;
 
           return (
             <Card
-              key={tier}
+              key={pkg.id}
               className={`relative flex flex-col ${
-                isPopular
+                isRecommended
                   ? "border-2 border-purple-500 shadow-lg scale-105"
                   : "border border-gray-200 dark:border-gray-800"
-              } ${isCurrentPlan ? "bg-green-50 dark:bg-green-950/20" : ""}`}
+              }`}
             >
-              {isPopular && (
+              {isRecommended && (
                 <div className="absolute -top-4 left-1/2 transform -translate-x-1/2">
                   <Badge className="bg-purple-500 text-white px-4 py-1">
                     <Sparkles className="h-3 w-3 mr-1 inline" />
-                    MOST POPULAR
-                  </Badge>
-                </div>
-              )}
-
-              {isCurrentPlan && (
-                <div className="absolute -top-4 right-4">
-                  <Badge className="bg-green-500 text-white">
-                    Current Plan
+                    BEST VALUE
                   </Badge>
                 </div>
               )}
 
               <CardHeader className="pb-4">
-                <CardTitle className="text-2xl">{config.name}</CardTitle>
-                <CardDescription className="text-sm h-10">
-                  {config.description}
+                <CardTitle className="text-2xl">{pkg.name}</CardTitle>
+                <CardDescription className="text-sm">
+                  {pkg.credits} credits for your projects
                 </CardDescription>
               </CardHeader>
 
               <CardContent className="flex-1">
                 <div className="mb-6">
-                  {config.price === null ? (
-                    <div>
-                      <div className="text-3xl font-bold">Custom</div>
-                      <div className="text-sm text-gray-500 dark:text-gray-400">
-                        Contact sales for pricing
-                      </div>
-                    </div>
-                  ) : config.price === 0 ? (
-                    <div>
-                      <div className="text-4xl font-bold">Free</div>
-                      <div className="text-sm text-gray-500 dark:text-gray-400">
-                        Forever
-                      </div>
-                    </div>
-                  ) : (
-                    <div>
-                      <div>
-                        <span className="text-4xl font-bold">${config.price}</span>
-                        <span className="text-gray-500 dark:text-gray-400">/month</span>
-                      </div>
-                      <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                        Billed monthly
-                      </div>
-                    </div>
-                  )}
+                  <div>
+                    <span className="text-4xl font-bold">${pkg.price}</span>
+                  </div>
+                  <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                    One-time purchase
+                  </div>
 
-                  <div className="mt-2 text-sm font-semibold text-amber-600 dark:text-amber-400">
-                    {typeof config.coins === "number"
-                      ? `${config.coins} coins/month`
-                      : config.coins
-                    }
+                  <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-950/20 rounded-lg">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-amber-600 dark:text-amber-400">
+                      <Clock className="h-4 w-4" />
+                      {pkg.credits} credits
+                    </div>
+                    <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                      Valid for {pkg.validity_days} days
+                    </div>
                   </div>
                 </div>
 
                 <ul className="space-y-3">
-                  {config.features.map((feature, idx) => (
-                    <li key={idx} className="flex items-start gap-2 text-sm">
-                      {feature.included ? (
-                        <Check className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                      ) : (
-                        <X className="h-4 w-4 text-gray-300 dark:text-gray-700 mt-0.5 flex-shrink-0" />
-                      )}
-                      <span
-                        className={
-                          !feature.included
-                            ? "text-gray-400 dark:text-gray-600"
-                            : ""
-                        }
-                      >
-                        {feature.name}
-                      </span>
-                    </li>
-                  ))}
+                  <li className="flex items-start gap-2 text-sm">
+                    <Check className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
+                    <span>All premium features</span>
+                  </li>
+                  <li className="flex items-start gap-2 text-sm">
+                    <Check className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
+                    <span>Deployment hosting</span>
+                  </li>
+                  <li className="flex items-start gap-2 text-sm">
+                    <Check className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
+                    <span>Test case generation</span>
+                  </li>
+                  <li className="flex items-start gap-2 text-sm">
+                    <Check className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
+                    <span>VS Code access</span>
+                  </li>
+                  <li className="flex items-start gap-2 text-sm">
+                    <Check className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
+                    <span>Context harvesting</span>
+                  </li>
                 </ul>
               </CardContent>
 
               <CardFooter className="pt-4">
-                {isCurrentPlan ? (
-                  <Button
-                    variant="outline"
-                    className="w-full"
-                    disabled
-                  >
-                    Current Plan
-                  </Button>
-                ) : (
-                  <Button
-                    onClick={() => handleUpgrade(tier)}
-                    disabled={isProcessing && selectedTier === tier}
-                    className={`w-full ${
-                      isPopular
-                        ? "bg-purple-600 hover:bg-purple-700 text-white"
-                        : ""
-                    }`}
-                    variant={isPopular ? "default" : "outline"}
-                  >
-                    {isProcessing && selectedTier === tier ? (
-                      <>
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        Processing...
-                      </>
-                    ) : config.price === null ? (
-                      "Contact Sales"
-                    ) : (
-                      "Select Plan"
-                    )}
-                  </Button>
-                )}
+                <Button
+                  onClick={() => handlePurchase(pkg.id)}
+                  disabled={isProcessing && selectedPackage === pkg.id}
+                  className={`w-full ${
+                    isRecommended
+                      ? "bg-purple-600 hover:bg-purple-700 text-white"
+                      : ""
+                  }`}
+                  variant={isRecommended ? "default" : "outline"}
+                >
+                  {isProcessing && selectedPackage === pkg.id ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Processing...
+                    </>
+                  ) : (
+                    "Buy Now"
+                  )}
+                </Button>
               </CardFooter>
             </Card>
           );
         })}
       </div>
 
-      {/* Payment Integration Notice */}
-      <div className="mt-12 max-w-3xl mx-auto">
+      {/* Important Notice */}
+      <div className="mt-12 max-w-3xl mx-auto space-y-4">
+        <Card className="bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
+          <CardContent className="pt-6">
+            <div className="flex items-start gap-3">
+              <div className="text-2xl">ℹ️</div>
+              <div>
+                <h3 className="font-semibold mb-2">How Credits Work</h3>
+                <ul className="text-sm text-gray-700 dark:text-gray-300 space-y-1">
+                  <li>• Credits are valid for 30 days from purchase</li>
+                  <li>• Premium tier is activated automatically when you have credits</li>
+                  <li>• When credits expire, you'll be downgraded to the free tier</li>
+                  <li>• You can purchase multiple packages - credits stack and each has its own 30-day validity</li>
+                </ul>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
         <Card className="bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800">
           <CardContent className="pt-6">
             <div className="flex items-start gap-3">
@@ -251,8 +250,8 @@ export default function PricingPage() {
                 <h3 className="font-semibold mb-2">Secure Payment Processing</h3>
                 <p className="text-sm text-gray-700 dark:text-gray-300">
                   Payments are processed securely via Cashfree Payment Gateway.
-                  All transactions are encrypted and PCI DSS compliant. Your subscription
-                  will be activated immediately after successful payment. For billing inquiries,
+                  All transactions are encrypted and PCI DSS compliant. Your credits
+                  will be allocated immediately after successful payment. For billing inquiries,
                   please contact support.
                 </p>
               </div>

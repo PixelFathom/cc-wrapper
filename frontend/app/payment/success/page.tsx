@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CheckCircle, Loader2, AlertCircle, ArrowRight } from "lucide-react";
@@ -12,6 +13,7 @@ import { formatCurrency } from "@/lib/cashfree";
 function PaymentSuccessContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const queryClient = useQueryClient();
   const orderId = searchParams.get("order_id");
 
   const [verificationStatus, setVerificationStatus] = useState<"loading" | "success" | "error">("loading");
@@ -38,6 +40,22 @@ function PaymentSuccessContent() {
       if (payment.status === "success") {
         setPaymentDetails(payment);
         setVerificationStatus("success");
+
+        // IMPORTANT: Invalidate subscription and coin balance queries to refetch updated data
+        // Use refetchType: 'all' to force immediate refetch regardless of stale time
+        await queryClient.invalidateQueries({
+          queryKey: ["subscription"],
+          refetchType: 'all'
+        });
+        await queryClient.invalidateQueries({
+          queryKey: ["coin-balance"],
+          refetchType: 'all'
+        });
+
+        // Also manually refetch to ensure data is fresh
+        await queryClient.refetchQueries({
+          queryKey: ["subscription"]
+        });
       } else if (payment.status === "pending" || payment.status === "active") {
         // Payment still processing - retry after a delay
         setTimeout(() => {

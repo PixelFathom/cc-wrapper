@@ -17,7 +17,7 @@ from sqlalchemy import select
 from app.core.settings import get_settings
 from app.models.payment import Payment, PaymentStatus, PaymentProvider
 from app.models.user import User
-from app.models.subscription import SubscriptionTier, TIER_CONFIG
+from app.models.subscription import SubscriptionTier, TIER_CONFIG, CREDIT_PACKAGES, get_credit_package
 
 
 class CashfreeService:
@@ -56,17 +56,17 @@ class CashfreeService:
         self,
         session: AsyncSession,
         user: User,
-        tier: SubscriptionTier,
+        package_id: str,
         return_url: Optional[str] = None,
         cancel_url: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Create a Cashfree payment order for subscription upgrade.
+        Create a Cashfree payment order for credit purchase.
 
         Args:
             session: Database session
             user: User making the payment
-            tier: Target subscription tier
+            package_id: Credit package ID (basic/standard/pro)
             return_url: URL to redirect after payment (optional)
             cancel_url: URL to redirect if payment cancelled (optional)
 
@@ -74,25 +74,26 @@ class CashfreeService:
             Dictionary containing order details including order_id and payment_session_id
 
         Raises:
-            ValueError: If tier is invalid or user details incomplete
+            ValueError: If package_id is invalid or user details incomplete
             Exception: If Cashfree API call fails
         """
-        # Validate tier
-        if tier not in TIER_CONFIG:
-            raise ValueError(f"Invalid subscription tier: {tier}")
+        # Get credit package
+        package = get_credit_package(package_id)
+        if not package:
+            raise ValueError(f"Invalid credit package: {package_id}")
 
-        tier_config = TIER_CONFIG[tier]
-        amount = tier_config["price"]
+        amount = package["price"]
+        credits = package["credits"]
 
         if amount <= 0:
-            raise ValueError("Cannot create order for free tier")
+            raise ValueError("Cannot create order for free package")
 
         # Validate user details
         if not user.email:
             raise ValueError("User email is required for payment")
 
         # Generate unique order ID
-        order_id = f"ORDER_{user.id}_{tier.value}_{int(datetime.utcnow().timestamp())}"
+        order_id = f"ORDER_{user.id}_{package_id}_{int(datetime.utcnow().timestamp())}"
 
         # Calculate order expiry (30 minutes from now)
         order_expiry = datetime.utcnow() + timedelta(minutes=30)
@@ -113,7 +114,7 @@ class CashfreeService:
                 "notify_url": f"{self.settings.webhook_base_url}/api/webhooks/cashfree",
             },
             "order_expiry_time": order_expiry.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "order_note": f"Subscription upgrade to {tier_config['name']}",
+            "order_note": f"Credit purchase: {package['name']} ({credits} credits)",
         }
 
         # Call Cashfree API
@@ -146,13 +147,14 @@ class CashfreeService:
                 amount=float(amount),
                 currency="INR",
                 status=PaymentStatus.PENDING,
-                subscription_tier=tier.value,
+                subscription_tier=package_id,  # Store package_id instead of tier
                 customer_email=user.email,
                 customer_phone=user.phone,
                 payment_initiated_at=datetime.utcnow(),
                 meta_data={
-                    "tier_name": tier_config["name"],
-                    "coins_to_allocate": tier_config["coins"],
+                    "package_id": package_id,
+                    "package_name": package["name"],
+                    "credits": credits,
                     "cashfree_order": order_dict,
                 },
             )
@@ -166,8 +168,9 @@ class CashfreeService:
                 "payment_session_id": order_dict.get("payment_session_id"),
                 "amount": amount,
                 "currency": "INR",
-                "tier": tier.value,
-                "tier_name": tier_config["name"],
+                "package_id": package_id,
+                "package_name": package["name"],
+                "credits": credits,
                 "created_at": payment.created_at.isoformat(),
             }
 
@@ -262,39 +265,38 @@ class CashfreeService:
 
     def verify_webhook_signature(
         self,
-        payload: Dict[str, Any],
+        raw_body: str,
         signature: str,
         timestamp: str,
     ) -> bool:
         """
         Verify Cashfree webhook signature for security.
 
-        According to Cashfree docs:
-        signedPayload = timestamp.payload
-        expectedSignature = Base64(HMAC_SHA256(signedPayload, secretKey))
+        According to Cashfree official documentation:
+        - Use the raw request body (not parsed JSON)
+        - Concatenate: timestamp + rawBody (no separator)
+        - Calculate: Base64(HMAC_SHA256(timestamp + rawBody, secretKey))
+        - Use Cashfree SECRET KEY (not webhook secret)
+
+        Reference:
+        - https://github.com/cashfree/cashfree-pg-webhook
+        - https://www.cashfree.com/docs/api-reference/vrs/webhook-signature-verification
 
         Args:
-            payload: Webhook payload
+            raw_body: Raw request body as string
             signature: Signature from x-webhook-signature header
             timestamp: Timestamp from x-webhook-timestamp header
 
         Returns:
             True if signature is valid, False otherwise
         """
-        if not self.settings.cashfree_webhook_secret:
-            # If no webhook secret configured, skip verification (not recommended for production)
-            return True
-
         try:
-            # Convert payload to JSON string (no spaces, sorted keys for consistency)
-            payload_str = json.dumps(payload, sort_keys=True, separators=(',', ':'))
+            # Create signed payload: timestamp + raw_body (direct concatenation)
+            signed_payload = timestamp + raw_body
 
-            # Create signature base: timestamp.payload (with period separator)
-            signed_payload = f"{timestamp}.{payload_str}"
-
-            # Calculate HMAC SHA256
+            # Calculate HMAC SHA256 using Cashfree SECRET KEY
             hmac_digest = hmac.new(
-                self.settings.cashfree_webhook_secret.encode(),
+                self.settings.cashfree_secret_key.encode(),
                 signed_payload.encode(),
                 hashlib.sha256
             ).digest()
@@ -303,9 +305,18 @@ class CashfreeService:
             calculated_signature = base64.b64encode(hmac_digest).decode()
 
             # Compare signatures securely
-            return hmac.compare_digest(calculated_signature, signature)
+            is_valid = hmac.compare_digest(calculated_signature, signature)
 
-        except Exception:
+            if not is_valid:
+                # Log for debugging (without exposing secrets)
+                print(f"Webhook signature verification failed")
+                print(f"Expected signature: {calculated_signature[:20]}...")
+                print(f"Received signature: {signature[:20]}...")
+
+            return is_valid
+
+        except Exception as e:
+            print(f"Error verifying webhook signature: {str(e)}")
             return False
 
     async def process_webhook(

@@ -3,6 +3,7 @@ Coin service for managing user coin allocations, deductions, and transaction his
 """
 from typing import Optional, List
 from uuid import UUID
+from datetime import datetime, timedelta
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
 import logging
@@ -42,11 +43,22 @@ class CoinService:
         user_id: UUID,
         amount: int,
         description: str,
-        meta_data: Optional[dict] = None
+        meta_data: Optional[dict] = None,
+        expires_at: Optional[datetime] = None,
+        package_id: Optional[str] = None
     ) -> CoinTransaction:
         """
         Allocate coins to a user (add to their balance).
         Creates a transaction record for audit trail.
+
+        Args:
+            session: Database session
+            user_id: User to allocate coins to
+            amount: Number of coins to allocate
+            description: Description of the allocation
+            meta_data: Additional metadata
+            expires_at: When these coins expire (for credit purchases)
+            package_id: Credit package ID (basic/standard/pro)
         """
         if amount <= 0:
             raise ValueError("Amount must be positive")
@@ -70,7 +82,10 @@ class CoinService:
             transaction_type=TransactionType.ALLOCATION,
             description=description,
             balance_after=user.coins_balance,
-            meta_data=meta_data
+            meta_data=meta_data,
+            expires_at=expires_at,
+            package_id=package_id,
+            expired=False
         )
 
         session.add(user)
@@ -84,6 +99,7 @@ class CoinService:
             f"amount={amount} | "
             f"new_balance={user.coins_balance} | "
             f"description={description}"
+            f"{' | expires_at=' + expires_at.isoformat() if expires_at else ''}"
         )
 
         return transaction

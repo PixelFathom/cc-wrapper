@@ -12,7 +12,7 @@ import logging
 from app.deps import get_session, get_current_user
 from app.models.user import User
 from app.models.payment import Payment, PaymentStatus, PaymentProvider
-from app.models.subscription import SubscriptionTier
+from app.models.subscription import SubscriptionTier, get_all_credit_packages
 from app.services.cashfree_service import get_cashfree_service
 from app.services.subscription_service import SubscriptionService
 
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 # Request/Response Models
 class CreateOrderRequest(BaseModel):
     """Request model for creating a payment order."""
-    tier: SubscriptionTier = Field(..., description="Target subscription tier")
+    package_id: str = Field(..., description="Credit package ID (basic/standard/pro)")
     return_url: Optional[str] = Field(None, description="URL to redirect after payment")
     cancel_url: Optional[str] = Field(None, description="URL to redirect if payment cancelled")
 
@@ -34,8 +34,9 @@ class CreateOrderResponse(BaseModel):
     payment_session_id: str
     amount: float
     currency: str
-    tier: str
-    tier_name: str
+    package_id: str
+    package_name: str
+    credits: int
     created_at: str
 
 
@@ -105,7 +106,7 @@ async def create_payment_order(
         order_data = await cashfree_service.create_order(
             session=session,
             user=current_user,
-            tier=request.tier,
+            package_id=request.package_id,
             return_url=request.return_url,
             cancel_url=request.cancel_url,
         )
@@ -156,20 +157,19 @@ async def verify_payment(
                 detail="You don't have access to this payment"
             )
 
-        # If payment is successful, upgrade subscription
+        # If payment is successful, purchase credits
         if payment.status == PaymentStatus.SUCCESS:
             subscription_service = SubscriptionService()
-            tier = SubscriptionTier(payment.subscription_tier)
+            package_id = payment.subscription_tier  # Now stores package_id
 
-            # Upgrade subscription (will allocate coins automatically)
-            await subscription_service.upgrade_subscription(
+            # Purchase credits (will allocate with expiration and upgrade to PREMIUM)
+            await subscription_service.purchase_credits(
                 session=session,
                 user_id=current_user.id,
-                tier=tier,
-                payment_id=payment.order_id,
+                package_id=package_id,
             )
 
-            logger.info(f"Successfully upgraded user {current_user.id} to {tier.value} after payment verification")
+            logger.info(f"Successfully purchased credits for user {current_user.id} with package {package_id} after payment verification")
 
         return PaymentResponse(
             id=str(payment.id),
@@ -383,3 +383,23 @@ async def initiate_refund(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to initiate refund. Please contact support."
         )
+
+
+@router.get("/credit-packages")
+async def get_credit_packages():
+    """
+    Get all available credit packages.
+
+    Returns list of credit packages with their prices and benefits.
+    """
+    packages = get_all_credit_packages()
+
+    return {
+        "packages": [
+            {
+                "id": pkg_id,
+                **pkg_data
+            }
+            for pkg_id, pkg_data in packages.items()
+        ]
+    }

@@ -30,7 +30,10 @@ from .github_repository import GitHubRepository
 from .github_issue import GitHubIssue
 from .issue_resolution import IssueResolution
 from .coin_transaction import CoinTransaction, TransactionType
-from .subscription import SubscriptionTier, Feature, TIER_CONFIG, is_feature_enabled
+from .subscription import (
+    SubscriptionTier, Feature, TIER_CONFIG, is_feature_enabled,
+    CREDIT_PACKAGES, get_credit_package, get_all_credit_packages, calculate_credit_expiry_date
+)
 from .payment import Payment, PaymentStatus, PaymentProvider
 
 __all__ = [
@@ -43,5 +46,6 @@ __all__ = [
     "HarvestingSessionListResponse", "QuestionStatus",
     "User", "UserToken", "AuditLog", "GitHubRepository", "GitHubIssue", "IssueResolution",
     "CoinTransaction", "TransactionType", "SubscriptionTier", "Feature", "TIER_CONFIG",
-    "is_feature_enabled", "Payment", "PaymentStatus", "PaymentProvider"
+    "is_feature_enabled", "CREDIT_PACKAGES", "get_credit_package", "get_all_credit_packages",
+    "calculate_credit_expiry_date", "Payment", "PaymentStatus", "PaymentProvider"
 ]

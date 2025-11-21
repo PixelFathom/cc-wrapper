@@ -17,3 +17,4 @@ httpx==0.26.0
 aiohttp
 openai==1.6.1
 cryptography==42.0.5
+apscheduler==3.10.4

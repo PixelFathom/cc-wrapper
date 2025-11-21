@@ -1,59 +1,58 @@
 /**
- * Cashfree Payment Gateway Integration Utilities
- * Handles Cashfree checkout initialization and payment processing
+ * Cashfree Payment Gateway Integration
+ * Using official @cashfreepayments/cashfree-js package
+ * Documentation: https://github.com/cashfree/cashfree-js
  */
 
-// Get Cashfree environment from env variable
-const CASHFREE_ENV = process.env.NEXT_PUBLIC_CASHFREE_ENV || "sandbox";
+import { load } from '@cashfreepayments/cashfree-js';
 
-// Cashfree SDK type declaration
-declare global {
-  interface Window {
-    Cashfree: any;
-  }
-}
+// Get Cashfree environment from env variable
+const CASHFREE_ENV = (process.env.NEXT_PUBLIC_CASHFREE_ENV || "sandbox") as "sandbox" | "production";
+
+/**
+ * Cashfree instance (cached)
+ */
+let cashfreeInstance: any = null;
 
 /**
  * Initialize Cashfree SDK
- * Must be called before using any Cashfree functions
- * The SDK script is loaded via Next.js Script component in layout.tsx
+ * Loads the Cashfree SDK and returns the instance
  */
 export async function initializeCashfree() {
   try {
-    // Wait for Cashfree to be available (with retry logic)
-    let retries = 0;
-    const maxRetries = 10;
+    console.log(`Initializing Cashfree SDK in ${CASHFREE_ENV} mode...`);
 
-    while (!window.Cashfree && retries < maxRetries) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      retries++;
+    // Return cached instance if available
+    if (cashfreeInstance) {
+      console.log("Using cached Cashfree instance");
+      return cashfreeInstance;
     }
 
-    // Check if Cashfree is available
-    if (!window.Cashfree) {
-      throw new Error("Cashfree SDK not available. Please refresh the page.");
-    }
-
-    // Initialize Cashfree with environment
-    const cashfree = window.Cashfree({
-      mode: CASHFREE_ENV as "sandbox" | "production",
+    // Load Cashfree SDK
+    cashfreeInstance = await load({
+      mode: CASHFREE_ENV
     });
 
-    return cashfree;
+    if (!cashfreeInstance) {
+      throw new Error("Failed to load Cashfree SDK");
+    }
+
+    console.log("Cashfree SDK loaded successfully");
+    return cashfreeInstance;
+
   } catch (error) {
     console.error("Failed to initialize Cashfree SDK:", error);
-    throw new Error("Failed to initialize payment gateway");
+    throw new Error("Failed to initialize payment gateway. Please try again.");
   }
 }
 
 /**
  * Open Cashfree checkout for payment
- * Uses Cashfree Drop SDK for seamless checkout experience
  *
  * @param sessionId - Payment session ID from backend
  * @param orderId - Order ID from backend
- * @param onSuccess - Callback function on payment success
- * @param onFailure - Callback function on payment failure
+ * @param onSuccess - Optional callback for payment success
+ * @param onFailure - Optional callback for payment failure
  */
 export async function openCashfreeCheckout({
   sessionId,
@@ -67,74 +66,75 @@ export async function openCashfreeCheckout({
   onFailure?: (data: any) => void;
 }) {
   try {
-    // Try to use SDK if available, otherwise fall back to redirect
-    if (window.Cashfree) {
-      console.log("Using Cashfree SDK for checkout");
+    console.log("Opening Cashfree checkout...");
+    console.log("Order ID:", orderId);
+    console.log("Session ID:", sessionId.substring(0, 20) + "...");
 
-      const cashfree = await initializeCashfree();
+    // Initialize Cashfree
+    const cashfree = await initializeCashfree();
 
-      const checkoutOptions = {
-        paymentSessionId: sessionId,
-        returnUrl: `${window.location.origin}/payment/success?order_id=${orderId}`,
-      };
-
-      cashfree.checkout(checkoutOptions).then((result: any) => {
-        if (result.error) {
-          console.error("Cashfree checkout error:", result.error);
-          if (onFailure) {
-            onFailure(result.error);
-          } else {
-            window.location.href = `/payment/failure?order_id=${orderId}&error=${encodeURIComponent(result.error.message || "Payment failed")}`;
-          }
-        }
-
-        if (result.redirect) {
-          console.log("Payment redirect initiated");
-        }
-
-        if (result.paymentDetails) {
-          console.log("Payment completed:", result.paymentDetails);
-          if (onSuccess) {
-            onSuccess(result.paymentDetails);
-          } else {
-            window.location.href = `/payment/success?order_id=${orderId}`;
-          }
-        }
-      });
-    } else {
-      // Fallback: Use Cashfree's hosted checkout page (redirect)
-      console.log("Cashfree SDK not available, using hosted checkout redirect");
-
-      const returnUrl = `${window.location.origin}/payment/success?order_id=${orderId}`;
-
-      // Use Cashfree's hosted checkout page
-      const hostedCheckoutUrl = CASHFREE_ENV === "production"
-        ? `https://payments.cashfree.com/order/pay`
-        : `https://payments-test.cashfree.com/order/pay`;
-
-      // Create a form to POST the session ID to Cashfree
-      const form = document.createElement('form');
-      form.method = 'POST';
-      form.action = hostedCheckoutUrl;
-
-      const sessionInput = document.createElement('input');
-      sessionInput.type = 'hidden';
-      sessionInput.name = 'payment_session_id';
-      sessionInput.value = sessionId;
-      form.appendChild(sessionInput);
-
-      const returnUrlInput = document.createElement('input');
-      returnUrlInput.type = 'hidden';
-      returnUrlInput.name = 'return_url';
-      returnUrlInput.value = returnUrl;
-      form.appendChild(returnUrlInput);
-
-      document.body.appendChild(form);
-      form.submit();
+    if (!cashfree) {
+      throw new Error("Cashfree SDK not initialized");
     }
-  } catch (error) {
+
+    // Configure checkout options
+    const checkoutOptions = {
+      paymentSessionId: sessionId,
+      returnUrl: `${window.location.origin}/payment/success?order_id=${orderId}`,
+      redirectTarget: "_self" as const, // Open in same tab
+    };
+
+    console.log("Checkout options:", {
+      ...checkoutOptions,
+      paymentSessionId: sessionId.substring(0, 20) + "..."
+    });
+
+    // Call checkout - this will redirect to Cashfree portal
+    const result = await cashfree.checkout(checkoutOptions);
+
+    console.log("Checkout result:", result);
+
+    // Handle result
+    if (result?.error) {
+      console.error("Cashfree checkout error:", result.error);
+
+      if (onFailure) {
+        onFailure(result.error);
+      } else {
+        // Default error handling - redirect to failure page
+        window.location.href = `/payment/failure?order_id=${orderId}&error=${encodeURIComponent(result.error.message || "Payment failed")}`;
+      }
+      return;
+    }
+
+    // If we have payment details, payment was completed
+    if (result?.paymentDetails) {
+      console.log("Payment completed:", result.paymentDetails);
+
+      if (onSuccess) {
+        onSuccess(result.paymentDetails);
+      } else {
+        // Default success handling - redirect to success page
+        window.location.href = `/payment/success?order_id=${orderId}`;
+      }
+      return;
+    }
+
+    // If redirect is indicated, the SDK will handle it automatically
+    if (result?.redirect) {
+      console.log("Redirecting to Cashfree payment portal...");
+      // No action needed - SDK handles the redirect
+    }
+
+  } catch (error: any) {
     console.error("Failed to open Cashfree checkout:", error);
-    throw error;
+
+    if (onFailure) {
+      onFailure({ message: error.message || "Failed to open checkout" });
+    } else {
+      // Rethrow to be caught by the calling code
+      throw error;
+    }
   }
 }
 
@@ -162,8 +162,8 @@ export function isValidOrderId(orderId: string): boolean {
 /**
  * Format currency amount for display
  */
-export function formatCurrency(amount: number, currency: string = "USD"): string {
-  return new Intl.NumberFormat("en-US", {
+export function formatCurrency(amount: number, currency: string = "INR"): string {
+  return new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: currency,
   }).format(amount);

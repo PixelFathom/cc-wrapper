@@ -8,7 +8,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
 import logging
 
-from app.models import User, SubscriptionTier, Feature, is_feature_enabled, TIER_CONFIG
+from app.models import User, SubscriptionTier, Feature, is_feature_enabled, TIER_CONFIG, get_credit_package, calculate_credit_expiry_date
 from app.services.coin_service import CoinService
 
 logger = logging.getLogger(__name__)
@@ -219,6 +219,98 @@ class SubscriptionService:
         )
 
         return await SubscriptionService.get_user_subscription(session, user_id)
+
+    @staticmethod
+    async def purchase_credits(
+        session: AsyncSession,
+        user_id: UUID,
+        package_id: str
+    ) -> dict:
+        """
+        Purchase a credit package for a user.
+        Allocates credits with 30-day expiration and upgrades to PREMIUM tier.
+
+        Args:
+            session: Database session
+            user_id: User purchasing credits
+            package_id: Credit package ID (basic/standard/pro)
+
+        Returns:
+            Dict with purchase details and new subscription status
+        """
+        # Get package details
+        package = get_credit_package(package_id)
+        if not package:
+            raise ValueError(f"Invalid package ID: {package_id}")
+
+        # Get user
+        result = await session.execute(
+            select(User).where(User.id == user_id)
+        )
+        user = result.scalar_one_or_none()
+
+        if not user:
+            raise ValueError("User not found")
+
+        # Calculate expiration date (30 days from now)
+        purchase_date = datetime.utcnow()
+        expires_at = calculate_credit_expiry_date(
+            purchase_date,
+            package.get("validity_days", 30)
+        )
+
+        # Allocate credits with expiration
+        credits = package.get("credits", 0)
+        await CoinService.allocate_coins(
+            session=session,
+            user_id=user_id,
+            amount=credits,
+            description=f"Purchased {package['name']} ({credits} credits)",
+            meta_data={
+                "package_id": package_id,
+                "package_name": package["name"],
+                "price": package["price"],
+                "currency": package["currency"]
+            },
+            expires_at=expires_at,
+            package_id=package_id
+        )
+
+        # Upgrade to PREMIUM tier if not already
+        old_tier = user.subscription_tier
+        if user.subscription_tier != SubscriptionTier.PREMIUM:
+            user.subscription_tier = SubscriptionTier.PREMIUM
+            user.subscription_start_date = datetime.utcnow()
+            session.add(user)
+            await session.commit()
+            await session.refresh(user)
+
+            logger.info(
+                f"⬆️ User upgraded to PREMIUM | "
+                f"user_id={str(user_id)[:8]}... | "
+                f"old_tier={old_tier.value} | "
+                f"reason=credit_purchase"
+            )
+
+        logger.info(
+            f"💳 Credits purchased | "
+            f"user_id={str(user_id)[:8]}... | "
+            f"package={package_id} | "
+            f"credits={credits} | "
+            f"expires_at={expires_at.isoformat()}"
+        )
+
+        return {
+            "user_id": str(user_id),
+            "package_id": package_id,
+            "package_name": package["name"],
+            "credits_purchased": credits,
+            "price": package["price"],
+            "currency": package["currency"],
+            "expires_at": expires_at.isoformat(),
+            "subscription_tier": user.subscription_tier.value,
+            "new_balance": user.coins_balance
+        }
 
 
 subscription_service = SubscriptionService()

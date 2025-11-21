@@ -6,6 +6,7 @@ from fastapi import APIRouter, Request, HTTPException, Depends, Header, status
 from sqlmodel.ext.asyncio.session import AsyncSession
 from typing import Optional
 import logging
+import json
 
 from app.deps import get_session
 from app.models.payment import PaymentStatus
@@ -28,27 +29,34 @@ async def handle_cashfree_webhook(
     Handle Cashfree payment webhook notifications.
 
     This endpoint is called by Cashfree when:
-    - Payment is completed successfully
-    - Payment fails
-    - Payment is cancelled by user
-    - Refund is processed
+    - PAYMENT_SUCCESS_WEBHOOK: Payment is completed successfully
+    - PAYMENT_FAILED_WEBHOOK: Payment fails
+    - PAYMENT_USER_DROPPED_WEBHOOK: User abandons payment checkout
 
     Security:
-    - Verifies webhook signature using Cashfree webhook secret
-    - Only processes webhooks with valid signatures
+    - Verifies webhook signature using Cashfree secret key (NOT webhook secret)
+    - Uses raw request body for signature verification as per Cashfree docs
+    - Formula: Base64(HMAC_SHA256(timestamp + rawBody, secretKey))
+
+    Reference: https://github.com/cashfree/cashfree-pg-webhook
     """
     try:
-        # Parse webhook payload
-        payload = await request.json()
+        # Get raw request body for signature verification
+        # IMPORTANT: Must get raw body BEFORE parsing JSON
+        raw_body = await request.body()
+        raw_body_str = raw_body.decode('utf-8')
+
+        # Parse webhook payload from raw body
+        payload = json.loads(raw_body_str)
 
         logger.info(f"Received Cashfree webhook: {payload.get('type', 'unknown')}")
 
-        # Verify webhook signature
+        # Verify webhook signature using Cashfree's recommended method
         cashfree_service = get_cashfree_service()
 
         if x_webhook_signature and x_webhook_timestamp:
             is_valid = cashfree_service.verify_webhook_signature(
-                payload=payload,
+                raw_body=raw_body_str,
                 signature=x_webhook_signature,
                 timestamp=x_webhook_timestamp,
             )
@@ -73,21 +81,20 @@ async def handle_cashfree_webhook(
             f"Status: {payment.status.value}"
         )
 
-        # If payment is successful, upgrade subscription
+        # If payment is successful, purchase credits
         if payment.status == PaymentStatus.SUCCESS:
             subscription_service = SubscriptionService()
-            tier = SubscriptionTier(payment.subscription_tier)
+            package_id = payment.subscription_tier  # Now stores package_id
 
-            # Upgrade subscription (will allocate coins automatically)
-            await subscription_service.upgrade_subscription(
+            # Purchase credits (will allocate with expiration and upgrade to PREMIUM)
+            await subscription_service.purchase_credits(
                 session=session,
                 user_id=payment.user_id,
-                tier=tier,
-                payment_id=payment.order_id,
+                package_id=package_id,
             )
 
             logger.info(
-                f"Successfully upgraded user {payment.user_id} to {tier.value} "
+                f"Successfully purchased credits for user {payment.user_id} with package {package_id} "
                 f"via webhook for order {payment.order_id}"
             )
 

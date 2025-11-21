@@ -6,6 +6,7 @@ import logging
 
 from app.core.settings import get_settings
 from app.core.redis import close_redis
+from app.core.scheduler import start_scheduler, shutdown_scheduler
 from app.deps import engine
 from app.api import projects, tasks, chat, files, approvals, auto_continuation, test_cases, contest_harvesting, github_auth, github_repositories, github_issues, issue_resolution, subscriptions, payments, webhooks_cashfree
 from app.api.v1 import webhooks, mcp_approvals
@@ -31,9 +32,17 @@ sys.stderr = sys.__stderr__
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Startup
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
+
+    # Start the scheduler for background jobs (credit expiration)
+    start_scheduler()
+
     yield
+
+    # Shutdown
+    shutdown_scheduler()
     await close_redis()
 
 
