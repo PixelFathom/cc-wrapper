@@ -62,6 +62,7 @@ app.add_middleware(
         "https://api-code.thegetshitdone.ai",
         "https://code.tanmaydeepsharma.com",
         "https://code-api.tanmaydeepsharma.com",
+        "https://tediux.com",
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
