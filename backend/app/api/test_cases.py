@@ -7,7 +7,8 @@ from datetime import datetime
 import httpx
 import redis.asyncio as redis
 
-from ..deps import get_session, get_redis_client, get_current_user
+from ..deps import get_session, get_redis_client, get_current_user, require_feature
+from ..models.subscription import Feature
 from ..models.test_case import (
     TestCase, TestCaseStatus, TestCaseCreate, TestCaseUpdate, TestCaseRead,
     TestCaseExecutionRequest, TestCaseGenerationRequest, TestCaseGenerationResponse
@@ -40,10 +41,10 @@ async def verify_task_ownership(task_id: UUID, current_user: User, session: Asyn
 @router.get("/tasks/{task_id}/test-cases", response_model=List[TestCaseRead])
 async def get_test_cases(
     task_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_feature(Feature.TEST_CASES)),
     session: AsyncSession = Depends(get_session)
 ):
-    """Get all test cases for a task"""
+    """Get all test cases for a task (requires TEST_CASES feature)"""
     await verify_task_ownership(task_id, current_user, session)
     statement = select(TestCase).where(TestCase.task_id == task_id)
     result = await session.exec(statement)
@@ -54,10 +55,10 @@ async def get_test_cases(
 @router.get("/tasks/{task_id}/test-cases/grouped")
 async def get_test_cases_grouped_by_session(
     task_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_feature(Feature.TEST_CASES)),
     session: AsyncSession = Depends(get_session)
 ):
-    """Get all test cases for a task grouped by session_id"""
+    """Get all test cases for a task grouped by session_id (requires TEST_CASES feature)"""
     await verify_task_ownership(task_id, current_user, session)
     statement = select(TestCase).where(TestCase.task_id == task_id)
     result = await session.exec(statement)
@@ -131,11 +132,12 @@ async def get_test_cases_grouped_by_session(
 
 @router.post("/tasks/{task_id}/test-cases", response_model=TestCaseRead)
 async def create_test_case(
-    task_id: UUID, 
-    test_case_data: TestCaseCreate, 
+    task_id: UUID,
+    test_case_data: TestCaseCreate,
+    current_user: User = Depends(require_feature(Feature.TEST_CASES)),
     session: AsyncSession = Depends(get_session)
 ):
-    """Create a new test case"""
+    """Create a new test case (requires TEST_CASES feature)"""
     # Set task_id from URL parameter
     create_data = test_case_data.model_dump()
     create_data['task_id'] = task_id

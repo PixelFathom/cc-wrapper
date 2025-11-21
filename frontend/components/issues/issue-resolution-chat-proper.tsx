@@ -103,7 +103,19 @@ export function IssueResolutionChatProper({
       queryClient.invalidateQueries({ queryKey: ['chats', 'session', data.session_id] })
     },
     onError: (error: any) => {
-      toast.error(error?.message || 'Failed to send message')
+      // Extract detailed error information
+      const errorMessage = error?.message || 'Failed to send message'
+      const errorData = error?.responseData?.detail
+
+      // Check if it's a subscription/credits error
+      if (errorData && typeof errorData === 'object' && errorData.error === 'insufficient_coins') {
+        toast.error('Insufficient Credits', {
+          description: `${errorMessage}. You need ${errorData.required} credit(s) but only have ${errorData.available}. Please upgrade your subscription.`,
+          duration: 7000,
+        })
+      } else {
+        toast.error(errorMessage)
+      }
     }
   })
 

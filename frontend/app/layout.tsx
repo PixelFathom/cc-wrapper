@@ -3,6 +3,7 @@ import { Inter } from 'next/font/google'
 import './globals.css'
 import { Providers } from '@/components/providers'
 import { Navigation } from '@/components/navigation'
+import { Footer } from '@/components/footer'
 import { ApprovalCenter } from '@/components/approval-center'
 import { Toaster } from 'sonner'
 
@@ -20,12 +21,13 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark scroll-smooth">
-      <body className={`${inter.className} min-h-screen`}>
+      <body className={`${inter.className} min-h-screen flex flex-col`}>
         <Providers>
           <Navigation />
-          <main className="pt-20 pb-10">
+          <main className="pt-20 pb-10 flex-1">
             {children}
           </main>
+          <Footer />
           <ApprovalCenter />
           <Toaster position="top-right" richColors />
         </Providers>

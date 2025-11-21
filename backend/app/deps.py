@@ -1,4 +1,4 @@
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, Optional, Callable
 from sqlmodel import SQLModel, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncEngine
@@ -7,6 +7,7 @@ from fastapi import Header, HTTPException, status, Depends
 from app.core.settings import get_settings
 from app.core.redis import get_redis
 from app.models.user import User
+from app.models.subscription import Feature
 import redis.asyncio as redis
 from uuid import UUID
 
@@ -74,3 +75,50 @@ async def get_current_user(
         )
 
     return user
+
+
+async def get_admin_user(
+    current_user: User = Depends(get_current_user)
+) -> User:
+    """
+    Verify that the current user is an admin.
+    """
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required"
+        )
+    return current_user
+
+
+def require_feature(feature: Feature) -> Callable:
+    """
+    Dependency factory to check if user has access to a specific feature.
+
+    Usage:
+        @router.get("/some-endpoint")
+        async def some_endpoint(
+            user: User = Depends(require_feature(Feature.DEPLOYMENT_HOST))
+        ):
+            ...
+    """
+    async def feature_checker(
+        current_user: User = Depends(get_current_user)
+    ) -> User:
+        # Import here to avoid circular dependency
+        from app.models.subscription import is_feature_enabled
+
+        # Admins have access to all features
+        if current_user.is_admin:
+            return current_user
+
+        # Check if feature is enabled for user's tier
+        if not is_feature_enabled(current_user.subscription_tier, feature):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"This feature requires a higher subscription tier. Feature: {feature.value}"
+            )
+
+        return current_user
+
+    return feature_checker

@@ -29,6 +29,7 @@ import { IssueResolutionView } from './issue-resolution-view'
 import { MessagesTab } from './messages-tab'
 import { VSCodeLinkModal } from './vscode-link-modal'
 import { DeploymentTaskTab } from './deployment-task-tab'
+import { CommitAndPushModal } from './commit-and-push-modal'
 
 interface TaskDetailProps {
   projectId: string
@@ -124,6 +125,9 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
 
   // State for expanded sessions (expand first session by default)
   const [expandedSessions, setExpandedSessions] = useState<Set<string>>(new Set())
+
+  // State for commit and push modal
+  const [commitAndPushModalOpen, setCommitAndPushModalOpen] = useState(false)
 
   // Initialize expanded sessions with the first session when test cases are loaded
   useEffect(() => {
@@ -591,9 +595,27 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
                         </button>
                       }
                     />
+                    <button
+                      onClick={() => setCommitAndPushModalOpen(true)}
+                      className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-gradient-to-r from-green-500/20 to-emerald-500/20 hover:from-green-500/30 hover:to-emerald-500/30 transition-all border border-green-500/30 text-sm text-green-400 hover:text-green-300 group w-full shadow-[0_0_15px_rgba(34,197,94,0.1)] hover:shadow-[0_0_20px_rgba(34,197,94,0.2)]"
+                      disabled={!task.deployment_completed}
+                      title={!task.deployment_completed ? "Complete deployment first" : "Commit and push changes (Premium)"}
+                    >
+                      <CommitIcon className="h-4 w-4 group-hover:scale-110 transition-transform" />
+                      <span>Commit & Push</span>
+                      <span className="ml-auto text-xs bg-green-500/20 px-1.5 py-0.5 rounded">Premium</span>
+                    </button>
                   </div>
                 </motion.div>
               )}
+
+              {/* Commit and Push Modal */}
+              <CommitAndPushModal
+                taskId={taskId}
+                taskName={task.name}
+                open={commitAndPushModalOpen}
+                onOpenChange={setCommitAndPushModalOpen}
+              />
             </div>
           </motion.div>
         )}

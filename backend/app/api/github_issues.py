@@ -9,7 +9,9 @@ from typing import List, Optional
 from uuid import UUID
 from datetime import datetime
 
-from app.deps import get_session
+from app.deps import get_session, get_current_user, require_feature
+from app.models.user import User
+from app.models.subscription import Feature
 from app.models.github_issue import GitHubIssue
 from app.models.github_repository import GitHubRepository
 from app.models.task import Task
@@ -72,10 +74,11 @@ async def list_issues(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=100),
     sync: bool = Query(False, description="Sync from GitHub before returning"),
+    current_user: User = Depends(require_feature(Feature.GITHUB_ISSUES)),
     session: AsyncSession = Depends(get_session)
 ):
     """
-    List GitHub issues for user's repositories.
+    List GitHub issues for user's repositories (requires GITHUB_ISSUES feature).
 
     Args:
         user_id: User UUID

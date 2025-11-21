@@ -7,13 +7,14 @@ import logging
 from app.core.settings import get_settings
 from app.core.redis import close_redis
 from app.deps import engine
-from app.api import projects, tasks, chat, files, approvals, auto_continuation, test_cases, contest_harvesting, github_auth, github_repositories, github_issues, issue_resolution
+from app.api import projects, tasks, chat, files, approvals, auto_continuation, test_cases, contest_harvesting, github_auth, github_repositories, github_issues, issue_resolution, subscriptions
 from app.api.v1 import webhooks, mcp_approvals
 
 # Import models to ensure they are registered with SQLAlchemy
 from app.models import (
     TestCaseHook, ContestHarvestingSession, HarvestingQuestion,
-    User, UserToken, AuditLog, GitHubRepository, GitHubIssue, IssueResolution
+    User, UserToken, AuditLog, GitHubRepository, GitHubIssue, IssueResolution,
+    CoinTransaction
 )  # Ensure tables are created
 
 settings = get_settings()
@@ -72,6 +73,7 @@ app.include_router(github_auth.router, prefix="/api", tags=["github-auth"])
 app.include_router(github_repositories.router, prefix="/api", tags=["github-repositories"])
 app.include_router(github_issues.router, prefix="/api", tags=["github-issues"])
 app.include_router(issue_resolution.router, prefix="/api", tags=["issue-resolution"])
+app.include_router(subscriptions.router, prefix="/api", tags=["subscriptions"])
 
 
 @app.get("/")

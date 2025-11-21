@@ -16,8 +16,10 @@ from app.models import Task, Project, DeploymentHook, SubProject, KnowledgeBaseF
 from app.schemas import TaskCreate, TaskRead, TaskUpdate, VSCodeLinkResponse
 from app.services.deployment_service import deployment_service
 from app.services.knowledge_base_service import upload_to_knowledge_base
+from app.services.coin_service import coin_service, InsufficientCoinsError
 from app.core.rate_limiter import RateLimitExceeded
 from app.core.settings import get_settings
+from pydantic import BaseModel, Field
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -1012,19 +1014,51 @@ async def deploy_task(
 ):
     """Deploy a task with docker setup and testing"""
     task = await verify_task_ownership(task_id, current_user, session)
-    
+
     # Verify task has port number
     if not task.deployment_port:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Task does not have a port number assigned. Please initialize the task first."
         )
-    
+
     project = await session.get(Project, task.project_id)
     if not project:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Project not found"
+        )
+
+    # Deduct coins for deployment (1 coin)
+    DEPLOYMENT_COST = 1
+    try:
+        transaction = await coin_service.deduct_coins(
+            session,
+            current_user.id,
+            DEPLOYMENT_COST,
+            f"Deployment for task: {task.name}",
+            reference_id=str(task_id),
+            reference_type="deployment",
+            meta_data={
+                "task_id": str(task_id),
+                "project_id": str(project.id),
+            }
+        )
+    except InsufficientCoinsError as e:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "error": "insufficient_coins",
+                "message": str(e).replace("coins", "credits").replace("Coins", "Credits"),
+                "required": DEPLOYMENT_COST,
+                "available": current_user.coins_balance,
+                "subscription_tier": current_user.subscription_tier
+            }
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
         )
     
     # Construct deployment instruction
@@ -1104,11 +1138,195 @@ async def deploy_task(
                     }
                 else:
                     error_detail = await response.text()
+                    logger.error(f"Failed to start deployment: {error_detail}")
+
+                    # Refund coins on failure
+                    await coin_service.refund_coins(
+                        session,
+                        current_user.id,
+                        DEPLOYMENT_COST,
+                        f"Refund for failed deployment: {task.name}",
+                        reference_id=str(transaction.id),
+                        meta_data={"original_transaction_id": str(transaction.id)}
+                    )
+
                     raise HTTPException(
                         status_code=response.status,
                         detail=f"Failed to start deployment: {error_detail}"
                     )
     except aiohttp.ClientError as e:
+        logger.error(f"Failed to connect to deployment service: {str(e)}")
+
+        # Refund coins on connection failure
+        await coin_service.refund_coins(
+            session,
+            current_user.id,
+            DEPLOYMENT_COST,
+            f"Refund for failed deployment (connection error): {task.name}",
+            reference_id=str(transaction.id),
+            meta_data={"original_transaction_id": str(transaction.id)}
+        )
+
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Failed to connect to deployment service: {str(e)}"
+        )
+
+
+class CommitAndPushRequest(BaseModel):
+    """Request model for commit and push operation."""
+    branch_name: str = Field(..., description="Branch name to commit and push to")
+    commit_message: str = Field(..., description="Commit message")
+    create_new_branch: bool = Field(default=True, description="Whether to create a new branch")
+
+
+class CommitAndPushResponse(BaseModel):
+    """Response model for commit and push operation."""
+    task_id: str
+    session_id: str
+    message: str
+    coin_transaction_id: str
+    coins_remaining: int
+
+
+@router.post("/tasks/{task_id}/commit-and-push", response_model=CommitAndPushResponse)
+async def commit_and_push_task_changes(
+    task_id: UUID,
+    request: CommitAndPushRequest,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session)
+):
+    """
+    Premium feature: Commit and push changes for a task.
+    Costs 1 coin per operation.
+    """
+    # Verify task ownership
+    task = await verify_task_ownership(task_id, current_user, session)
+
+    # Get the project
+    project = await session.get(Project, task.project_id)
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found"
+        )
+
+    # Check if task deployment is completed (initialization required)
+    if not task.deployment_completed and task.deployment_status != "completed":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Task deployment must be initialized and completed before committing changes"
+        )
+
+    # Deduct coins for this premium feature (1 coin)
+    COMMIT_PUSH_COST = 1
+    try:
+        transaction = await coin_service.deduct_coins(
+            session,
+            current_user.id,
+            COMMIT_PUSH_COST,
+            f"Commit and push changes for task: {task.name}",
+            reference_id=str(task_id),
+            reference_type="commit_and_push",
+            meta_data={
+                "task_id": str(task_id),
+                "project_id": str(project.id),
+                "branch_name": request.branch_name,
+                "commit_message": request.commit_message,
+            }
+        )
+    except InsufficientCoinsError as e:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "error": "insufficient_coins",
+                "message": str(e).replace("coins", "credits").replace("Coins", "Credits"),
+                "required": COMMIT_PUSH_COST,
+                "available": current_user.coins_balance,
+                "subscription_tier": current_user.subscription_tier
+            }
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+    # Build CWD path (organization_name/project_path)
+    cwd = f"{project.name}/{task.id}"
+
+    # Webhook URL for commit and push status updates
+    webhook_url = f"{settings.webhook_base_url}/api/webhooks/deployment/{task.id}/deployment"
+
+    try:
+        # Call external service to commit and push changes
+        async with aiohttp.ClientSession() as client:
+            payload = {
+                "organization_name": settings.org_name,
+                "project_path": cwd,
+                "branch_name": request.branch_name,
+                "commit_message": request.commit_message,
+                "webhook_url": webhook_url,
+                "create_new_branch": request.create_new_branch
+            }
+
+            push_url = f"{settings.external_api_url}/task/push-changes"
+            logger.info(f"Calling push-changes API: {push_url}")
+            logger.info(f"Payload: {payload}")
+
+            async with client.post(
+                push_url,
+                json=payload,
+                headers={"Content-Type": "application/json"},
+                timeout=aiohttp.ClientTimeout(total=60)
+            ) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    session_id = result.get("session_id", str(task_id))
+
+                    logger.info(f"Commit and push initiated successfully: {result}")
+
+                    # Refresh current_user to get updated balance
+                    await session.refresh(current_user)
+
+                    return CommitAndPushResponse(
+                        task_id=str(task_id),
+                        session_id=session_id,
+                        message="Commit and push initiated successfully",
+                        coin_transaction_id=str(transaction.id),
+                        coins_remaining=current_user.coins_balance
+                    )
+                else:
+                    error_detail = await response.text()
+                    logger.error(f"Failed to commit and push: {error_detail}")
+
+                    # Refund coins on failure
+                    await coin_service.refund_coins(
+                        session,
+                        current_user.id,
+                        COMMIT_PUSH_COST,
+                        f"Refund for failed commit and push: {task.name}",
+                        reference_id=str(transaction.id),
+                        meta_data={"original_transaction_id": str(transaction.id)}
+                    )
+
+                    raise HTTPException(
+                        status_code=response.status,
+                        detail=f"Failed to commit and push changes: {error_detail}"
+                    )
+    except aiohttp.ClientError as e:
+        logger.error(f"Failed to connect to deployment service: {str(e)}")
+
+        # Refund coins on connection failure
+        await coin_service.refund_coins(
+            session,
+            current_user.id,
+            COMMIT_PUSH_COST,
+            f"Refund for failed commit and push (connection error): {task.name}",
+            reference_id=str(transaction.id),
+            meta_data={"original_transaction_id": str(transaction.id)}
+        )
+
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Failed to connect to deployment service: {str(e)}"

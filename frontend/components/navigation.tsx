@@ -8,6 +8,7 @@ import { Button } from './ui/button'
 // Removed Clerk imports as basic auth is used instead
 import { usePathname } from 'next/navigation'
 import { GitHubAuthButton } from './github-auth-button'
+import { SubscriptionBadge } from './subscription/SubscriptionBadge'
 
 export function Navigation() {
   const [scrolled, setScrolled] = useState(false)
@@ -61,6 +62,9 @@ export function Navigation() {
               <span className="text-muted-foreground text-xs font-mono">main</span>
             </div>
 
+            {/* Subscription Badge */}
+            <SubscriptionBadge />
+
             {/* GitHub Auth Button */}
             <GitHubAuthButton />
           </div>
@@ -92,6 +96,11 @@ export function Navigation() {
               <div className="flex flex-col space-y-3">
                 <div className="text-center py-4">
                   <span className="text-xs text-muted-foreground font-mono">v1.0.0</span>
+                </div>
+
+                {/* Subscription Badge - Mobile */}
+                <div className="px-4 flex justify-center">
+                  <SubscriptionBadge />
                 </div>
 
                 {/* GitHub Auth Button - Mobile */}

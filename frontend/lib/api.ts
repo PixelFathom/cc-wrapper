@@ -302,7 +302,25 @@ class ApiClient {
         // If response is not JSON, use status text
       }
 
-      const errorMessage = errorData?.detail || response.statusText || `API error (${response.status})`
+      // Extract error message from various response formats
+      let errorMessage: string
+      if (errorData?.detail) {
+        // Check if detail is an object with a message field (e.g., subscription errors)
+        if (typeof errorData.detail === 'object' && errorData.detail.message) {
+          errorMessage = errorData.detail.message
+        }
+        // Check if detail is a string
+        else if (typeof errorData.detail === 'string') {
+          errorMessage = errorData.detail
+        }
+        // Fallback to stringified object
+        else {
+          errorMessage = JSON.stringify(errorData.detail)
+        }
+      } else {
+        errorMessage = response.statusText || `API error (${response.status})`
+      }
+
       throw new ApiError(errorMessage, response.status, errorData)
     }
 
@@ -327,7 +345,25 @@ class ApiClient {
         // If response is not JSON, use status text
       }
 
-      const errorMessage = errorData?.detail || response.statusText || `API error (${response.status})`
+      // Extract error message from various response formats
+      let errorMessage: string
+      if (errorData?.detail) {
+        // Check if detail is an object with a message field (e.g., subscription errors)
+        if (typeof errorData.detail === 'object' && errorData.detail.message) {
+          errorMessage = errorData.detail.message
+        }
+        // Check if detail is a string
+        else if (typeof errorData.detail === 'string') {
+          errorMessage = errorData.detail
+        }
+        // Fallback to stringified object
+        else {
+          errorMessage = JSON.stringify(errorData.detail)
+        }
+      } else {
+        errorMessage = response.statusText || `API error (${response.status})`
+      }
+
       throw new ApiError(errorMessage, response.status, errorData)
     }
 
@@ -722,6 +758,24 @@ class ApiClient {
     generation_summary: string
   }> => {
     return this.authenticatedRequest(`/sessions/${sessionId}/test-cases/generate-and-execute`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  // Commit and Push Changes (Premium Feature)
+  commitAndPushChanges = async (taskId: string, data: {
+    branch_name: string
+    commit_message: string
+    create_new_branch?: boolean
+  }): Promise<{
+    task_id: string
+    session_id: string
+    message: string
+    coin_transaction_id: string
+    coins_remaining: number
+  }> => {
+    return this.authenticatedRequest(`/tasks/${taskId}/commit-and-push`, {
       method: 'POST',
       body: JSON.stringify(data),
     })
@@ -1134,6 +1188,57 @@ Object.assign(api, {
   getTestCaseHooks: async (taskId: string) => {
     const response = await fetch(`${API_BASE_URL}/api/tasks/${taskId}/test-case-hooks`)
     if (!response.ok) throw new Error('Failed to fetch test case hooks')
+    return response.json()
+  },
+
+  // Subscription & Coins Management
+  getSubscription: async () => {
+    const response = await fetch(`${API_BASE_URL}/api/subscription`, {
+      headers: getAuthHeaders(),
+    })
+    if (!response.ok) throw new Error('Failed to fetch subscription')
+    return response.json()
+  },
+
+  getCoinBalance: async () => {
+    const response = await fetch(`${API_BASE_URL}/api/subscription/balance`, {
+      headers: getAuthHeaders(),
+    })
+    if (!response.ok) throw new Error('Failed to fetch coin balance')
+    return response.json()
+  },
+
+  getTransactionHistory: async (limit = 100, offset = 0, transactionType?: string) => {
+    const params = new URLSearchParams({
+      limit: limit.toString(),
+      offset: offset.toString(),
+    })
+    if (transactionType) {
+      params.append('transaction_type', transactionType)
+    }
+    const response = await fetch(`${API_BASE_URL}/api/subscription/transactions?${params}`, {
+      headers: getAuthHeaders(),
+    })
+    if (!response.ok) throw new Error('Failed to fetch transaction history')
+    return response.json()
+  },
+
+  upgradeSubscription: async (data: { tier: string; stripe_subscription_id?: string }) => {
+    const response = await fetch(`${API_BASE_URL}/api/subscription/upgrade`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    })
+    if (!response.ok) throw new Error('Failed to upgrade subscription')
+    return response.json()
+  },
+
+  cancelSubscription: async () => {
+    const response = await fetch(`${API_BASE_URL}/api/subscription/cancel`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    })
+    if (!response.ok) throw new Error('Failed to cancel subscription')
     return response.json()
   },
 })

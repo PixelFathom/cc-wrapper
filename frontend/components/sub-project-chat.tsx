@@ -308,10 +308,22 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
           duration: 5000,
         })
       } else {
-        // Handle other errors with a toast notification
-        toast.error('Failed to send message', {
-          description: error instanceof Error ? error.message : 'An unexpected error occurred',
-        })
+        // Extract detailed error information
+        const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred'
+        const errorData = (error as any)?.responseData?.detail
+
+        // Check if it's a subscription/credits error
+        if (errorData && typeof errorData === 'object' && errorData.error === 'insufficient_coins') {
+          toast.error('Insufficient Credits', {
+            description: `${errorMessage}. You need ${errorData.required} credit(s) but only have ${errorData.available}. Please upgrade your subscription or visit the pricing page.`,
+            duration: 7000,
+          })
+        } else {
+          // Handle other errors with a toast notification
+          toast.error('Failed to send message', {
+            description: errorMessage,
+          })
+        }
       }
 
       // Remove the processing message if there was an error

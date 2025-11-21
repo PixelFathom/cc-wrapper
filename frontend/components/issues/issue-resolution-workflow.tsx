@@ -43,6 +43,7 @@ import { StageKey } from "./stage-progress-rail"
 import { format } from "date-fns"
 import { toast } from "sonner"
 import ReactMarkdown from "react-markdown"
+import { CommitAndPushModal } from "../commit-and-push-modal"
 
 interface IssueResolutionWorkflowProps {
   taskId: string
@@ -121,6 +122,7 @@ export function IssueResolutionWorkflow({
   const [approvalNotes, setApprovalNotes] = useState("")
   const [isApproving, setIsApproving] = useState(false)
   const [showIssueDetails, setShowIssueDetails] = useState(false)
+  const [commitAndPushModalOpen, setCommitAndPushModalOpen] = useState(false)
 
   const { data: stageStatus, isLoading, refetch } = useQuery({
     queryKey: ['issue-resolution-stage-status', projectId, issueNumber],
@@ -635,6 +637,34 @@ export function IssueResolutionWorkflow({
                 </div>
               )}
 
+              {/* Commit and Push Action */}
+              {(activeStage === 'implementation' || activeStage === 'deploy' || activeStage === 'testing' || activeStage === 'pr') && (
+                <div className="rounded-2xl border bg-gradient-to-br from-green-500/5 to-emerald-500/5 p-6">
+                  <div className="flex items-start gap-3 mb-4">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-green-500/10">
+                      <GitBranch className="h-5 w-5 text-green-500" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold mb-1 flex items-center gap-2">
+                        Commit & Push
+                        <Badge variant="secondary" className="text-xs">Premium</Badge>
+                      </h3>
+                      <p className="text-xs text-muted-foreground uppercase tracking-wider">Push changes to repository</p>
+                    </div>
+                  </div>
+                  <p className="text-sm leading-relaxed mb-4 text-muted-foreground">
+                    Commit your implementation changes and push to a branch. This premium feature costs 1 coin.
+                  </p>
+                  <Button
+                    onClick={() => setCommitAndPushModalOpen(true)}
+                    className="w-full bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600"
+                  >
+                    <GitBranch className="h-4 w-4 mr-2" />
+                    Commit & Push Changes
+                  </Button>
+                </div>
+              )}
+
               {/* Task UI Links */}
               {activeStage === 'deploy' && (activeStageData?.started_at || activeStageData?.complete) && (
                 <div className="space-y-4">
@@ -755,6 +785,14 @@ export function IssueResolutionWorkflow({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Commit and Push Modal */}
+      <CommitAndPushModal
+        taskId={taskId}
+        taskName={issueTitle}
+        open={commitAndPushModalOpen}
+        onOpenChange={setCommitAndPushModalOpen}
+      />
     </div>
   )
 }

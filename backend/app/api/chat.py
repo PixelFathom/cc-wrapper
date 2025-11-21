@@ -15,8 +15,10 @@ from app.schemas import QueryRequest, QueryResponse
 from app.services.cwd import parse_cwd
 from app.services.chat_service import chat_service
 from app.core.rate_limiter import RateLimitExceeded
+from app.services.coin_service import coin_service, InsufficientCoinsError
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.post("/query", response_model=QueryResponse)
@@ -27,11 +29,45 @@ async def handle_query(
     session: AsyncSession = Depends(get_session),
     redis_client: redis.Redis = Depends(get_redis_client)
 ):
+    # COIN DEDUCTION: Check and deduct coins before processing
+    # This is the primary point where coins are consumed
+    COINS_PER_CHAT_MESSAGE = 1  # 1 coin per chat message
+
+    try:
+        # Check coin balance first
+        balance = await coin_service.get_balance(session, current_user.id)
+        if balance < COINS_PER_CHAT_MESSAGE:
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail={
+                    "error": "insufficient_coins",
+                    "message": f"Insufficient credits. Required: {COINS_PER_CHAT_MESSAGE}, Available: {balance}",
+                    "required": COINS_PER_CHAT_MESSAGE,
+                    "available": balance,
+                    "subscription_tier": current_user.subscription_tier
+                }
+            )
+    except InsufficientCoinsError as e:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "error": "insufficient_coins",
+                "message": str(e).replace("coins", "credits").replace("Coins", "Credits"),
+                "subscription_tier": current_user.subscription_tier
+            }
+        )
+
     # Don't generate session_id here - wait for remote service response
     temp_session_id = request.session_id or str(uuid4())  # Temporary ID for tracking
     # First try to parse existing cwd
     sub_project_id = await parse_cwd(request.cwd, session)
-    
+
+    # Track project and task info for metadata
+    project_name = None
+    task_name = None
+    project_id = None
+    db_task_id = None  # Renamed to avoid conflict with remote service task_id
+
     # If not found, create the project/task/subproject structure
     if not sub_project_id:
         parts = request.cwd.split("/")
@@ -40,10 +76,10 @@ async def handle_query(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid cwd format. Expected: project_name/task_name/sub_project_name"
             )
-        
+
         project_name = parts[0]
         task_name = parts[1]
-        
+
         # Find or create project (get the most recent one if multiple exist)
         result = await session.execute(
             select(Project)
@@ -65,7 +101,9 @@ async def handle_query(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You don't have permission to access this project"
             )
-        
+
+        project_id = str(project.id)
+
         # Find or create task
         result = await session.execute(
             select(Task)
@@ -73,12 +111,14 @@ async def handle_query(
             .where(Task.name == task_name)
         )
         task = result.scalar_one_or_none()
-        
+
         if not task:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Task '{task_name}' not found in project '{project_name}'"
             )
+
+        db_task_id = str(task.id)
         
         # Find existing sub_project or create new one
         result = await session.execute(
@@ -100,7 +140,22 @@ async def handle_query(
             logger.info(f"📂 Using existing sub_project: {str(sub_project.id)[:8]}... for task: {task_name}")
         
         sub_project_id = sub_project.id
-    
+    else:
+        # sub_project_id exists, fetch project and task info
+        result = await session.execute(
+            select(SubProject, Task, Project)
+            .join(Task, SubProject.task_id == Task.id)
+            .join(Project, Task.project_id == Project.id)
+            .where(SubProject.id == sub_project_id)
+        )
+        sub_proj_data = result.first()
+        if sub_proj_data:
+            _, task, project = sub_proj_data
+            project_name = project.name
+            task_name = task.name
+            project_id = str(project.id)
+            db_task_id = str(task.id)
+
     # Create chat record - will update session_id later
     chat = Chat(
         sub_project_id=sub_project_id,
@@ -194,7 +249,31 @@ async def handle_query(
         # Include task_id if available
         if task_id:
             response_data["task_id"] = task_id
-            
+
+        # COIN DEDUCTION: Successfully processed, now deduct the coins
+        try:
+            await coin_service.deduct_coins(
+                session,
+                current_user.id,
+                COINS_PER_CHAT_MESSAGE,
+                f"Chat message processed",
+                reference_id=str(chat.id),
+                reference_type="chat",
+                meta_data={
+                    "session_id": final_ui_session_id,
+                    "task_id": task_id,  # This is from the remote service
+                    "prompt_length": len(request.prompt),
+                    "project_name": project_name,
+                    "task_name": task_name,
+                    "project_id": project_id,
+                    "task_id_ref": db_task_id  # This is the database task ID for navigation
+                }
+            )
+        except Exception as coin_error:
+            # Log but don't fail the request if coin deduction fails
+            # The chat has already been processed
+            logger.error(f"Failed to deduct coins: {coin_error}")
+
         return QueryResponse(**response_data)
     except RateLimitExceeded as e:
         headers = {}
