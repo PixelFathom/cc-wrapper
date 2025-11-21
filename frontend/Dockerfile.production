@@ -30,6 +30,10 @@ COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
 
+# Cashfree environment (passed as build arg or defaults to production)
+ARG NEXT_PUBLIC_CASHFREE_ENV=production
+ENV NEXT_PUBLIC_CASHFREE_ENV=${NEXT_PUBLIC_CASHFREE_ENV}
+
 # Build the application (Next.js will use standalone output)
 RUN npm run build
 
