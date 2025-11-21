@@ -50,7 +50,26 @@ export default function PricingPage() {
     setIsProcessing(true);
 
     try {
-      // Step 1: Create payment order
+      // Step 1: Validate payment requirements (email and phone)
+      toast.loading("Checking profile...");
+
+      const validation = await api.validatePaymentRequirements();
+
+      if (!validation.valid) {
+        toast.dismiss();
+        toast.error(validation.message);
+
+        // Redirect to profile page after a short delay
+        setTimeout(() => {
+          router.push("/profile");
+        }, 2000);
+
+        setIsProcessing(false);
+        setSelectedPackage(null);
+        return;
+      }
+
+      // Step 2: Create payment order
       toast.loading("Initializing payment...");
 
       const orderData = await api.createPaymentOrder({
@@ -63,7 +82,7 @@ export default function PricingPage() {
       toast.dismiss();
       toast.success("Opening payment checkout...");
 
-      // Step 2: Open Cashfree checkout
+      // Step 3: Open Cashfree checkout
       await openCashfreeCheckout({
         sessionId: orderData.payment_session_id,
         orderId: orderData.order_id,
@@ -83,10 +102,11 @@ export default function PricingPage() {
       console.error("Payment initiation failed:", error);
       toast.dismiss();
 
-      if (error.message.includes("Email is required")) {
-        toast.error("Please update your email in profile settings before purchasing.");
-      } else if (error.message.includes("Phone number is required")) {
-        toast.error("Please update your phone number in profile settings before purchasing.");
+      if (error.message.includes("Email is required") || error.message.includes("Phone number is required")) {
+        toast.error("Please update your profile with email and phone number to proceed.");
+        setTimeout(() => {
+          router.push("/profile");
+        }, 2000);
       } else {
         toast.error(error.message || "Failed to initiate payment. Please try again.");
       }
@@ -156,7 +176,9 @@ export default function PricingPage() {
               <CardContent className="flex-1">
                 <div className="mb-6">
                   <div>
-                    <span className="text-4xl font-bold">${pkg.price}</span>
+                    <span className="text-4xl font-bold">
+                      {pkg.currency === 'INR' ? '₹' : '$'}{pkg.price}
+                    </span>
                   </div>
                   <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                     One-time purchase

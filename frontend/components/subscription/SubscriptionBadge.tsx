@@ -13,7 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
-import { Coins, Crown, ChevronDown, History, CreditCard } from "lucide-react";
+import { Coins, Crown, ChevronDown, History, CreditCard, User } from "lucide-react";
 
 const TIER_COLORS = {
   [SubscriptionTier.FREE]: "bg-gray-500",
@@ -26,16 +26,44 @@ const TIER_NAMES = {
 };
 
 export function SubscriptionBadge() {
-  const { balance, tier, isLoading, refresh } = useCoinBalance();
+  const { balance, tier, isLoading } = useCoinBalance();
   const [isOpen, setIsOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   useEffect(() => {
+    const checkAuth = () => {
+      try {
+        setIsAuthenticated(!!localStorage.getItem("github_user"));
+      } catch (error) {
+        console.error("Failed to read auth status from storage", error);
+        setIsAuthenticated(false);
+      }
+    };
+
+    checkAuth();
     setMounted(true);
+
+    const handleStorageChange = (event: StorageEvent) => {
+      if (event.key === "github_user") {
+        checkAuth();
+      }
+    };
+
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
   }, []);
 
-  // Always show loading skeleton during SSR and initial client render
-  if (!mounted || isLoading) {
+  // Don't render anything until we've checked auth status
+  if (!mounted) {
+    return null;
+  }
+
+  if (!isAuthenticated) {
+    return null;
+  }
+
+  if (isLoading) {
     return (
       <div className="flex items-center gap-2">
         <div className="h-8 w-16 bg-gray-200 dark:bg-gray-700 animate-pulse rounded-full" />
@@ -83,6 +111,17 @@ export function SubscriptionBadge() {
           </DropdownMenuLabel>
 
           <DropdownMenuSeparator />
+
+          <DropdownMenuItem asChild>
+            <Link
+              href="/profile"
+              className="flex items-center cursor-pointer"
+              onClick={() => setIsOpen(false)}
+            >
+              <User className="h-4 w-4 mr-2" />
+              Edit Profile
+            </Link>
+          </DropdownMenuItem>
 
           <DropdownMenuItem asChild>
             <Link

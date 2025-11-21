@@ -1318,6 +1318,45 @@ Object.assign(api, {
     }
     return response.json()
   },
+
+  // User Profile Management
+  getMyProfile: async () => {
+    const response = await fetch(`${API_BASE_URL}/api/users/me`, {
+      headers: getAuthHeaders(),
+    })
+    if (!response.ok) throw new Error('Failed to fetch profile')
+    return response.json()
+  },
+
+  updateMyProfile: async (data: {
+    email?: string;
+    phone?: string;
+    github_name?: string;
+    bio?: string;
+    company?: string;
+    location?: string;
+    blog?: string;
+  }) => {
+    const response = await fetch(`${API_BASE_URL}/api/users/me`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    })
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.detail?.[0]?.msg || error.detail || 'Failed to update profile')
+    }
+    return response.json()
+  },
+
+  validatePaymentRequirements: async () => {
+    const response = await fetch(`${API_BASE_URL}/api/users/me/validate-payment-requirements`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    })
+    if (!response.ok) throw new Error('Failed to validate payment requirements')
+    return response.json()
+  },
 })
 
 export default api

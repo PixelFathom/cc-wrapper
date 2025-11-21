@@ -19,30 +19,62 @@ class Feature(str, Enum):
     CONTEXT_HARVESTING = "context_harvesting"
 
 
-# Credit packages (one-time purchases)
+# Credit packages (one-time purchases) - 50% DISCOUNT APPLIED
 CREDIT_PACKAGES = {
+    "starter": {
+        "id": "starter",
+        "name": "Starter Package",
+        "price": 499,
+        "credits": 1,
+        "currency": "INR",
+        "validity_days": 30,
+    },
     "basic": {
         "id": "basic",
         "name": "Basic Package",
-        "price": 19,
+        "price": 999,
         "credits": 3,
-        "currency": "USD",
+        "currency": "INR",
         "validity_days": 30,
     },
     "standard": {
         "id": "standard",
         "name": "Standard Package",
-        "price": 39,
+        "price": 1999,
         "credits": 10,
-        "currency": "USD",
+        "currency": "INR",
+        "validity_days": 30,
+    },
+    "plus": {
+        "id": "plus",
+        "name": "Plus Package",
+        "price": 2999,
+        "credits": 15,
+        "currency": "INR",
         "validity_days": 30,
     },
     "pro": {
         "id": "pro",
         "name": "Pro Package",
-        "price": 99,
+        "price": 4999,
         "credits": 30,
-        "currency": "USD",
+        "currency": "INR",
+        "validity_days": 30,
+    },
+    "enterprise": {
+        "id": "enterprise",
+        "name": "Enterprise Package",
+        "price": 9999,
+        "credits": 70,
+        "currency": "INR",
+        "validity_days": 30,
+    },
+    "ultimate": {
+        "id": "ultimate",
+        "name": "Ultimate Package",
+        "price": 19999,
+        "credits": 150,
+        "currency": "INR",
         "validity_days": 30,
     },
 }
