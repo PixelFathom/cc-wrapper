@@ -1,12 +1,13 @@
 "use client";
 
+import { Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { XCircle, RefreshCw, ArrowLeft, HelpCircle } from "lucide-react";
 import Link from "next/link";
 
-export default function PaymentFailurePage() {
+function PaymentFailureContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const orderId = searchParams.get("order_id");
@@ -155,5 +156,35 @@ export default function PaymentFailurePage() {
         </Card>
       </div>
     </div>
+  );
+}
+
+export default function PaymentFailurePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="container mx-auto px-4 py-12">
+          <div className="max-w-2xl mx-auto">
+            <Card className="border-red-200 dark:border-red-800">
+              <CardHeader>
+                <div className="flex items-center gap-3">
+                  <XCircle className="h-12 w-12 text-red-500" />
+                  <div>
+                    <CardTitle className="text-red-600 dark:text-red-400 text-2xl">
+                      Payment Failed
+                    </CardTitle>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                      Loading details...
+                    </p>
+                  </div>
+                </div>
+              </CardHeader>
+            </Card>
+          </div>
+        </div>
+      }
+    >
+      <PaymentFailureContent />
+    </Suspense>
   );
 }
