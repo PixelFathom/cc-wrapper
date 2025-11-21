@@ -31,6 +31,7 @@ from .github_issue import GitHubIssue
 from .issue_resolution import IssueResolution
 from .coin_transaction import CoinTransaction, TransactionType
 from .subscription import SubscriptionTier, Feature, TIER_CONFIG, is_feature_enabled
+from .payment import Payment, PaymentStatus, PaymentProvider
 
 __all__ = [
     "Project", "Task", "SubProject", "File", "Chat", "Approval", "DeploymentHook",
@@ -42,5 +43,5 @@ __all__ = [
     "HarvestingSessionListResponse", "QuestionStatus",
     "User", "UserToken", "AuditLog", "GitHubRepository", "GitHubIssue", "IssueResolution",
     "CoinTransaction", "TransactionType", "SubscriptionTier", "Feature", "TIER_CONFIG",
-    "is_feature_enabled"
+    "is_feature_enabled", "Payment", "PaymentStatus", "PaymentProvider"
 ]

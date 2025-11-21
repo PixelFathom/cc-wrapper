@@ -1241,6 +1241,72 @@ Object.assign(api, {
     if (!response.ok) throw new Error('Failed to cancel subscription')
     return response.json()
   },
+
+  // Payment Management (Cashfree)
+  createPaymentOrder: async (data: { tier: string; return_url?: string; cancel_url?: string }) => {
+    const response = await fetch(`${API_BASE_URL}/api/payments/create-order`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    })
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.detail || 'Failed to create payment order')
+    }
+    return response.json()
+  },
+
+  verifyPayment: async (orderId: string) => {
+    const response = await fetch(`${API_BASE_URL}/api/payments/verify`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ order_id: orderId }),
+    })
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.detail || 'Failed to verify payment')
+    }
+    return response.json()
+  },
+
+  getPaymentByOrder: async (orderId: string) => {
+    const response = await fetch(`${API_BASE_URL}/api/payments/order/${orderId}`, {
+      headers: getAuthHeaders(),
+    })
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.detail || 'Failed to fetch payment details')
+    }
+    return response.json()
+  },
+
+  getMyPayments: async (statusFilter?: string, limit = 50, offset = 0) => {
+    const params = new URLSearchParams({
+      limit: limit.toString(),
+      offset: offset.toString(),
+    })
+    if (statusFilter) {
+      params.append('status_filter', statusFilter)
+    }
+    const response = await fetch(`${API_BASE_URL}/api/payments/my-payments?${params}`, {
+      headers: getAuthHeaders(),
+    })
+    if (!response.ok) throw new Error('Failed to fetch payments')
+    return response.json()
+  },
+
+  initiateRefund: async (data: { order_id: string; refund_amount?: number; refund_note?: string }) => {
+    const response = await fetch(`${API_BASE_URL}/api/payments/refund`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    })
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.detail || 'Failed to initiate refund')
+    }
+    return response.json()
+  },
 })
 
 export default api

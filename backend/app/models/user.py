@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from .project import Project
     from .audit_log import AuditLog
     from .coin_transaction import CoinTransaction
+    from .payment import Payment
 
 
 class User(BaseModel, table=True):
@@ -27,6 +28,7 @@ class User(BaseModel, table=True):
 
     # Contact & profile
     email: Optional[str] = Field(default=None, max_length=255)
+    phone: Optional[str] = Field(default=None, max_length=20)  # Required for Cashfree payments
     avatar_url: Optional[str] = Field(default=None, max_length=500)
 
     # GitHub profile metadata
@@ -73,3 +75,4 @@ class User(BaseModel, table=True):
     projects: List["Project"] = Relationship(back_populates="user")
     audit_logs: List["AuditLog"] = Relationship(back_populates="user")
     coin_transactions: List["CoinTransaction"] = Relationship(back_populates="user")
+    payments: List["Payment"] = Relationship(back_populates="user")

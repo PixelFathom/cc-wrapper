@@ -2,25 +2,27 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useSubscription, useUpgradeSubscription } from "@/lib/hooks/useSubscription";
+import { useSubscription } from "@/lib/hooks/useSubscription";
 import { SubscriptionTier, TIER_CONFIGS } from "@/lib/subscription-types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Check, X, Loader2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
+import api from "@/lib/api";
+import { openCashfreeCheckout } from "@/lib/cashfree";
 
 export default function PricingPage() {
   const router = useRouter();
   const { tier: currentTier, isLoading: subscriptionLoading } = useSubscription();
-  const upgradeMutation = useUpgradeSubscription();
   const [selectedTier, setSelectedTier] = useState<SubscriptionTier | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const handleUpgrade = async (tier: SubscriptionTier) => {
     if (tier === SubscriptionTier.TIER_3) {
       // For enterprise, redirect to contact sales
       toast.info("Redirecting to contact sales...");
-      // TODO: Add contact sales page
+      router.push("/contact");
       return;
     }
 
@@ -29,21 +31,58 @@ export default function PricingPage() {
       return;
     }
 
+    if (tier === SubscriptionTier.FREE) {
+      // Downgrade to free - use cancel subscription flow
+      toast.info("To downgrade to free tier, please cancel your subscription from your account settings.");
+      return;
+    }
+
     setSelectedTier(tier);
+    setIsProcessing(true);
 
     try {
-      await upgradeMutation.mutateAsync({
-        tier,
-        // TODO: Integrate with Razorpay/Stripe
-        // stripeSubscriptionId will be added after payment
+      // Step 1: Create payment order
+      toast.loading("Initializing payment...");
+
+      const orderData = await api.createPaymentOrder({
+        tier: tier,
+        return_url: `${window.location.origin}/payment/success`,
+        cancel_url: `${window.location.origin}/payment/failure`,
       });
 
-      toast.success(`Successfully upgraded to ${TIER_CONFIGS[tier].name}!`);
-      router.push("/");
+      // Clear loading toast
+      toast.dismiss();
+      toast.success("Opening payment checkout...");
+
+      // Step 2: Open Cashfree checkout
+      await openCashfreeCheckout({
+        sessionId: orderData.payment_session_id,
+        orderId: orderData.order_id,
+        onSuccess: () => {
+          // Payment successful - will be redirected to success page
+          toast.success("Payment initiated successfully!");
+        },
+        onFailure: (error) => {
+          // Payment failed
+          toast.error(error.message || "Payment failed. Please try again.");
+          setIsProcessing(false);
+          setSelectedTier(null);
+        },
+      });
+
     } catch (error: any) {
-      console.error("Upgrade failed:", error);
-      toast.error(error.response?.data?.detail || "Failed to upgrade subscription");
-    } finally {
+      console.error("Payment initiation failed:", error);
+      toast.dismiss();
+
+      if (error.message.includes("Email is required")) {
+        toast.error("Please update your email in profile settings before upgrading.");
+      } else if (error.message.includes("Phone number is required")) {
+        toast.error("Please update your phone number in profile settings before upgrading.");
+      } else {
+        toast.error(error.message || "Failed to initiate payment. Please try again.");
+      }
+
+      setIsProcessing(false);
       setSelectedTier(null);
     }
   };
@@ -176,7 +215,7 @@ export default function PricingPage() {
                 ) : (
                   <Button
                     onClick={() => handleUpgrade(tier)}
-                    disabled={upgradeMutation.isPending && selectedTier === tier}
+                    disabled={isProcessing && selectedTier === tier}
                     className={`w-full ${
                       isPopular
                         ? "bg-purple-600 hover:bg-purple-700 text-white"
@@ -184,7 +223,7 @@ export default function PricingPage() {
                     }`}
                     variant={isPopular ? "default" : "outline"}
                   >
-                    {upgradeMutation.isPending && selectedTier === tier ? (
+                    {isProcessing && selectedTier === tier ? (
                       <>
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                         Processing...
@@ -204,16 +243,17 @@ export default function PricingPage() {
 
       {/* Payment Integration Notice */}
       <div className="mt-12 max-w-3xl mx-auto">
-        <Card className="bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
+        <Card className="bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800">
           <CardContent className="pt-6">
             <div className="flex items-start gap-3">
               <div className="text-2xl">💳</div>
               <div>
-                <h3 className="font-semibold mb-2">Payment Integration</h3>
+                <h3 className="font-semibold mb-2">Secure Payment Processing</h3>
                 <p className="text-sm text-gray-700 dark:text-gray-300">
-                  Payment processing via Razorpay/Stripe will be integrated soon.
-                  For now, plan upgrades are processed immediately. Contact support
-                  for billing inquiries.
+                  Payments are processed securely via Cashfree Payment Gateway.
+                  All transactions are encrypted and PCI DSS compliant. Your subscription
+                  will be activated immediately after successful payment. For billing inquiries,
+                  please contact support.
                 </p>
               </div>
             </div>
