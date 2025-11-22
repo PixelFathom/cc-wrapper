@@ -639,25 +639,25 @@ export function IssueResolutionWorkflow({
 
               {/* Commit and Push Action */}
               {(activeStage === 'implementation' || activeStage === 'deploy' || activeStage === 'testing' || activeStage === 'pr') && (
-                <div className="rounded-2xl border bg-gradient-to-br from-green-500/5 to-emerald-500/5 p-6">
+                <div className="rounded-2xl border bg-gradient-to-br from-amber-500/5 to-orange-500/5 p-6">
                   <div className="flex items-start gap-3 mb-4">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-green-500/10">
-                      <GitBranch className="h-5 w-5 text-green-500" />
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/10">
+                      <GitBranch className="h-5 w-5 text-amber-500" />
                     </div>
                     <div>
                       <h3 className="font-bold mb-1 flex items-center gap-2">
                         Commit & Push
-                        <Badge variant="secondary" className="text-xs">Premium</Badge>
+                        <Badge variant="secondary" className="text-xs bg-amber-500/20 text-amber-600">Coming Soon</Badge>
                       </h3>
                       <p className="text-xs text-muted-foreground uppercase tracking-wider">Push changes to repository</p>
                     </div>
                   </div>
                   <p className="text-sm leading-relaxed mb-4 text-muted-foreground">
-                    Commit your implementation changes and push to a branch. This premium feature costs 1 coin.
+                    Commit your implementation changes and push to a branch. This feature is coming soon!
                   </p>
                   <Button
                     onClick={() => setCommitAndPushModalOpen(true)}
-                    className="w-full bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600"
+                    className="w-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600"
                   >
                     <GitBranch className="h-4 w-4 mr-2" />
                     Commit & Push Changes
