@@ -67,7 +67,14 @@ class Task(BaseModel, table=True):
 
     # Active session tracking
     active_planning_session_id: Optional[UUID] = Field(default=None)
-    
+
+    # Hosting fields
+    hosting_subdomain: Optional[str] = Field(default=None)  # e.g., 'my-app'
+    hosting_fqdn: Optional[str] = Field(default=None)  # e.g., 'my-app.example.com'
+    hosting_status: Optional[str] = Field(default=None)  # active, active_no_ssl, dns_only, failed, removed
+    hosting_provisioned_at: Optional[datetime] = Field(default=None)
+    hosting_removed_at: Optional[datetime] = Field(default=None)
+
     project: Optional["Project"] = Relationship(back_populates="tasks")
     sub_projects: List["SubProject"] = Relationship(back_populates="task")
     deployment_hooks: List["DeploymentHook"] = Relationship(back_populates="task")

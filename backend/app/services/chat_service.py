@@ -64,7 +64,7 @@ class ChatService:
             project = await db.get(Project, task.project_id)
             if not project:
                 raise ValueError("Project not found")
-            
+
             redis_client = await get_redis()
             await assert_within_rate_limit(
                 redis_client,
@@ -73,8 +73,25 @@ class ChatService:
 
             # Generate webhook URL
             webhook_url = f"{self.webhook_base_url}/api/webhooks/chat/{chat_id}"
-            
+
             project_path = f"{project.name}/{task.id}"
+
+            # Add deployment context to prompt if task has a port assigned
+            enhanced_prompt = prompt
+            if task.deployment_port:
+                deployment_context = (
+                    f"\n\n---\n"
+                    f"DEPLOYMENT CONTEXT:\n"
+                    f"- Assigned port for this task: {task.deployment_port}\n"
+                    f"- If you need to deploy or run the service, use port {task.deployment_port}\n"
+                    f"- Before deploying, check if Docker containers are already running: 'docker ps' and 'docker compose ps'\n"
+                    f"- If existing containers are healthy and working, no need to redeploy\n"
+                    f"- Use dev mode with hot reload when deploying (volume mounts for source code)\n"
+                    f"---\n"
+                )
+                enhanced_prompt = prompt + deployment_context
+
+            prompt = enhanced_prompt
 
             # Determine permission mode
             # Priority: permission_mode parameter > bypass_mode (for backward compatibility) > default to "interactive"

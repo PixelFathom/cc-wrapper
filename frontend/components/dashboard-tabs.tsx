@@ -1,16 +1,49 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ProjectList } from './project-list'
 import { GitHubIssuesExplorer } from './github-issues-explorer'
+import { api } from '@/lib/api'
+import { LockClosedIcon } from '@radix-ui/react-icons'
 
 export function DashboardTabs() {
   const [activeTab, setActiveTab] = useState('projects')
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+
+  useEffect(() => {
+    const checkAdminStatus = async () => {
+      try {
+        const profile = await api.getMyProfile()
+        setIsAdmin(profile.is_admin || false)
+      } catch (error) {
+        console.error('Failed to check admin status:', error)
+        setIsAdmin(false)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    const storedUser = localStorage.getItem('github_user')
+    if (storedUser) {
+      checkAdminStatus()
+    } else {
+      setIsLoading(false)
+    }
+  }, [])
+
+  const handleTabChange = (value: string) => {
+    // Prevent switching to issues tab if not admin
+    if (value === 'issues' && !isAdmin) {
+      return
+    }
+    setActiveTab(value)
+  }
 
   return (
     <section className="container mx-auto px-6 py-16">
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+      <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
         {/* Tab Headers */}
         <div className="mb-8">
           <TabsList className="grid w-full max-w-md mx-auto grid-cols-2 bg-card/50 border border-border">
@@ -22,14 +55,31 @@ export function DashboardTabs() {
               Projects
               <span className="text-muted-foreground ml-2">{'/>'}</span>
             </TabsTrigger>
-            <TabsTrigger
-              value="issues"
-              className="font-mono data-[state=active]:bg-purple-500/20 data-[state=active]:text-purple-400"
-            >
-              <span className="text-muted-foreground mr-2">{'<'}</span>
-              GitHub Issues
-              <span className="text-muted-foreground ml-2">{'/>'}</span>
-            </TabsTrigger>
+            {isAdmin ? (
+              <TabsTrigger
+                value="issues"
+                className="font-mono data-[state=active]:bg-purple-500/20 data-[state=active]:text-purple-400"
+              >
+                <span className="text-muted-foreground mr-2">{'<'}</span>
+                GitHub Issues
+                <span className="text-muted-foreground ml-2">{'/>'}</span>
+              </TabsTrigger>
+            ) : (
+              <div
+                className="relative group inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium transition-all cursor-not-allowed opacity-60 hover:opacity-80"
+                title="Coming Soon"
+              >
+                <LockClosedIcon className="h-3 w-3 mr-2 text-muted-foreground" />
+                <span className="font-mono text-muted-foreground">
+                  <span className="mr-1">{'<'}</span>
+                  Issues
+                  <span className="ml-1">{'/>'}</span>
+                </span>
+                <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 px-2 py-1 bg-card border border-purple-500/50 rounded text-xs font-mono text-purple-400 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
+                  Coming Soon
+                </span>
+              </div>
+            )}
           </TabsList>
         </div>
 
@@ -69,10 +119,12 @@ export function DashboardTabs() {
           <ProjectList />
         </TabsContent>
 
-        {/* GitHub Issues Tab */}
-        <TabsContent value="issues" className="mt-0">
-          <GitHubIssuesExplorer />
-        </TabsContent>
+        {/* GitHub Issues Tab - Admin Only */}
+        {isAdmin && (
+          <TabsContent value="issues" className="mt-0">
+            <GitHubIssuesExplorer />
+          </TabsContent>
+        )}
       </Tabs>
     </section>
   )

@@ -10,8 +10,8 @@ import { Toaster } from 'sonner'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'Project Hub - Elegant Project Management',
-  description: 'A sophisticated project management platform with real-time collaboration',
+  title: 'Tediux - AI-Powered Development Platform',
+  description: 'Build, deploy, and collaborate with AI-powered development tools',
 }
 
 export default function RootLayout({

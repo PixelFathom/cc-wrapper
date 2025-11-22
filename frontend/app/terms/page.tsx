@@ -25,7 +25,7 @@ export default function TermsPage() {
             <section className="mb-8">
               <h2 className="text-2xl font-semibold mb-4">1. Acceptance of Terms</h2>
               <p className="text-gray-700 dark:text-gray-300 mb-4">
-                By accessing and using Project Hub ("Service"), you accept and agree to be bound by the terms and provisions of this agreement. If you do not agree to these Terms and Conditions, please do not use our Service.
+                By accessing and using Tediux ("Service"), you accept and agree to be bound by the terms and provisions of this agreement. If you do not agree to these Terms and Conditions, please do not use our Service.
               </p>
             </section>
 
@@ -72,12 +72,12 @@ export default function TermsPage() {
             <Separator className="my-6" />
 
             <section className="mb-8">
-              <h2 className="text-2xl font-semibold mb-4">5. Coin System</h2>
+              <h2 className="text-2xl font-semibold mb-4">5. Credit System</h2>
               <p className="text-gray-700 dark:text-gray-300 mb-4">
-                Project Hub uses a coin-based system for accessing certain features and services. Coins are allocated monthly based on your subscription tier and do not roll over to the next billing period unless otherwise specified.
+                Tediux uses a credit-based system for accessing certain features and services. Credits are allocated based on your purchase and do not roll over to the next billing period unless otherwise specified.
               </p>
               <p className="text-gray-700 dark:text-gray-300 mb-4">
-                Coins have no cash value and cannot be exchanged for money. Unused coins expire at the end of each billing period.
+                Credits have no cash value and cannot be exchanged for money. Unused credits expire after 30 days from purchase.
               </p>
             </section>
 
@@ -102,7 +102,7 @@ export default function TermsPage() {
             <section className="mb-8">
               <h2 className="text-2xl font-semibold mb-4">7. Intellectual Property</h2>
               <p className="text-gray-700 dark:text-gray-300 mb-4">
-                The Service and its original content (excluding Content provided by users), features, and functionality are and will remain the exclusive property of Project Hub and its licensors. The Service is protected by copyright, trademark, and other laws of both domestic and foreign countries.
+                The Service and its original content (excluding Content provided by users), features, and functionality are and will remain the exclusive property of Tediux and its licensors. The Service is protected by copyright, trademark, and other laws of both domestic and foreign countries.
               </p>
               <p className="text-gray-700 dark:text-gray-300 mb-4">
                 You retain all rights to the content you create and upload to the Service. By uploading content, you grant us a worldwide, non-exclusive, royalty-free license to use, store, and display your content as necessary to provide the Service.
@@ -126,7 +126,7 @@ export default function TermsPage() {
             <section className="mb-8">
               <h2 className="text-2xl font-semibold mb-4">9. Limitation of Liability</h2>
               <p className="text-gray-700 dark:text-gray-300 mb-4">
-                In no event shall Project Hub, nor its directors, employees, partners, agents, suppliers, or affiliates, be liable for any indirect, incidental, special, consequential, or punitive damages, including without limitation, loss of profits, data, use, goodwill, or other intangible losses, resulting from your access to or use of or inability to access or use the Service.
+                In no event shall Tediux, nor its directors, employees, partners, agents, suppliers, or affiliates, be liable for any indirect, incidental, special, consequential, or punitive damages, including without limitation, loss of profits, data, use, goodwill, or other intangible losses, resulting from your access to or use of or inability to access or use the Service.
               </p>
             </section>
 
@@ -169,7 +169,7 @@ export default function TermsPage() {
               </p>
               <div className="bg-gray-50 dark:bg-gray-900 p-4 rounded-lg">
                 <p className="text-gray-700 dark:text-gray-300 font-mono text-sm">
-                  Email: support@projecthub.com<br />
+                  Email: support@tediux.com<br />
                   Website: <a href="/contact" className="text-cyan-500 hover:underline">Contact Form</a>
                 </p>
               </div>

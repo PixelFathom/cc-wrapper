@@ -46,8 +46,7 @@ export function Navigation() {
                 <CodeIcon className="h-4 sm:h-5 w-4 sm:w-5 text-cyan-500" />
                 <span className="font-mono text-xs sm:text-sm">
                   <span className="text-muted-foreground">$</span>
-                  <span className="text-cyan-500 ml-1">project</span>
-                  <span className="text-muted-foreground hidden sm:inline">-hub</span>
+                  <span className="text-cyan-500 ml-1">tediux</span>
                   <span className="animate-terminal-cursor ml-0.5">_</span>
                 </span>
               </div>

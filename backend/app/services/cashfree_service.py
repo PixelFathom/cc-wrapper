@@ -84,6 +84,7 @@ class CashfreeService:
 
         amount = package["price"]
         credits = package["credits"]
+        currency = package.get("currency", "USD")
 
         if amount <= 0:
             raise ValueError("Cannot create order for free package")
@@ -102,7 +103,7 @@ class CashfreeService:
         order_request = {
             "order_id": order_id,
             "order_amount": float(amount),
-            "order_currency": "INR",  # Cashfree TEST accounts only support INR
+            "order_currency": currency,
             "customer_details": {
                 "customer_id": str(user.id),
                 "customer_email": user.email,
@@ -145,7 +146,7 @@ class CashfreeService:
                 order_id=order_id,
                 payment_session_id=order_dict.get("payment_session_id"),
                 amount=float(amount),
-                currency="INR",
+                currency=currency,
                 status=PaymentStatus.PENDING,
                 subscription_tier=package_id,  # Store package_id instead of tier
                 customer_email=user.email,
@@ -167,7 +168,7 @@ class CashfreeService:
                 "order_id": order_id,
                 "payment_session_id": order_dict.get("payment_session_id"),
                 "amount": amount,
-                "currency": "INR",
+                "currency": currency,
                 "package_id": package_id,
                 "package_name": package["name"],
                 "credits": credits,

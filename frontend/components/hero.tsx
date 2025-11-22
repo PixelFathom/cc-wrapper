@@ -77,12 +77,12 @@ export function Hero() {
                   <div className="w-2.5 sm:w-3 h-2.5 sm:h-3 rounded-full bg-yellow-500"></div>
                   <div className="w-2.5 sm:w-3 h-2.5 sm:h-3 rounded-full bg-green-500"></div>
                 </div>
-                <span className="text-xs font-mono text-muted-foreground">~/project-hub</span>
+                <span className="text-xs font-mono text-muted-foreground">~/tediux</span>
               </div>
               <div className="p-4 sm:p-6 font-mono text-sm sm:text-base">
                 <div className="text-left">
                   <span className="text-green-400">➜</span>
-                  <span className="text-cyan-500 ml-2">project-hub</span>
+                  <span className="text-cyan-500 ml-2">tediux</span>
                   <span className="text-muted-foreground ml-2 hidden sm:inline">git:(</span>
                   <span className="text-red-400 hidden sm:inline">main</span>
                   <span className="text-muted-foreground hidden sm:inline">)</span>

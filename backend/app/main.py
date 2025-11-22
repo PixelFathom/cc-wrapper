@@ -8,7 +8,7 @@ from app.core.settings import get_settings
 from app.core.redis import close_redis
 from app.core.scheduler import start_scheduler, shutdown_scheduler
 from app.deps import engine
-from app.api import projects, tasks, chat, files, approvals, auto_continuation, test_cases, contest_harvesting, github_auth, github_repositories, github_issues, issue_resolution, subscriptions, payments, webhooks_cashfree, users
+from app.api import projects, tasks, chat, files, approvals, auto_continuation, test_cases, contest_harvesting, github_auth, github_repositories, github_issues, issue_resolution, subscriptions, payments, webhooks_cashfree, users, hosting
 from app.api.v1 import webhooks, mcp_approvals
 
 # Import models to ensure they are registered with SQLAlchemy
@@ -58,8 +58,6 @@ app.add_middleware(
         "http://localhost:3000",
         "http://localhost:2000",
         "https://localhost:3000", 
-        "https://code.thegetshitdone.ai",
-        "https://api-code.thegetshitdone.ai",
         "https://code.tanmaydeepsharma.com",
         "https://code-api.tanmaydeepsharma.com",
         "https://tediux.com",
@@ -88,6 +86,7 @@ app.include_router(subscriptions.router, prefix="/api", tags=["subscriptions"])
 app.include_router(payments.router, prefix="/api", tags=["payments"])
 app.include_router(webhooks_cashfree.router, prefix="/api", tags=["webhooks-cashfree"])
 app.include_router(users.router, prefix="/api", tags=["users"])
+app.include_router(hosting.router, prefix="/api", tags=["hosting"])
 
 
 @app.get("/")

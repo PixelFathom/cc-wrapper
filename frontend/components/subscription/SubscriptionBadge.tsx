@@ -13,7 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
-import { Coins, Crown, ChevronDown, History, CreditCard } from "lucide-react";
+import { Coins, Crown, ChevronDown, History, CreditCard, Plus } from "lucide-react";
 
 const TIER_COLORS = {
   [SubscriptionTier.FREE]: "bg-gray-500",
@@ -85,6 +85,13 @@ export function SubscriptionBadge() {
         <span className="font-semibold text-sm text-amber-900 dark:text-amber-100">
           {balance}
         </span>
+        <Link
+          href="/pricing"
+          className="ml-1 p-0.5 rounded-full bg-amber-200 dark:bg-amber-800 hover:bg-amber-300 dark:hover:bg-amber-700 transition-colors"
+          title="Buy Credits"
+        >
+          <Plus className="h-3.5 w-3.5 text-amber-700 dark:text-amber-300" />
+        </Link>
       </div>
 
       {/* Tier Badge with Dropdown */}

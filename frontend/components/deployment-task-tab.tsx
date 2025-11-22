@@ -30,11 +30,13 @@ export function DeploymentTaskTab({ taskId, task }: DeploymentTaskTabProps) {
   const [saveMessage, setSaveMessage] = useState<string>('')
   const [envVars, setEnvVars] = useState<EnvVariable[]>([])
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
-  const [deploymentHost, setDeploymentHost] = useState<string>(task.deployment_host || '')
-  const [hostSaveStatus, setHostSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle')
-  const [hostSaveMessage, setHostSaveMessage] = useState<string>('')
-  const [sslStatus, setSslStatus] = useState<'idle' | 'setting_up' | 'success' | 'error'>('idle')
-  const [sslMessage, setSslMessage] = useState<string>('')
+  const [hostingStatus, setHostingStatus] = useState<'idle' | 'provisioning' | 'success' | 'error'>('idle')
+  const [hostingMessage, setHostingMessage] = useState<string>('')
+  const [hostingDetails, setHostingDetails] = useState<{
+    subdomain?: string
+    fqdn?: string
+    steps?: { dns?: { status: string }; nginx?: { status: string }; certbot?: { status: string } }
+  } | null>(null)
 
   // Fetch environment variables
   const { data: envData, refetch: refetchEnv } = useQuery({
@@ -58,10 +60,6 @@ export function DeploymentTaskTab({ taskId, task }: DeploymentTaskTabProps) {
     }
   }, [envData])
 
-  // Update deploymentHost when task changes
-  useEffect(() => {
-    setDeploymentHost(task.deployment_host || '')
-  }, [task.deployment_host])
 
   // Fetch deployment hooks (only deployment phase for this tab)
   // Poll more aggressively during active deployment, but keep polling even when completed
@@ -105,53 +103,43 @@ export function DeploymentTaskTab({ taskId, task }: DeploymentTaskTabProps) {
     },
   })
 
-  // Update deployment host mutation
-  const updateHostMutation = useMutation({
-    mutationFn: (host: string) => api.updateDeploymentHost(taskId, host),
-    onSuccess: () => {
+  // Provision hosting mutation (DNS + Nginx + SSL in one call)
+  // Backend auto-generates a unique subdomain
+  const provisionHostingMutation = useMutation({
+    mutationFn: () => {
+      if (!task.deployment_port) {
+        throw new Error('Deployment port is required')
+      }
+      // Don't pass subdomain - let backend generate a unique one
+      return api.provisionHostingForTask(taskId, undefined, task.deployment_port)
+    },
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['task', taskId] })
-      setHostSaveStatus('success')
-      setHostSaveMessage('Deployment host saved successfully')
-      setTimeout(() => {
-        setHostSaveStatus('idle')
-        setHostSaveMessage('')
-      }, 3000)
+      setHostingStatus('success')
+      setHostingDetails({ subdomain: data.subdomain, fqdn: data.fqdn, steps: data.steps })
+
+      if (data.status === 'success') {
+        setHostingMessage(`Custom domain ${data.fqdn} configured with SSL!`)
+      } else if (data.status === 'partial') {
+        setHostingMessage(data.warning || `Domain ${data.fqdn} configured (some steps may need attention)`)
+      }
     },
     onError: (error: Error) => {
-      setHostSaveStatus('error')
-      setHostSaveMessage(error.message || 'Failed to save deployment host')
+      setHostingStatus('error')
+      setHostingMessage(error.message || 'Failed to provision hosting')
+      setHostingDetails(null)
     },
   })
 
-  const handleSaveHost = () => {
-    updateHostMutation.mutate(deploymentHost)
+  const handleProvisionHosting = () => {
+    setHostingStatus('provisioning')
+    setHostingMessage('Generating subdomain and setting up DNS, Nginx, and SSL certificate...')
+    provisionHostingMutation.mutate()
   }
 
-  // Setup SSL mutation
-  const setupSslMutation = useMutation({
-    mutationFn: () => api.setupSSLCertificate(taskId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['task', taskId] })
-      setSslStatus('success')
-      setSslMessage('SSL certificate configured successfully')
-      setTimeout(() => {
-        setSslStatus('idle')
-        setSslMessage('')
-      }, 5000)
-    },
-    onError: (error: Error) => {
-      setSslStatus('error')
-      setSslMessage(error.message || 'Failed to setup SSL certificate')
-      setTimeout(() => {
-        setSslStatus('idle')
-        setSslMessage('')
-      }, 5000)
-    },
-  })
-
-  const handleSetupSsl = () => {
-    setupSslMutation.mutate()
-  }
+  // Check if hosting is already provisioned
+  const isHostingProvisioned = task.hosting_status === 'active' || task.hosting_status === 'active_no_ssl'
+  const hostingFqdn = task.hosting_fqdn || (hostingDetails?.fqdn)
 
   // Deploy mutation
   const deployMutation = useMutation({
@@ -238,7 +226,7 @@ export function DeploymentTaskTab({ taskId, task }: DeploymentTaskTabProps) {
         </div>
       </motion.div>
 
-      {/* Deployment Host Section */}
+      {/* Custom Domain Section */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -249,113 +237,117 @@ export function DeploymentTaskTab({ taskId, task }: DeploymentTaskTabProps) {
           <div className="flex items-center gap-3">
             <CubeIcon className="h-5 w-5 text-blue-400" />
             <div>
-              <h3 className="text-sm font-semibold text-foreground">Deployment Host</h3>
-              <p className="text-xs text-muted-foreground">Host URL for nginx configuration</p>
+              <h3 className="text-sm font-semibold text-foreground">Custom Domain</h3>
+              <p className="text-xs text-muted-foreground">Setup DNS, Nginx & SSL in one click</p>
             </div>
           </div>
+          {isHostingProvisioned && (
+            <div className="flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium font-mono bg-green-500/20 text-green-400">
+              <CheckCircledIcon className="h-3 w-3" />
+              Active
+            </div>
+          )}
         </div>
 
-        {/* Save Status */}
-        {hostSaveStatus !== 'idle' && (
+        {/* Status Message */}
+        {hostingStatus !== 'idle' && (
           <div className={cn(
             "flex items-center gap-2 p-3 rounded-lg text-sm font-mono mb-4",
-            hostSaveStatus === 'success' && "bg-green-500/10 text-green-400",
-            hostSaveStatus === 'error' && "bg-red-500/10 text-red-400",
-            hostSaveStatus === 'saving' && "bg-cyan-500/10 text-cyan-400"
+            hostingStatus === 'success' && "bg-green-500/10 text-green-400",
+            hostingStatus === 'error' && "bg-red-500/10 text-red-400",
+            hostingStatus === 'provisioning' && "bg-cyan-500/10 text-cyan-400"
           )}>
-            {hostSaveStatus === 'saving' && <UpdateIcon className="h-4 w-4 animate-spin" />}
-            {hostSaveStatus === 'success' && <CheckCircledIcon className="h-4 w-4" />}
-            {hostSaveStatus === 'error' && <CrossCircledIcon className="h-4 w-4" />}
-            <span>{hostSaveMessage}</span>
+            {hostingStatus === 'provisioning' && <UpdateIcon className="h-4 w-4 animate-spin" />}
+            {hostingStatus === 'success' && <CheckCircledIcon className="h-4 w-4" />}
+            {hostingStatus === 'error' && <CrossCircledIcon className="h-4 w-4" />}
+            <span>{hostingMessage}</span>
           </div>
         )}
 
-        <div className="flex gap-3">
-          <Input
-            value={deploymentHost}
-            onChange={(e) => setDeploymentHost(e.target.value)}
-            placeholder="example.com or subdomain.example.com"
-            className="font-mono text-sm flex-1 bg-black/20 border-border"
-          />
-          <Button
-            onClick={handleSaveHost}
-            disabled={updateHostMutation.isPending || deploymentHost === (task.deployment_host || '')}
-            className="font-mono"
-          >
-            {updateHostMutation.isPending ? (
-              <>
-                <UpdateIcon className="h-4 w-4 mr-2 animate-spin" />
-                Saving...
-              </>
-            ) : (
-              <>
-                <CheckCircledIcon className="h-4 w-4 mr-2" />
-                Save Host
-              </>
-            )}
-          </Button>
-        </div>
-        {task.deployment_host && (
-          <p className="text-xs text-muted-foreground mt-2 font-mono">
-            Current host: <span className="text-foreground">{task.deployment_host}</span>
-          </p>
-        )}
-        <p className="text-xs text-muted-foreground mt-2">
-          The host will be used to create nginx configuration via API during deployment.
-        </p>
-
-        {/* SSL Certificate Setup */}
-        {task.deployment_host && (
-          <div className="mt-4 pt-4 border-t border-border/50">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <LockClosedIcon className="h-4 w-4 text-green-400" />
-                <h4 className="text-sm font-semibold text-foreground">SSL Certificate</h4>
+        {/* Provisioning Steps Progress */}
+        {hostingStatus === 'success' && hostingDetails?.steps && (
+          <div className="mb-4 p-3 bg-black/20 rounded-lg border border-border/50">
+            <div className="flex items-center gap-4 text-xs font-mono">
+              <div className={cn(
+                "flex items-center gap-1",
+                hostingDetails.steps.dns?.status === 'success' ? "text-green-400" : "text-red-400"
+              )}>
+                {hostingDetails.steps.dns?.status === 'success' ? <CheckCircledIcon className="h-3 w-3" /> : <CrossCircledIcon className="h-3 w-3" />}
+                DNS
+              </div>
+              <div className={cn(
+                "flex items-center gap-1",
+                hostingDetails.steps.nginx?.status === 'success' ? "text-green-400" : "text-yellow-400"
+              )}>
+                {hostingDetails.steps.nginx?.status === 'success' ? <CheckCircledIcon className="h-3 w-3" /> : <CrossCircledIcon className="h-3 w-3" />}
+                Nginx
+              </div>
+              <div className={cn(
+                "flex items-center gap-1",
+                hostingDetails.steps.certbot?.status === 'success' ? "text-green-400" : "text-yellow-400"
+              )}>
+                {hostingDetails.steps.certbot?.status === 'success' ? <CheckCircledIcon className="h-3 w-3" /> : <CrossCircledIcon className="h-3 w-3" />}
+                SSL
               </div>
             </div>
+          </div>
+        )}
 
-            {/* SSL Status */}
-            {sslStatus !== 'idle' && (
-              <div className={cn(
-                "flex items-center gap-2 p-3 rounded-lg text-sm font-mono mb-3",
-                sslStatus === 'success' && "bg-green-500/10 text-green-400",
-                sslStatus === 'error' && "bg-red-500/10 text-red-400",
-                sslStatus === 'setting_up' && "bg-cyan-500/10 text-cyan-400"
-              )}>
-                {sslStatus === 'setting_up' && <UpdateIcon className="h-4 w-4 animate-spin" />}
-                {sslStatus === 'success' && <CheckCircledIcon className="h-4 w-4" />}
-                {sslStatus === 'error' && <CrossCircledIcon className="h-4 w-4" />}
-                <span>{sslMessage}</span>
-              </div>
-            )}
+        {/* Generated Subdomain Display (after provisioning started) */}
+        {hostingDetails?.subdomain && (
+          <div className="mb-4 p-3 bg-black/20 rounded-lg border border-cyan-500/30">
+            <p className="text-xs text-muted-foreground mb-1">Generated subdomain:</p>
+            <p className="text-sm font-mono text-cyan-400">{hostingDetails.subdomain}.tediux.com</p>
+          </div>
+        )}
 
+        {!isHostingProvisioned && !hostingDetails?.subdomain ? (
+          <>
             <Button
-              onClick={handleSetupSsl}
-              disabled={setupSslMutation.isPending || !task.deployment_host}
-              variant="outline"
+              onClick={handleProvisionHosting}
+              disabled={provisionHostingMutation.isPending || !task.deployment_port}
               className="font-mono w-full"
             >
-              {setupSslMutation.isPending ? (
+              {provisionHostingMutation.isPending ? (
                 <>
                   <UpdateIcon className="h-4 w-4 mr-2 animate-spin" />
-                  Setting up SSL...
+                  Generating subdomain & setting up...
                 </>
               ) : (
                 <>
                   <LockClosedIcon className="h-4 w-4 mr-2" />
-                  Setup SSL Certificate
+                  Setup Custom Domain with SSL
                 </>
               )}
             </Button>
+
+            {!task.deployment_port && (
+              <p className="text-xs text-yellow-400 mt-2 font-mono">
+                Deployment port required. Deploy the task first.
+              </p>
+            )}
             <p className="text-xs text-muted-foreground mt-2">
-              Configures Let's Encrypt SSL certificate for HTTPS access.
+              Auto-generates a unique subdomain, creates DNS record, configures Nginx reverse proxy, and sets up SSL certificate.
+            </p>
+          </>
+        ) : (
+          <div className="space-y-3">
+            <div className="p-3 bg-black/20 rounded-lg border border-green-500/30">
+              <div className="flex items-center gap-2 mb-1">
+                <LockClosedIcon className="h-4 w-4 text-green-400" />
+                <span className="text-sm font-semibold text-foreground">Domain Active</span>
+              </div>
+              <p className="text-sm font-mono text-cyan-400">{hostingFqdn}</p>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Your custom domain is configured with DNS, Nginx, and SSL certificate.
             </p>
           </div>
         )}
       </motion.div>
 
-      {/* Visit Deployed Site - Show only when deployment_host is set */}
-      {task.deployment_host && (
+      {/* Visit Deployed Site - Show when hosting_fqdn or deployment_host is set */}
+      {(hostingFqdn || task.deployment_host) && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -366,7 +358,7 @@ export function DeploymentTaskTab({ taskId, task }: DeploymentTaskTabProps) {
           <div className="absolute -inset-0.5 bg-gradient-to-r from-cyan-500 via-blue-500 to-purple-500 rounded-xl blur opacity-30 group-hover:opacity-60 transition duration-300" />
 
           <a
-            href={`https://${task.deployment_host}`}
+            href={`https://${hostingFqdn || task.deployment_host}`}
             target="_blank"
             rel="noopener noreferrer"
             className="relative block"
@@ -386,7 +378,7 @@ export function DeploymentTaskTab({ taskId, task }: DeploymentTaskTabProps) {
                       Visit Deployed Site
                     </h3>
                     <p className="text-sm font-mono text-cyan-400/90 group-hover:text-cyan-300 transition-colors">
-                      {task.deployment_host}
+                      {hostingFqdn || task.deployment_host}
                     </p>
                   </div>
                 </div>

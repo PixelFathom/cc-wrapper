@@ -150,7 +150,7 @@ export default function RefundPolicyPage() {
               </p>
               <ol className="list-decimal pl-6 text-gray-700 dark:text-gray-300 space-y-3 mb-4">
                 <li>
-                  <strong>Contact Support:</strong> Send an email to support@projecthub.com with the subject line "Refund Request"
+                  <strong>Contact Support:</strong> Send an email to support@tediux.com with the subject line "Refund Request"
                 </li>
                 <li>
                   <strong>Provide Information:</strong> Include your account email, subscription details, and reason for the refund request
@@ -260,7 +260,7 @@ export default function RefundPolicyPage() {
               </p>
               <div className="bg-gray-50 dark:bg-gray-900 p-4 rounded-lg">
                 <p className="text-gray-700 dark:text-gray-300 font-mono text-sm">
-                  Email: support@projecthub.com<br />
+                  Email: support@tediux.com<br />
                   Subject: Refund Request or Cancellation Question<br />
                   Website: <a href="/contact" className="text-cyan-500 hover:underline">Contact Form</a>
                 </p>

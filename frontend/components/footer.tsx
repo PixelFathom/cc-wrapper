@@ -18,12 +18,12 @@ export function Footer() {
                 <CodeIcon className="h-5 w-5 text-cyan-500" />
                 <span className="font-mono text-sm">
                   <span className="text-muted-foreground">$</span>
-                  <span className="text-cyan-500 ml-1">project-hub</span>
+                  <span className="text-cyan-500 ml-1">tediux</span>
                 </span>
               </div>
             </Link>
             <p className="text-sm text-muted-foreground">
-              Elegant project management with real-time collaboration
+              AI-powered development platform
             </p>
           </div>
 
@@ -109,7 +109,7 @@ export function Footer() {
 
         <div className="flex flex-col md:flex-row justify-between items-center gap-4">
           <p className="text-sm text-muted-foreground">
-            &copy; {currentYear} Project Hub. All rights reserved.
+            &copy; {currentYear} Tediux. All rights reserved.
           </p>
           <div className="flex items-center gap-4">
             <span className="text-xs text-muted-foreground font-mono">v1.0.0</span>

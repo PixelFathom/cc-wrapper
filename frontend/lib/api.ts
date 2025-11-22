@@ -51,6 +51,12 @@ export interface Task {
   env_file_path?: string
   env_variables?: Record<string, string>
   task_type?: string
+  // Hosting fields
+  hosting_subdomain?: string
+  hosting_fqdn?: string
+  hosting_status?: 'active' | 'active_no_ssl' | 'dns_only' | 'failed' | 'removed' | null
+  hosting_provisioned_at?: string
+  hosting_removed_at?: string
 }
 
 export interface DeploymentHook {
@@ -589,6 +595,73 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify({ email }),
     })
+  }
+
+  // Hosting - Provision complete hosting for a task (DNS + Nginx + SSL) in one call
+  provisionHostingForTask = async (taskId: string, subdomain?: string, upstreamPort?: number): Promise<{
+    subdomain: string
+    fqdn: string
+    url: string
+    upstream_port: number
+    ip: string
+    steps: {
+      dns: { status: string; message?: string; error?: string }
+      nginx: { status: string; message?: string; error?: string }
+      certbot: { status: string; message?: string; error?: string }
+    }
+    status: string
+    warning?: string
+  }> => {
+    return this.authenticatedRequest('/hosting/provision', {
+      method: 'POST',
+      body: JSON.stringify({
+        task_id: taskId,
+        ...(subdomain && { subdomain }),
+        ...(upstreamPort && { upstream_port: upstreamPort }),
+      }),
+    })
+  }
+
+  // Hosting - Provision complete hosting (DNS + Nginx + SSL) in one call - Admin only
+  provisionHostingSimple = async (subdomain: string, upstreamPort: number, ip?: string): Promise<{
+    subdomain: string
+    fqdn: string
+    url: string
+    upstream_port: number
+    ip: string
+    steps: {
+      dns: { status: string; message?: string; error?: string }
+      nginx: { status: string; message?: string; error?: string }
+      certbot: { status: string; message?: string; error?: string }
+    }
+    status: string
+    warning?: string
+  }> => {
+    return this.authenticatedRequest('/hosting/provision/simple', {
+      method: 'POST',
+      body: JSON.stringify({
+        subdomain,
+        upstream_port: upstreamPort,
+        ...(ip && { ip }),
+      }),
+    })
+  }
+
+  // Check if subdomain exists
+  checkSubdomainExists = async (subdomain: string): Promise<{
+    subdomain: string
+    fqdn: string
+    exists: boolean
+  }> => {
+    return this.authenticatedRequest(`/hosting/dns/check/${subdomain}`)
+  }
+
+  // Generate unique subdomain
+  generateSubdomain = async (prefix: string = 'site'): Promise<{
+    subdomain: string
+    fqdn: string
+  }> => {
+    return this.authenticatedRequest(`/hosting/dns/generate-subdomain?prefix=${encodeURIComponent(prefix)}`)
   }
 
   // VS Code (requires authentication)
