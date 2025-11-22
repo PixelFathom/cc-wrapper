@@ -1,8 +1,18 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { GitHubLogoIcon, ExitIcon } from '@radix-ui/react-icons';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { GitHubLogoIcon } from '@radix-ui/react-icons';
+import { User, LogOut, ChevronDown } from 'lucide-react';
 import { getGitHubAuthUrl } from '@/lib/api/github-auth';
 
 export function GitHubAuthButton() {
@@ -44,32 +54,57 @@ export function GitHubAuthButton() {
 
   if (user) {
     return (
-      <div className="flex items-center gap-2">
-        <div className="relative group">
-          <div className="absolute -inset-0.5 bg-gradient-to-r from-purple-600 to-pink-600 rounded-lg blur opacity-20 group-hover:opacity-40 transition duration-300"></div>
-          <div className="relative flex items-center gap-2 bg-card/80 backdrop-blur-sm rounded-lg px-3 py-1.5 border border-purple-500/30">
-            {user.avatar_url && (
-              <img
-                src={user.avatar_url}
-                alt={user.github_login}
-                className="w-5 h-5 rounded-full ring-1 ring-purple-500/50"
-              />
-            )}
-            <div className="flex items-center gap-1">
-              <span className="text-xs font-mono text-purple-400">@</span>
-              <span className="text-xs font-mono text-cyan-400">{user.github_login}</span>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            className="relative group p-0 h-auto hover:bg-transparent"
+          >
+            <div className="absolute -inset-0.5 bg-gradient-to-r from-purple-600 to-pink-600 rounded-lg blur opacity-20 group-hover:opacity-40 transition duration-300"></div>
+            <div className="relative flex items-center gap-2 bg-card/80 backdrop-blur-sm rounded-lg px-3 py-1.5 border border-purple-500/30">
+              {user.avatar_url && (
+                <img
+                  src={user.avatar_url}
+                  alt={user.github_login}
+                  className="w-5 h-5 rounded-full ring-1 ring-purple-500/50"
+                />
+              )}
+              <div className="flex items-center gap-1">
+                <span className="text-xs font-mono text-purple-400">@</span>
+                <span className="text-xs font-mono text-cyan-400">{user.github_login}</span>
+              </div>
+              <ChevronDown className="h-3 w-3 text-muted-foreground" />
             </div>
-          </div>
-        </div>
-        <Button
-          onClick={handleLogout}
-          variant="ghost"
-          size="sm"
-          className="text-xs text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-all duration-200"
-        >
-          <ExitIcon className="h-3 w-3" />
-        </Button>
-      </div>
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-48">
+          <DropdownMenuLabel>
+            <div className="flex flex-col">
+              <span className="text-sm font-semibold">{user.github_login}</span>
+              {user.email && (
+                <span className="text-xs text-gray-500 font-normal truncate">
+                  {user.email}
+                </span>
+              )}
+            </div>
+          </DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem asChild>
+            <Link href="/profile" className="flex items-center cursor-pointer">
+              <User className="h-4 w-4 mr-2" />
+              Edit Profile
+            </Link>
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onClick={handleLogout}
+            className="text-red-500 focus:text-red-500 cursor-pointer"
+          >
+            <LogOut className="h-4 w-4 mr-2" />
+            Sign Out
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     );
   }
 

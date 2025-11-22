@@ -69,10 +69,10 @@ export default function ContactPage() {
                 <div>
                   <h3 className="font-semibold mb-1">Email</h3>
                   <a
-                    href="mailto:support@projecthub.com"
+                    href="mailto:info@tediux.com"
                     className="text-sm text-cyan-500 hover:underline"
                   >
-                    support@projecthub.com
+                    info@tediux.com
                   </a>
                 </div>
               </div>

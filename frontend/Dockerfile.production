@@ -30,6 +30,10 @@ COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
 
+# Backend API URL (passed as build arg - REQUIRED for production)
+ARG NEXT_PUBLIC_BACKEND_HOST
+ENV NEXT_PUBLIC_BACKEND_HOST=${NEXT_PUBLIC_BACKEND_HOST}
+
 # Cashfree environment (passed as build arg or defaults to production)
 ARG NEXT_PUBLIC_CASHFREE_ENV=production
 ENV NEXT_PUBLIC_CASHFREE_ENV=${NEXT_PUBLIC_CASHFREE_ENV}

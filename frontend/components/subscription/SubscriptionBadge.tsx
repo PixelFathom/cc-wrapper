@@ -13,7 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
-import { Coins, Crown, ChevronDown, History, CreditCard, User } from "lucide-react";
+import { Coins, Crown, ChevronDown, History, CreditCard } from "lucide-react";
 
 const TIER_COLORS = {
   [SubscriptionTier.FREE]: "bg-gray-500",
@@ -111,17 +111,6 @@ export function SubscriptionBadge() {
           </DropdownMenuLabel>
 
           <DropdownMenuSeparator />
-
-          <DropdownMenuItem asChild>
-            <Link
-              href="/profile"
-              className="flex items-center cursor-pointer"
-              onClick={() => setIsOpen(false)}
-            >
-              <User className="h-4 w-4 mr-2" />
-              Edit Profile
-            </Link>
-          </DropdownMenuItem>
 
           <DropdownMenuItem asChild>
             <Link

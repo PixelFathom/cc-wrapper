@@ -72,7 +72,7 @@ export function Footer() {
               </li>
               <li>
                 <a
-                  href="mailto:support@projecthub.com"
+                  href="mailto:info@tediux.com"
                   className="text-sm text-muted-foreground hover:text-cyan-500 transition-colors"
                 >
                   Email Support

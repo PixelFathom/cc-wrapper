@@ -63,6 +63,7 @@ app.add_middleware(
         "https://code.tanmaydeepsharma.com",
         "https://code-api.tanmaydeepsharma.com",
         "https://tediux.com",
+        "https://api.tediux.com",
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
