@@ -116,22 +116,22 @@ class HostingService:
                 "status": "failed",
                 "error": str(e)
             }
-            # Continue to certbot even if nginx has issues - it might already be configured
+            # Continue to SSL setup even if nginx has issues - it might already be configured
             logger.warning("Continuing despite Nginx error...")
 
         try:
-            # Step 3: Setup SSL with Certbot
+            # Step 3: Setup SSL certificate
             logger.info(f"Step 3: Setting up SSL for {fqdn}")
-            certbot_result = await self._setup_certbot(fqdn)
-            results["steps"]["certbot"] = {
+            ssl_result = await self._setup_ssl(fqdn)
+            results["steps"]["ssl"] = {
                 "status": "success",
                 "message": f"SSL certificate obtained for {fqdn}"
             }
-            logger.info(f"Certbot configured: {certbot_result}")
+            logger.info(f"SSL configured: {ssl_result}")
 
         except Exception as e:
             logger.error(f"Failed to setup SSL: {e}")
-            results["steps"]["certbot"] = {
+            results["steps"]["ssl"] = {
                 "status": "failed",
                 "error": str(e)
             }
@@ -146,7 +146,7 @@ class HostingService:
         # Determine overall status
         dns_ok = results["steps"]["dns"]["status"] == "success"
         nginx_ok = results["steps"].get("nginx", {}).get("status") == "success"
-        ssl_ok = results["steps"].get("certbot", {}).get("status") == "success"
+        ssl_ok = results["steps"].get("ssl", {}).get("status") == "success"
 
         if dns_ok and nginx_ok and ssl_ok:
             results["status"] = "success"
@@ -178,45 +178,37 @@ class HostingService:
         Returns:
             API response
         """
-        url = f"{self.nginx_api_url}/configure"
-
-        payload = {
-            "domain": fqdn,
-            "upstream_host": "localhost",
-            "upstream_port": upstream_port,
-            "enable_ssl": False  # SSL will be handled by certbot
-        }
+        # Remove protocol if present
+        host_clean = fqdn.replace("https://", "").replace("http://", "").strip()
 
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                url,
-                json=payload,
+                f"{self.nginx_api_url}/create-config",
+                json={"port": upstream_port, "host_name": host_clean},
                 timeout=60.0
             )
             response.raise_for_status()
             return response.json()
 
-    async def _setup_certbot(self, fqdn: str) -> Dict[str, Any]:
+    async def _setup_ssl(self, fqdn: str, email: str = "admin@example.com") -> Dict[str, Any]:
         """
-        Setup SSL certificate using Certbot.
+        Setup SSL certificate using the nginx API.
 
         Args:
             fqdn: Fully qualified domain name
+            email: Email for Let's Encrypt certificate notifications
 
         Returns:
             API response
         """
-        url = f"{self.nginx_api_url}/certbot"
-
-        payload = {
-            "domain": fqdn
-        }
+        # Remove protocol if present
+        host_clean = fqdn.replace("https://", "").replace("http://", "").strip()
 
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                url,
-                json=payload,
-                timeout=120.0  # Certbot can take time
+                f"{self.nginx_api_url}/add-ssl",
+                json={"host_name": host_clean, "email": email},
+                timeout=120.0  # SSL setup can take time
             )
             response.raise_for_status()
             return response.json()
@@ -395,14 +387,168 @@ class HostingService:
 
         # Step 3: Setup SSL
         try:
-            await self._setup_certbot(fqdn)
-            results["steps"]["certbot"] = {"status": "success"}
+            await self._setup_ssl(fqdn)
+            results["steps"]["ssl"] = {"status": "success"}
         except Exception as e:
-            results["steps"]["certbot"] = {"status": "failed", "error": str(e)}
+            results["steps"]["ssl"] = {"status": "failed", "error": str(e)}
 
         # Determine status
         all_success = all(s.get("status") == "success" for s in results["steps"].values())
         results["status"] = "success" if all_success else "partial"
+
+        return results
+
+    async def retry_step(
+        self,
+        db: AsyncSession,
+        task_id: UUID,
+        step: str
+    ) -> Dict[str, Any]:
+        """
+        Retry a specific failed step for a task's hosting setup.
+
+        Args:
+            db: Database session
+            task_id: Task UUID
+            step: Step to retry ('dns', 'nginx', or 'ssl')
+
+        Returns:
+            Result of the retry operation
+        """
+        task = await db.get(Task, task_id)
+        if not task:
+            raise ValueError(f"Task not found: {task_id}")
+
+        if not task.hosting_subdomain or not task.hosting_fqdn:
+            raise ValueError("Hosting not provisioned for this task. Use provision_hosting first.")
+
+        fqdn = task.hosting_fqdn
+        subdomain = task.hosting_subdomain
+        port = task.deployment_port
+
+        if not port:
+            raise ValueError("No deployment port available for task")
+
+        result = {
+            "task_id": str(task_id),
+            "step": step,
+            "fqdn": fqdn
+        }
+
+        try:
+            if step == "dns":
+                await self.dns_service.add_a_record(subdomain, ip=self.server_ip)
+                result["status"] = "success"
+                result["message"] = f"DNS A record added: {fqdn} -> {self.server_ip}"
+
+            elif step == "nginx":
+                await self._configure_nginx(fqdn, port)
+                result["status"] = "success"
+                result["message"] = f"Nginx configured for {fqdn} -> localhost:{port}"
+
+            elif step == "ssl":
+                await self._setup_ssl(fqdn)
+                result["status"] = "success"
+                result["message"] = f"SSL certificate obtained for {fqdn}"
+
+            else:
+                raise ValueError(f"Invalid step: {step}. Must be 'dns', 'nginx', or 'ssl'")
+
+            # Update task hosting status based on result
+            await self._update_hosting_status(db, task)
+
+        except Exception as e:
+            logger.error(f"Failed to retry step {step} for {fqdn}: {e}")
+            result["status"] = "failed"
+            result["error"] = str(e)
+
+        return result
+
+    async def _update_hosting_status(self, db: AsyncSession, task: Task) -> None:
+        """Update task hosting status based on current state."""
+        # For now, just mark as active since a retry succeeded
+        if task.hosting_status in ("failed", "dns_only", "active_no_ssl"):
+            task.hosting_status = "active"
+            await db.commit()
+
+    async def retry_all_failed(
+        self,
+        db: AsyncSession,
+        task_id: UUID
+    ) -> Dict[str, Any]:
+        """
+        Retry all steps for a task's hosting setup (useful for regenerating).
+
+        Args:
+            db: Database session
+            task_id: Task UUID
+
+        Returns:
+            Results of all retry operations
+        """
+        task = await db.get(Task, task_id)
+        if not task:
+            raise ValueError(f"Task not found: {task_id}")
+
+        if not task.hosting_subdomain or not task.hosting_fqdn:
+            raise ValueError("Hosting not provisioned for this task. Use provision_hosting first.")
+
+        fqdn = task.hosting_fqdn
+        subdomain = task.hosting_subdomain
+        port = task.deployment_port
+
+        if not port:
+            raise ValueError("No deployment port available for task")
+
+        results = {
+            "task_id": str(task_id),
+            "subdomain": subdomain,
+            "fqdn": fqdn,
+            "steps": {}
+        }
+
+        # Step 1: Retry DNS
+        try:
+            await self.dns_service.add_a_record(subdomain, ip=self.server_ip)
+            results["steps"]["dns"] = {"status": "success", "message": f"DNS A record added: {fqdn} -> {self.server_ip}"}
+        except Exception as e:
+            results["steps"]["dns"] = {"status": "failed", "error": str(e)}
+
+        # Step 2: Retry Nginx
+        try:
+            await self._configure_nginx(fqdn, port)
+            results["steps"]["nginx"] = {"status": "success", "message": f"Nginx configured for {fqdn} -> localhost:{port}"}
+        except Exception as e:
+            results["steps"]["nginx"] = {"status": "failed", "error": str(e)}
+
+        # Step 3: Retry SSL
+        try:
+            await self._setup_ssl(fqdn)
+            results["steps"]["ssl"] = {"status": "success", "message": f"SSL certificate obtained for {fqdn}"}
+        except Exception as e:
+            results["steps"]["ssl"] = {"status": "failed", "error": str(e)}
+
+        # Determine overall status
+        dns_ok = results["steps"]["dns"]["status"] == "success"
+        nginx_ok = results["steps"]["nginx"]["status"] == "success"
+        ssl_ok = results["steps"]["ssl"]["status"] == "success"
+
+        if dns_ok and nginx_ok and ssl_ok:
+            results["status"] = "success"
+            task.hosting_status = "active"
+        elif dns_ok and nginx_ok:
+            results["status"] = "partial"
+            results["warning"] = "SSL setup failed, site available on HTTP only"
+            task.hosting_status = "active_no_ssl"
+        elif dns_ok:
+            results["status"] = "partial"
+            results["warning"] = "Nginx and/or SSL setup failed"
+            task.hosting_status = "dns_only"
+        else:
+            results["status"] = "failed"
+            task.hosting_status = "failed"
+
+        await db.commit()
 
         return results
 

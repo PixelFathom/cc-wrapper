@@ -301,3 +301,66 @@ async def generate_unique_subdomain(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate subdomain: {str(e)}"
         )
+
+
+# Retry endpoints
+class RetryStepRequest(BaseModel):
+    """Request to retry a specific hosting step"""
+    step: str = Field(..., description="Step to retry: 'dns', 'nginx', or 'ssl'")
+
+
+@router.post("/{task_id}/retry-step", response_model=dict)
+async def retry_hosting_step(
+    task_id: UUID,
+    request: RetryStepRequest,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Retry a specific failed step for a task's hosting setup.
+
+    Use this when DNS, Nginx, or SSL setup failed and you want to retry just that step.
+    Valid steps: 'dns', 'nginx', 'ssl'
+    """
+    try:
+        result = await hosting_service.retry_step(
+            db=db,
+            task_id=task_id,
+            step=request.step
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to retry step: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retry step: {str(e)}"
+        )
+
+
+@router.post("/{task_id}/retry-all", response_model=dict)
+async def retry_all_hosting_steps(
+    task_id: UUID,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Retry all hosting steps (DNS, Nginx, SSL) for a task.
+
+    Use this to regenerate all hosting configuration when multiple steps failed.
+    """
+    try:
+        result = await hosting_service.retry_all_failed(
+            db=db,
+            task_id=task_id
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to retry hosting steps: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retry hosting steps: {str(e)}"
+        )

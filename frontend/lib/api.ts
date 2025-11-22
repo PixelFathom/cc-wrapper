@@ -572,31 +572,6 @@ class ApiClient {
     })
   }
 
-  updateDeploymentHost = async (taskId: string, host: string): Promise<{
-    message: string
-    task_id: string
-    deployment_host: string
-    nginx_status: string
-  }> => {
-    return this.authenticatedRequest(`/tasks/${taskId}/deployment/host`, {
-      method: 'PUT',
-      body: JSON.stringify({ host }),
-    })
-  }
-
-  setupSSLCertificate = async (taskId: string, email: string = 'admin@example.com'): Promise<{
-    message: string
-    task_id: string
-    deployment_host: string
-    ssl_status: string
-    email: string
-  }> => {
-    return this.authenticatedRequest(`/tasks/${taskId}/deployment/ssl`, {
-      method: 'POST',
-      body: JSON.stringify({ email }),
-    })
-  }
-
   // Hosting - Provision complete hosting for a task (DNS + Nginx + SSL) in one call
   provisionHostingForTask = async (taskId: string, subdomain?: string, upstreamPort?: number): Promise<{
     subdomain: string
@@ -662,6 +637,39 @@ class ApiClient {
     fqdn: string
   }> => {
     return this.authenticatedRequest(`/hosting/dns/generate-subdomain?prefix=${encodeURIComponent(prefix)}`)
+  }
+
+  // Retry a specific hosting step (dns, nginx, or ssl)
+  retryHostingStep = async (taskId: string, step: 'dns' | 'nginx' | 'ssl'): Promise<{
+    task_id: string
+    step: string
+    fqdn: string
+    status: string
+    message?: string
+    error?: string
+  }> => {
+    return this.authenticatedRequest(`/hosting/${taskId}/retry-step`, {
+      method: 'POST',
+      body: JSON.stringify({ step }),
+    })
+  }
+
+  // Retry all hosting steps (regenerate)
+  retryAllHostingSteps = async (taskId: string): Promise<{
+    task_id: string
+    subdomain: string
+    fqdn: string
+    steps: {
+      dns: { status: string; message?: string; error?: string }
+      nginx: { status: string; message?: string; error?: string }
+      ssl: { status: string; message?: string; error?: string }
+    }
+    status: string
+    warning?: string
+  }> => {
+    return this.authenticatedRequest(`/hosting/${taskId}/retry-all`, {
+      method: 'POST',
+    })
   }
 
   // VS Code (requires authentication)

@@ -35,8 +35,9 @@ export function DeploymentTaskTab({ taskId, task }: DeploymentTaskTabProps) {
   const [hostingDetails, setHostingDetails] = useState<{
     subdomain?: string
     fqdn?: string
-    steps?: { dns?: { status: string }; nginx?: { status: string }; certbot?: { status: string } }
+    steps?: { dns?: { status: string; error?: string }; nginx?: { status: string; error?: string }; ssl?: { status: string; error?: string } }
   } | null>(null)
+  const [retryingStep, setRetryingStep] = useState<string | null>(null)
 
   // Fetch environment variables
   const { data: envData, refetch: refetchEnv } = useQuery({
@@ -59,6 +60,33 @@ export function DeploymentTaskTab({ taskId, task }: DeploymentTaskTabProps) {
       setHasUnsavedChanges(false)
     }
   }, [envData])
+
+  // Initialize hostingDetails from task data on load/refresh
+  useEffect(() => {
+    if (task.hosting_fqdn || task.hosting_subdomain) {
+      // Determine step statuses based on hosting_status
+      const getStepStatuses = () => {
+        switch (task.hosting_status) {
+          case 'active':
+            return { dns: { status: 'success' }, nginx: { status: 'success' }, ssl: { status: 'success' } }
+          case 'active_no_ssl':
+            return { dns: { status: 'success' }, nginx: { status: 'success' }, ssl: { status: 'failed' } }
+          case 'dns_only':
+            return { dns: { status: 'success' }, nginx: { status: 'failed' }, ssl: { status: 'failed' } }
+          case 'failed':
+            return { dns: { status: 'failed' }, nginx: { status: 'failed' }, ssl: { status: 'failed' } }
+          default:
+            return undefined
+        }
+      }
+
+      setHostingDetails({
+        subdomain: task.hosting_subdomain || undefined,
+        fqdn: task.hosting_fqdn || undefined,
+        steps: getStepStatuses()
+      })
+    }
+  }, [task.hosting_fqdn, task.hosting_subdomain, task.hosting_status])
 
 
   // Fetch deployment hooks (only deployment phase for this tab)
@@ -137,8 +165,73 @@ export function DeploymentTaskTab({ taskId, task }: DeploymentTaskTabProps) {
     provisionHostingMutation.mutate()
   }
 
-  // Check if hosting is already provisioned
+  // Retry step mutation
+  const retryStepMutation = useMutation({
+    mutationFn: (step: 'dns' | 'nginx' | 'ssl') => api.retryHostingStep(taskId, step),
+    onSuccess: (data, step) => {
+      queryClient.invalidateQueries({ queryKey: ['task', taskId] })
+      if (data.status === 'success') {
+        // Update the local state with the successful step
+        setHostingDetails(prev => ({
+          ...prev,
+          steps: {
+            ...prev?.steps,
+            [step]: { status: 'success', message: data.message }
+          }
+        }))
+        setHostingMessage(`${step.toUpperCase()} step completed successfully!`)
+      } else {
+        setHostingMessage(`Failed to retry ${step}: ${data.error}`)
+      }
+      setRetryingStep(null)
+    },
+    onError: (error: Error, step) => {
+      setHostingMessage(`Failed to retry ${step}: ${error.message}`)
+      setRetryingStep(null)
+    },
+  })
+
+  // Retry all steps mutation
+  const retryAllMutation = useMutation({
+    mutationFn: () => api.retryAllHostingSteps(taskId),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['task', taskId] })
+      setHostingDetails({ subdomain: data.subdomain, fqdn: data.fqdn, steps: data.steps })
+      if (data.status === 'success') {
+        setHostingStatus('success')
+        setHostingMessage(`All steps completed successfully for ${data.fqdn}!`)
+      } else if (data.status === 'partial') {
+        setHostingStatus('success')
+        setHostingMessage(data.warning || `Domain ${data.fqdn} configured (some steps may need attention)`)
+      } else {
+        setHostingStatus('error')
+        setHostingMessage('Some steps failed. Click retry on individual steps.')
+      }
+      setRetryingStep(null)
+    },
+    onError: (error: Error) => {
+      setHostingStatus('error')
+      setHostingMessage(error.message || 'Failed to retry hosting steps')
+      setRetryingStep(null)
+    },
+  })
+
+  const handleRetryStep = (step: 'dns' | 'nginx' | 'ssl') => {
+    setRetryingStep(step)
+    retryStepMutation.mutate(step)
+  }
+
+  const handleRetryAll = () => {
+    setRetryingStep('all')
+    setHostingStatus('provisioning')
+    setHostingMessage('Retrying all hosting steps...')
+    retryAllMutation.mutate()
+  }
+
+  // Check if hosting is already provisioned (including partial states like dns_only)
   const isHostingProvisioned = task.hosting_status === 'active' || task.hosting_status === 'active_no_ssl'
+  const isHostingPartiallyProvisioned = task.hosting_status === 'dns_only' || task.hosting_status === 'failed'
+  const hasHostingAttempted = isHostingProvisioned || isHostingPartiallyProvisioned || !!task.hosting_fqdn
   const hostingFqdn = task.hosting_fqdn || (hostingDetails?.fqdn)
 
   // Deploy mutation
@@ -200,32 +293,6 @@ export function DeploymentTaskTab({ taskId, task }: DeploymentTaskTabProps) {
   const disableDeployButton = !canDeploy || deployMutation.isPending || hasUnsavedChanges || isDeployingWithoutError
   return (
     <div className="space-y-6">
-      {/* Port Display */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="bg-gradient-to-br from-card to-card/80 rounded-xl border border-border/50 p-5 backdrop-blur-sm"
-      >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <CubeIcon className="h-5 w-5 text-cyan-400" />
-            <div>
-              <h3 className="text-sm font-semibold text-foreground">Deployment Port</h3>
-              <p className="text-xs text-muted-foreground">Port assigned to this task</p>
-            </div>
-          </div>
-          {task.deployment_port ? (
-            <div className="px-4 py-2 bg-cyan-500/20 rounded-lg border border-cyan-500/30">
-              <span className="font-mono text-lg text-cyan-400">{task.deployment_port}</span>
-            </div>
-          ) : (
-            <div className="px-4 py-2 bg-gray-500/20 rounded-lg border border-gray-500/30">
-              <span className="font-mono text-sm text-muted-foreground">Not assigned</span>
-            </div>
-          )}
-        </div>
-      </motion.div>
-
       {/* Custom Domain Section */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -247,6 +314,12 @@ export function DeploymentTaskTab({ taskId, task }: DeploymentTaskTabProps) {
               Active
             </div>
           )}
+          {isHostingPartiallyProvisioned && (
+            <div className="flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium font-mono bg-yellow-500/20 text-yellow-400">
+              <CrossCircledIcon className="h-3 w-3" />
+              Partial
+            </div>
+          )}
         </div>
 
         {/* Status Message */}
@@ -265,31 +338,102 @@ export function DeploymentTaskTab({ taskId, task }: DeploymentTaskTabProps) {
         )}
 
         {/* Provisioning Steps Progress */}
-        {hostingStatus === 'success' && hostingDetails?.steps && (
+        {hostingDetails?.steps && (
           <div className="mb-4 p-3 bg-black/20 rounded-lg border border-border/50">
-            <div className="flex items-center gap-4 text-xs font-mono">
-              <div className={cn(
-                "flex items-center gap-1",
-                hostingDetails.steps.dns?.status === 'success' ? "text-green-400" : "text-red-400"
-              )}>
-                {hostingDetails.steps.dns?.status === 'success' ? <CheckCircledIcon className="h-3 w-3" /> : <CrossCircledIcon className="h-3 w-3" />}
-                DNS
+            <div className="flex flex-wrap items-center gap-3 text-xs font-mono">
+              {/* DNS Step */}
+              <div className="flex items-center gap-1">
+                <div className={cn(
+                  "flex items-center gap-1",
+                  hostingDetails.steps.dns?.status === 'success' ? "text-green-400" : "text-red-400"
+                )}>
+                  {hostingDetails.steps.dns?.status === 'success' ? <CheckCircledIcon className="h-3 w-3" /> : <CrossCircledIcon className="h-3 w-3" />}
+                  DNS
+                </div>
+                {hostingDetails.steps.dns?.status !== 'success' && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-5 px-1.5 text-xs text-cyan-400 hover:text-cyan-300"
+                    onClick={() => handleRetryStep('dns')}
+                    disabled={retryingStep !== null}
+                  >
+                    {retryingStep === 'dns' ? <UpdateIcon className="h-3 w-3 animate-spin" /> : <ReloadIcon className="h-3 w-3" />}
+                  </Button>
+                )}
               </div>
-              <div className={cn(
-                "flex items-center gap-1",
-                hostingDetails.steps.nginx?.status === 'success' ? "text-green-400" : "text-yellow-400"
-              )}>
-                {hostingDetails.steps.nginx?.status === 'success' ? <CheckCircledIcon className="h-3 w-3" /> : <CrossCircledIcon className="h-3 w-3" />}
-                Nginx
+
+              {/* Nginx Step */}
+              <div className="flex items-center gap-1">
+                <div className={cn(
+                  "flex items-center gap-1",
+                  hostingDetails.steps.nginx?.status === 'success' ? "text-green-400" : "text-yellow-400"
+                )}>
+                  {hostingDetails.steps.nginx?.status === 'success' ? <CheckCircledIcon className="h-3 w-3" /> : <CrossCircledIcon className="h-3 w-3" />}
+                  Nginx
+                </div>
+                {hostingDetails.steps.nginx?.status !== 'success' && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-5 px-1.5 text-xs text-cyan-400 hover:text-cyan-300"
+                    onClick={() => handleRetryStep('nginx')}
+                    disabled={retryingStep !== null}
+                  >
+                    {retryingStep === 'nginx' ? <UpdateIcon className="h-3 w-3 animate-spin" /> : <ReloadIcon className="h-3 w-3" />}
+                  </Button>
+                )}
               </div>
-              <div className={cn(
-                "flex items-center gap-1",
-                hostingDetails.steps.certbot?.status === 'success' ? "text-green-400" : "text-yellow-400"
-              )}>
-                {hostingDetails.steps.certbot?.status === 'success' ? <CheckCircledIcon className="h-3 w-3" /> : <CrossCircledIcon className="h-3 w-3" />}
-                SSL
+
+              {/* SSL Step */}
+              <div className="flex items-center gap-1">
+                <div className={cn(
+                  "flex items-center gap-1",
+                  hostingDetails.steps.ssl?.status === 'success' ? "text-green-400" : "text-yellow-400"
+                )}>
+                  {hostingDetails.steps.ssl?.status === 'success' ? <CheckCircledIcon className="h-3 w-3" /> : <CrossCircledIcon className="h-3 w-3" />}
+                  SSL
+                </div>
+                {hostingDetails.steps.ssl?.status !== 'success' && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-5 px-1.5 text-xs text-cyan-400 hover:text-cyan-300"
+                    onClick={() => handleRetryStep('ssl')}
+                    disabled={retryingStep !== null}
+                  >
+                    {retryingStep === 'ssl' ? <UpdateIcon className="h-3 w-3 animate-spin" /> : <ReloadIcon className="h-3 w-3" />}
+                  </Button>
+                )}
               </div>
             </div>
+
+            {/* Retry All Button - show if any step failed */}
+            {(hostingDetails.steps.dns?.status !== 'success' ||
+              hostingDetails.steps.nginx?.status !== 'success' ||
+              hostingDetails.steps.ssl?.status !== 'success') && (
+              <div className="mt-3 pt-3 border-t border-border/50">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-xs font-mono"
+                  onClick={handleRetryAll}
+                  disabled={retryingStep !== null}
+                >
+                  {retryingStep === 'all' ? (
+                    <>
+                      <UpdateIcon className="h-3 w-3 mr-1 animate-spin" />
+                      Retrying all...
+                    </>
+                  ) : (
+                    <>
+                      <ReloadIcon className="h-3 w-3 mr-1" />
+                      Retry All Failed Steps
+                    </>
+                  )}
+                </Button>
+              </div>
+            )}
           </div>
         )}
 
@@ -301,7 +445,7 @@ export function DeploymentTaskTab({ taskId, task }: DeploymentTaskTabProps) {
           </div>
         )}
 
-        {!isHostingProvisioned && !hostingDetails?.subdomain ? (
+        {!hasHostingAttempted && !hostingDetails?.subdomain ? (
           <>
             <Button
               onClick={handleProvisionHosting}
