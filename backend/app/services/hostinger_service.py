@@ -118,6 +118,18 @@ class HostingerDNSService:
                     "response": result
                 }
         except httpx.HTTPStatusError as e:
+            # 422 means record already exists - treat as success
+            if e.response.status_code == 422:
+                logger.info(f"A record already exists for {subdomain}.{self.domain} (422 response)")
+                return {
+                    "success": True,
+                    "subdomain": subdomain,
+                    "fqdn": f"{subdomain}.{self.domain}",
+                    "ip": target_ip,
+                    "ttl": record_ttl,
+                    "already_exists": True,
+                    "message": "DNS record already exists"
+                }
             logger.error(f"HTTP error adding A record: {e.response.status_code} - {e.response.text}")
             raise
         except httpx.HTTPError as e:
