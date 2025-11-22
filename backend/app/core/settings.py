@@ -42,6 +42,16 @@ class Settings(BaseSettings):
     cashfree_api_version: str = "2023-08-01"
     cashfree_environment: str = "sandbox"  # sandbox or production
 
+    # Hostinger DNS API Configuration
+    hostinger_api_token: str = ""
+    hostinger_domain: str = ""  # e.g., "example.com"
+    hostinger_api_base_url: str = "https://developers.hostinger.com"
+
+    # Hosting Configuration
+    server_ip: str = "149.5.247.109"  # Target IP for A records
+    default_dns_ttl: int = 300  # TTL in seconds
+
+
     @property
     def database_url(self) -> str:
         return f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
