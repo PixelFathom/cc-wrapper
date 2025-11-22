@@ -181,14 +181,21 @@ class HostingService:
         # Remove protocol if present
         host_clean = fqdn.replace("https://", "").replace("http://", "").strip()
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self.nginx_api_url}/create-config",
-                json={"port": upstream_port, "host_name": host_clean},
-                timeout=60.0
-            )
-            response.raise_for_status()
-            return response.json()
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.nginx_api_url}/create-config",
+                    json={"port": upstream_port, "host_name": host_clean},
+                    timeout=60.0
+                )
+                response.raise_for_status()
+                return response.json()
+        except httpx.RemoteProtocolError as e:
+            # Server disconnects when nginx reloads - treat as success
+            if "Server disconnected" in str(e):
+                logger.info(f"Nginx config applied (server disconnected during reload): {fqdn}")
+                return {"status": "success", "message": "Nginx configured (server reloaded)"}
+            raise
 
     async def _setup_ssl(self, fqdn: str, email: str = "admin@example.com") -> Dict[str, Any]:
         """
@@ -204,14 +211,21 @@ class HostingService:
         # Remove protocol if present
         host_clean = fqdn.replace("https://", "").replace("http://", "").strip()
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self.nginx_api_url}/add-ssl",
-                json={"host_name": host_clean, "email": email},
-                timeout=120.0  # SSL setup can take time
-            )
-            response.raise_for_status()
-            return response.json()
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.nginx_api_url}/add-ssl",
+                    json={"host_name": host_clean, "email": email},
+                    timeout=120.0  # SSL setup can take time
+                )
+                response.raise_for_status()
+                return response.json()
+        except httpx.RemoteProtocolError as e:
+            # Server disconnects when nginx reloads after SSL setup - treat as success
+            if "Server disconnected" in str(e):
+                logger.info(f"SSL configured (server disconnected during reload): {fqdn}")
+                return {"status": "success", "message": "SSL configured (server reloaded)"}
+            raise
 
     async def remove_hosting(
         self,
@@ -437,9 +451,15 @@ class HostingService:
 
         try:
             if step == "dns":
-                await self.dns_service.add_a_record(subdomain, ip=self.server_ip)
-                result["status"] = "success"
-                result["message"] = f"DNS A record added: {fqdn} -> {self.server_ip}"
+                # Check if DNS record already exists before trying to add
+                dns_exists = await self.dns_service.check_subdomain_exists(subdomain)
+                if dns_exists:
+                    result["status"] = "success"
+                    result["message"] = f"DNS A record already exists: {fqdn} -> {self.server_ip}"
+                else:
+                    await self.dns_service.add_a_record(subdomain, ip=self.server_ip)
+                    result["status"] = "success"
+                    result["message"] = f"DNS A record added: {fqdn} -> {self.server_ip}"
 
             elif step == "nginx":
                 await self._configure_nginx(fqdn, port)
@@ -507,10 +527,14 @@ class HostingService:
             "steps": {}
         }
 
-        # Step 1: Retry DNS
+        # Step 1: Retry DNS (check if exists first)
         try:
-            await self.dns_service.add_a_record(subdomain, ip=self.server_ip)
-            results["steps"]["dns"] = {"status": "success", "message": f"DNS A record added: {fqdn} -> {self.server_ip}"}
+            dns_exists = await self.dns_service.check_subdomain_exists(subdomain)
+            if dns_exists:
+                results["steps"]["dns"] = {"status": "success", "message": f"DNS A record already exists: {fqdn} -> {self.server_ip}"}
+            else:
+                await self.dns_service.add_a_record(subdomain, ip=self.server_ip)
+                results["steps"]["dns"] = {"status": "success", "message": f"DNS A record added: {fqdn} -> {self.server_ip}"}
         except Exception as e:
             results["steps"]["dns"] = {"status": "failed", "error": str(e)}
 
