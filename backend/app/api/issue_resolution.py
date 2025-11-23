@@ -505,12 +505,6 @@ async def initialize_issue_environment(
             if task.mcp_servers:
                 init_payload["mcp_servers"] = task.mcp_servers
 
-            redis_client = await get_redis()
-            await assert_within_rate_limit(
-                redis_client,
-                user_id=project.user_id,
-            )
-
             # Call init_project on external service
             async with httpx.AsyncClient() as client:
                 init_response = await client.post(
@@ -746,23 +740,6 @@ async def solve_issue(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to check repository permissions or create fork: {str(e)}"
-        )
-
-    redis_client = await get_redis()
-    try:
-        await assert_within_rate_limit(
-            redis_client,
-            user_id=current_user.id,
-            consume=False,
-        )
-    except RateLimitExceeded as e:
-        headers = {}
-        if e.retry_after is not None and e.retry_after > 0:
-            headers["Retry-After"] = str(e.retry_after)
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=str(e),
-            headers=headers or None
         )
 
     issue_title = payload.issue_title

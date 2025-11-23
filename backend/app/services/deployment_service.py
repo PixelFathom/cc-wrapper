@@ -56,12 +56,6 @@ class DeploymentService:
             task.deployment_port = await self._generate_unique_port(db, task_id)
             logger.info(f"Assigned port {task.deployment_port} to task {task_id}")
 
-        redis_client = await get_redis()
-        await assert_within_rate_limit(
-            redis_client,
-            user_id=task.project.user_id,
-        )
-
         # Get GitHub token if not provided
         if not github_token and task.project.user_id:
             from app.services.github_auth_service import GitHubAuthService

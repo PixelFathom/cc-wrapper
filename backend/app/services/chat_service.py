@@ -65,11 +65,6 @@ class ChatService:
             if not project:
                 raise ValueError("Project not found")
 
-            redis_client = await get_redis()
-            await assert_within_rate_limit(
-                redis_client,
-                user_id=project.user_id,
-            )
 
             # Generate webhook URL
             webhook_url = f"{self.webhook_base_url}/api/webhooks/chat/{chat_id}"

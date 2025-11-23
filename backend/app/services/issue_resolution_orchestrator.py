@@ -823,12 +823,6 @@ class IssueResolutionOrchestrator:
             # Webhook URL points to deployment webhook
             webhook_url = f"{settings.webhook_base_url}/api/webhooks/deployment/{task.id}/initialization"
 
-            redis_client = await get_redis()
-            await assert_within_rate_limit(
-                redis_client,
-                user_id=project.user_id,
-            )
-
             # Prepare init payload with issue branch
             init_payload = {
                 "organization_name": settings.org_name,
