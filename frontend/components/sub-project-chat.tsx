@@ -934,234 +934,99 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
   return (
     <div className="flex flex-col h-[calc(100vh-8rem)] sm:h-[calc(100vh-10rem)] md:h-[calc(100vh-12rem)]">
       <div className="flex-1 overflow-hidden flex flex-col gradient-border-neon rounded-lg relative bg-black/30">
-        {/* Terminal header */}
-        <div className="flex items-center justify-between px-2 sm:px-4 py-2 border-b border-border bg-card/80 backdrop-blur-sm">
-          <div className="flex items-center space-x-2">
-            <div className="flex items-center space-x-1.5">
-              <div className="w-2.5 h-2.5 rounded-full bg-red-500"></div>
-              <div className="w-2.5 h-2.5 rounded-full bg-yellow-500"></div>
-              <div className="w-2.5 h-2.5 rounded-full bg-green-500"></div>
-            </div>
-            <span className="text-xs font-mono text-muted-foreground hidden sm:inline">developer-chat</span>
-            {/* Permission Mode Indicator */}
-            <div className={cn(
-              "flex items-center gap-1 ml-2 px-2 py-0.5 rounded-full border",
-              permissionMode === 'bypassPermissions'
-                ? "bg-amber-500/20 border-amber-500/30"
-                : permissionMode === 'plan'
-                ? "bg-purple-500/20 border-purple-500/30"
-                : "bg-gray-500/20 border-gray-500/30"
-            )}>
-              <GearIcon className={cn(
-                "h-3 w-3",
-                permissionMode === 'bypassPermissions'
-                  ? "text-amber-500"
-                  : permissionMode === 'plan'
-                  ? "text-purple-500"
-                  : "text-gray-500"
-              )} />
-              <span className={cn(
-                "text-[10px] font-mono",
-                permissionMode === 'bypassPermissions'
-                  ? "text-amber-500"
-                  : permissionMode === 'plan'
-                  ? "text-purple-500"
-                  : "text-gray-500"
-              )}>
-                {permissionMode === 'bypassPermissions' ? 'Bypass' : permissionMode === 'plan' ? 'Plan' : 'Interactive'}
-              </span>
-            </div>
-          </div>
-          <div className="flex items-center space-x-1 sm:space-x-2">
-            {/* Auto-scroll toggle */}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                const newState = !autoScrollEnabled
-                setAutoScrollEnabled(newState)
-                // If enabling auto-scroll and user is not at bottom, scroll down
-                if (newState && userScrolledUp) {
-                  scrollToBottomManually()
-                }
-              }}
-              className={cn(
-                "text-xs font-mono h-6 px-1 sm:px-2 flex items-center gap-1 transition-all duration-200",
-                autoScrollEnabled
-                  ? "text-green-500 hover:text-green-400 hover:bg-green-500/10"
-                  : "text-gray-500 hover:text-gray-400 hover:bg-gray-500/10"
+        {/* Modern Chat Header - Clean & Minimal */}
+        <div className="bg-card/80 backdrop-blur-xl border-b border-border/40">
+          <div className="flex items-center h-11 px-2 sm:px-3">
+            {/* Session Tabs Container */}
+            <div className="flex items-center flex-1 min-w-0 overflow-x-auto scrollbar-none">
+              {/* New Session Tab */}
+              <button
+                type="button"
+                onClick={startNewSession}
+                className="flex items-center gap-1 h-7 px-2.5 mr-1 rounded-md text-xs font-medium text-muted-foreground hover:text-cyan-400 hover:bg-cyan-500/10 transition-all shrink-0"
+              >
+                <span className="text-sm">+</span>
+                <span className="hidden sm:inline">New</span>
+              </button>
+
+              {/* Divider */}
+              {sessionTabs.length > 0 && (
+                <div className="w-px h-4 bg-border/50 mx-1 shrink-0" />
               )}
-              title={autoScrollEnabled ? 'Auto-scroll enabled - will scroll to new messages' : 'Auto-scroll disabled - stay at current position'}
-            >
-              <ChevronDownIcon className={cn(
-                "h-3 w-3 transition-all duration-200",
-                autoScrollEnabled ? "text-green-500 rotate-0" : "text-gray-500 rotate-180"
-              )} />
-              <span className="hidden sm:inline">Auto-scroll</span>
-            </Button>
-            {/* Permission Mode toggle - Cycles through modes */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
+
+              {/* Session Tabs */}
+              <div className="flex items-center gap-0.5">
+                {sessionTabs.map((session, index) => {
+                  const isActive = session.session_id === sessionId
+                  const messageCount = getSessionTabMessageCount(session)
+                  const label = getSessionTabLabel(session, index)
+                  return (
+                    <button
+                      type="button"
+                      key={session.session_id ?? `session-${index}`}
+                      onClick={() => {
+                        if (!session.session_id || session.session_id === sessionId) return
+                        loadChatHistory(session.session_id)
+                      }}
+                      className={cn(
+                        "group relative flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs transition-all duration-150 shrink-0 max-w-[160px]",
+                        isActive
+                          ? "bg-muted/80 text-foreground"
+                          : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                      )}
+                      title={getSessionTabTooltip(session)}
+                    >
+                      {/* Active indicator */}
+                      {isActive && (
+                        <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-cyan-500 rounded-full" />
+                      )}
+                      <span className="truncate">{label}</span>
+                      <span className={cn(
+                        "text-[10px] tabular-nums",
+                        isActive ? "text-cyan-400" : "text-muted-foreground/60"
+                      )}>
+                        {messageCount}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* Right Controls */}
+            <div className="flex items-center gap-1.5 ml-2 shrink-0">
+              {/* Connection Status */}
+              {sessionId && (
+                <span className={cn(
+                  "w-1.5 h-1.5 rounded-full",
+                  sessionError ? "bg-red-500 animate-pulse" : "bg-green-500"
+                )} title={sessionError ? 'Connection error' : 'Connected'} />
+              )}
+
+              {/* Test Generation */}
+              {sessionId && (
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="text-xs font-mono h-6 px-1 sm:px-2 flex items-center gap-1"
-                  title="Change permission mode"
+                  onClick={() => setShowTestCaseModal(true)}
+                  className="h-7 w-7 p-0 rounded-md text-muted-foreground hover:text-purple-400 hover:bg-purple-500/10"
+                  title="Generate test cases"
                 >
-                  <GearIcon className={cn(
-                    "h-3 w-3",
-                    permissionMode === 'bypassPermissions'
-                      ? "text-amber-500"
-                      : permissionMode === 'plan'
-                      ? "text-purple-500"
-                      : "text-gray-500"
-                  )} />
-                  <span className="hidden sm:inline">Mode</span>
+                  <MixerHorizontalIcon className="h-3.5 w-3.5" />
                 </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => setPermissionMode('interactive')}>
-                  <div className="flex items-center gap-2">
-                    <div className={cn(
-                      "w-2 h-2 rounded-full",
-                      permissionMode === 'interactive' ? "bg-gray-500" : "bg-transparent"
-                    )} />
-                    <span>Interactive (Approval Required)</span>
-                  </div>
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setPermissionMode('bypassPermissions')}>
-                  <div className="flex items-center gap-2">
-                    <div className={cn(
-                      "w-2 h-2 rounded-full",
-                      permissionMode === 'bypassPermissions' ? "bg-amber-500" : "bg-transparent"
-                    )} />
-                    <span>Bypass (Auto-execute)</span>
-                  </div>
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setPermissionMode('plan')}>
-                  <div className="flex items-center gap-2">
-                    <div className={cn(
-                      "w-2 h-2 rounded-full",
-                      permissionMode === 'plan' ? "bg-purple-500" : "bg-transparent"
-                    )} />
-                    <span>Plan (Planning Mode)</span>
-                  </div>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            {/* Auto-continuation toggle */}
-            {sessionId && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={async () => {
-                  const newState = !autoContinuationEnabled
-                  setAutoContinuationEnabled(newState)
-                  try {
-                    await api.toggleAutoContinuation(sessionId, newState)
-                  } catch (error) {
-                    console.error('Failed to toggle auto-continuation:', error)
-                    setAutoContinuationEnabled(!newState) // Revert on error
-                  }
-                }}
-                className="text-xs font-mono h-6 px-1 sm:px-2 flex items-center gap-1"
-                title={autoContinuationEnabled ? 'Auto-continuation enabled' : 'Auto-continuation disabled'}
-              >
-                <UpdateIcon className={cn(
-                  "h-3 w-3",
-                  autoContinuationEnabled ? "text-green-500" : "text-gray-500"
-                )} />
-                <span className="hidden sm:inline">Auto</span>
-              </Button>
-            )}
-            {/* Test Case Generation Button - Only show when we have a session */}
-            {sessionId && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowTestCaseModal(true)}
-                className="text-xs font-mono h-6 px-1 sm:px-2 flex items-center gap-1"
-                title="Generate AI test cases from this conversation"
-              >
-                <MixerHorizontalIcon className={cn(
-                  "h-3 w-3",
-                  "text-purple-500"
-                )} />
-                <span className="hidden sm:inline">Tests</span>
-              </Button>
-            )}
-            {sessionId && (
-              <>
-                <span className={cn(
-                  "w-2 h-2 rounded-full animate-pulse",
-                  sessionError ? "bg-red-500" : "bg-green-500"
-                )}></span>
-                <span className={cn(
-                  "text-xs font-mono hidden md:inline",
-                  sessionError ? "text-red-500" : "text-green-500"
-                )}>
-                  session:{sessionId.slice(0, 8)}
-                  {sessionError && " (error)"}
-                </span>
-              </>
-            )}
-          </div>
-        </div>
+              )}
 
-        {/* Session Tabs */}
-        <div className="border-b border-border/70 bg-card/70 px-2 sm:px-4 py-2">
-          <div className="flex items-center justify-between text-[11px] font-mono uppercase tracking-wide text-muted-foreground">
-            <div className="flex items-center gap-2">
-              <ChatBubbleIcon className="h-3 w-3" />
-              <span>Chat Sessions</span>
-            </div>
-            <span>{sessionTabs.length} open</span>
-          </div>
-          <div className="mt-2">
-            <div className="overflow-x-auto pb-1">
-              <div className="flex items-center gap-2 min-w-max pr-4">
-                <button
-                  type="button"
-                  onClick={startNewSession}
-                  className="shrink-0 rounded-md border border-dashed border-border px-3 py-1.5 text-xs font-mono text-muted-foreground hover:text-cyan-400 hover:border-cyan-500/50 transition-colors"
-                >
-                  + New Session
-                </button>
-                {sessionTabs.length === 0 ? (
-                  <div className="px-3 py-1.5 text-xs text-muted-foreground border border-dashed border-border rounded-md bg-card/40">
-                    No sessions yet
-                  </div>
-                ) : (
-                  sessionTabs.map((session, index) => {
-                    const isActive = session.session_id === sessionId
-                    const shortId = session.session_id ? session.session_id.slice(0, 8) : 'pending'
-                    const messageCount = getSessionTabMessageCount(session)
-                    return (
-                      <button
-                        type="button"
-                        key={session.session_id ?? `session-${index}`}
-                        onClick={() => {
-                          if (!session.session_id || session.session_id === sessionId) return
-                          loadChatHistory(session.session_id)
-                        }}
-                        className={cn(
-                          "flex min-w-[160px] max-w-[240px] flex-col rounded-md border px-3 py-1.5 text-left text-xs font-mono transition-colors duration-200 shrink-0",
-                          isActive
-                            ? "bg-card text-cyan-200 border-cyan-500/40 shadow-lg shadow-cyan-500/20"
-                            : "bg-card/30 text-muted-foreground border-border/40 hover:text-foreground hover:border-border"
-                        )}
-                        title={getSessionTabTooltip(session)}
-                        aria-current={isActive ? 'true' : undefined}
-                      >
-                        <span className="truncate font-semibold">{getSessionTabLabel(session, index)}</span>
-                        <span className="text-[10px] text-muted-foreground">
-                          {shortId} · {messageCount} msg{messageCount === 1 ? '' : 's'}
-                        </span>
-                      </button>
-                    )
-                  })
-                )}
-              </div>
+              {/* Mode Indicator */}
+              <span className={cn(
+                "hidden sm:inline-flex items-center gap-1 h-6 px-2 rounded text-[10px] font-medium",
+                permissionMode === 'bypassPermissions'
+                  ? "bg-amber-500/15 text-amber-400"
+                  : permissionMode === 'plan'
+                    ? "bg-purple-500/15 text-purple-400"
+                    : "bg-muted/50 text-muted-foreground"
+              )}>
+                {permissionMode === 'bypassPermissions' ? 'Bypass' : permissionMode === 'plan' ? 'Plan' : 'Ask'}
+              </span>
             </div>
           </div>
         </div>
@@ -1625,6 +1490,71 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                     </span>
                   )}
 
+                  {/* Mode selector dropdown - disabled when waiting */}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type="button"
+                        disabled={isWaitingForResponse}
+                        className={cn(
+                          "h-8 sm:h-9 px-2 sm:px-3 rounded-full text-xs font-medium flex items-center gap-1 min-w-0",
+                          isWaitingForResponse
+                            ? "bg-muted/30 text-muted-foreground/50 cursor-not-allowed"
+                            : permissionMode === 'bypassPermissions'
+                              ? "bg-amber-500/20 text-amber-400 hover:bg-amber-500/30"
+                              : permissionMode === 'plan'
+                                ? "bg-purple-500/20 text-purple-400 hover:bg-purple-500/30"
+                                : "bg-gray-500/20 text-gray-400 hover:bg-gray-500/30"
+                        )}
+                        size="sm"
+                      >
+                        <GearIcon className="h-3 w-3 flex-shrink-0" />
+                        <span className="truncate max-w-[60px] sm:max-w-none">
+                          {permissionMode === 'bypassPermissions' ? 'Bypass' : permissionMode === 'plan' ? 'Plan' : 'Interactive'}
+                        </span>
+                        <ChevronDownIcon className="h-3 w-3 flex-shrink-0" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-56">
+                      <DropdownMenuItem onClick={() => setPermissionMode('interactive')}>
+                        <div className="flex items-center gap-2 w-full">
+                          <div className={cn(
+                            "w-2 h-2 rounded-full",
+                            permissionMode === 'interactive' ? "bg-gray-500" : "bg-transparent border border-gray-500"
+                          )} />
+                          <div className="flex-1">
+                            <div className="font-medium">Interactive</div>
+                            <div className="text-xs text-muted-foreground">Approval required</div>
+                          </div>
+                        </div>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setPermissionMode('bypassPermissions')}>
+                        <div className="flex items-center gap-2 w-full">
+                          <div className={cn(
+                            "w-2 h-2 rounded-full",
+                            permissionMode === 'bypassPermissions' ? "bg-amber-500" : "bg-transparent border border-amber-500"
+                          )} />
+                          <div className="flex-1">
+                            <div className="font-medium">Bypass</div>
+                            <div className="text-xs text-muted-foreground">Auto-execute tools</div>
+                          </div>
+                        </div>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setPermissionMode('plan')}>
+                        <div className="flex items-center gap-2 w-full">
+                          <div className={cn(
+                            "w-2 h-2 rounded-full",
+                            permissionMode === 'plan' ? "bg-purple-500" : "bg-transparent border border-purple-500"
+                          )} />
+                          <div className="flex-1">
+                            <div className="font-medium">Plan</div>
+                            <div className="text-xs text-muted-foreground">Planning mode</div>
+                          </div>
+                        </div>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+
                   {/* Agent selector dropdown - disabled when waiting */}
                   <div className="relative" ref={agentDropdownRef}>
                     <Button
@@ -1636,15 +1566,15 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                         isWaitingForResponse
                           ? "bg-muted/30 text-muted-foreground/50 cursor-not-allowed"
                           : selectedAgent
-                            ? "bg-purple-500/20 text-purple-400 hover:bg-purple-500/30"
+                            ? "bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30"
                             : "bg-muted/50 text-muted-foreground hover:bg-muted"
                       )}
                       size="sm"
                     >
                       <ChatBubbleIcon className="h-3 w-3 flex-shrink-0" />
                       <span className="truncate max-w-[80px] sm:max-w-none">
-                        {selectedAgent 
-                          ? AVAILABLE_AGENTS.find(a => a.value === selectedAgent)?.label 
+                        {selectedAgent
+                          ? AVAILABLE_AGENTS.find(a => a.value === selectedAgent)?.label
                           : 'Agent'}
                       </span>
                       <ChevronDownIcon className={cn(
@@ -1813,8 +1743,8 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                 {isMobile ? (
                   <MobileInputStatus
                     isWaiting={isWaitingForResponse}
-                    isQueueProcessing={isQueueProcessing}
-                    queueLength={messageQueue.length}
+                    isQueueProcessing={false}
+                    queueLength={0}
                     inputLength={input.length}
                     showHints={false}
                   />
@@ -1851,9 +1781,9 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
 
       {/* Floating waiting indicator for mobile */}
       <FloatingWaitingIndicator
-        isVisible={isMobile && (isWaitingForResponse || isQueueProcessing)}
-        isQueueProcessing={isQueueProcessing}
-        queueLength={messageQueue.length}
+        isVisible={isMobile && isWaitingForResponse}
+        isQueueProcessing={false}
+        queueLength={0}
       />
 
       {/* Approval modals removed - approvals are now handled globally via ApprovalNotifications component */}

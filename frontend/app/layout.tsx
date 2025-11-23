@@ -63,8 +63,10 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
+      { url: '/icon', sizes: '32x32', type: 'image/png' },
       { url: '/favicon.svg', type: 'image/svg+xml' },
     ],
+    apple: '/apple-icon',
   },
   manifest: '/site.webmanifest',
 }
@@ -87,6 +89,9 @@ export default function RootLayout({
     <html lang="en" className="dark scroll-smooth">
       <head>
         <meta name="google-site-verification" content="-MkFFXW0NiFQDdTUV5nRvnXIjr5TNWNiu57BEsi23wY" />
+        <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+        <link rel="icon" href="/icon" type="image/png" sizes="32x32" />
+        <link rel="apple-touch-icon" href="/apple-icon" />
         <OrganizationSchema />
         <SoftwareApplicationSchema />
         <WebsiteSchema />

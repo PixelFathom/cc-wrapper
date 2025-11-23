@@ -27,7 +27,7 @@ import { MarkdownRenderer } from './markdown-renderer'
 import { IssueResolutionView } from './issue-resolution-view'
 import { MessagesTab } from './messages-tab'
 import { VSCodeLinkModal } from './vscode-link-modal'
-import { CustomDomainTab } from './custom-domain-tab'
+import { CustomDomainSection } from './custom-domain-section'
 import { DeployTab } from './deploy-tab'
 import { CommitAndPushModal } from './commit-and-push-modal'
 
@@ -41,11 +41,11 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
   const tabParam = searchParams.get('tab')
 
   // Will be set to 'issue-resolution' for issue tasks after loading
-  const [activeTab, setActiveTab] = useState<'deployment' | 'custom-domain' | 'deploy' | 'chat' | 'knowledge-base' | 'test-cases' | 'issue-resolution' | 'messages'>('deployment')
+  const [activeTab, setActiveTab] = useState<'deployment' | 'deploy' | 'chat' | 'knowledge-base' | 'test-cases' | 'issue-resolution' | 'messages'>('deployment')
 
   // Set tab from URL parameter if provided
   useEffect(() => {
-    if (tabParam && ['deployment', 'custom-domain', 'deploy', 'chat', 'knowledge-base', 'test-cases', 'issue-resolution', 'messages'].includes(tabParam)) {
+    if (tabParam && ['deployment', 'deploy', 'chat', 'knowledge-base', 'test-cases', 'issue-resolution', 'messages'].includes(tabParam)) {
       setActiveTab(tabParam as any)
     }
   }, [tabParam])
@@ -188,7 +188,7 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
 
   // For issue resolution tasks, render the dedicated issue resolution UI
   // UNLESS a specific tab is requested (to allow access to normal task features)
-  const allowedNormalTabs = ['chat', 'custom-domain', 'deploy', 'knowledge-base', 'test-cases', 'deployment']
+  const allowedNormalTabs = ['chat', 'deploy', 'knowledge-base', 'test-cases', 'deployment']
   const requestsNormalTab = tabParam && allowedNormalTabs.includes(tabParam)
 
   if (task.task_type === 'issue_resolution' && !requestsNormalTab) {
@@ -208,232 +208,114 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
       animate={{ opacity: 1 }}
       className="container mx-auto px-4 sm:px-6 py-6 sm:py-8"
     >
-      {/* Breadcrumb - Mobile Optimized */}
-      <nav className="flex items-center space-x-1 sm:space-x-2 text-xs sm:text-sm font-mono mb-4 sm:mb-6 overflow-x-auto">
-        <Link href="/" className="text-muted-foreground hover:text-cyan-500 transition-colors whitespace-nowrap">
-          ~/projects
-        </Link>
-        <span className="text-muted-foreground">/</span>
-        <Link href={`/p/${projectId}`} className="text-muted-foreground hover:text-cyan-500 transition-colors whitespace-nowrap">
-          {projectSlug}
-        </Link>
-        <span className="text-muted-foreground">/</span>
-        <span className="text-cyan-500 whitespace-nowrap">tasks/{taskSlug}</span>
-      </nav>
+      {/* Unified Task Header + Navigation */}
+      <div className="bg-card/80 backdrop-blur-xl rounded-xl border border-border/50 overflow-hidden mb-6">
+        {/* Status Accent Line */}
+        <div className={`h-0.5 ${
+          task.deployment_status === 'completed' ? 'bg-gradient-to-r from-transparent via-green-500 to-transparent' :
+          task.deployment_status === 'failed' ? 'bg-gradient-to-r from-transparent via-red-500 to-transparent' :
+          task.deployment_status === 'deploying' || task.deployment_status === 'initializing' ? 'bg-gradient-to-r from-transparent via-amber-500 to-transparent animate-pulse' :
+          'bg-gradient-to-r from-transparent via-gray-500/50 to-transparent'
+        }`} />
 
-      {/* Modern Task Header - Mobile Friendly */}
-      <div className="relative mb-6">
-        {/* Background Gradient Effect */}
-        <div className="absolute inset-0 bg-gradient-to-r from-cyan-500/10 via-purple-500/10 to-cyan-500/10 rounded-xl md:rounded-2xl blur-xl" />
-        
-        <div className="relative bg-card/90 backdrop-blur-xl rounded-xl md:rounded-2xl border border-border/50 overflow-hidden">
-          {/* Status Bar */}
-          <div className={`h-1 ${
-            task.deployment_status === 'completed' ? 'bg-gradient-to-r from-green-400 to-green-600' :
-            task.deployment_status === 'failed' ? 'bg-gradient-to-r from-red-400 to-red-600' :
-            task.deployment_status === 'deploying' || task.deployment_status === 'initializing' ? 'bg-gradient-to-r from-yellow-400 to-orange-500 animate-pulse' :
-            'bg-gradient-to-r from-gray-400 to-gray-600'
-          }`} />
-          
-          <div className="p-4 md:p-6 lg:p-8">
-            {/* Task Title and Status - Mobile Optimized */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">
-                  {task.name}
-                </h1>
-                {task.deployment_status === 'completed' ? (
-                  <motion.span 
-                    initial={{ scale: 0 }}
-                    animate={{ scale: 1 }}
-                    className="inline-flex items-center px-2.5 py-1 rounded-full text-xs sm:text-sm font-medium bg-green-500/20 text-green-400 border border-green-500/30 shadow-[0_0_15px_rgba(34,197,94,0.3)] self-start sm:self-auto"
-                  >
-                    <CheckCircledIcon className="h-3.5 w-3.5 mr-1" />
-                    Success
-                  </motion.span>
-                ) : task.deployment_status === 'failed' ? (
-                  <motion.span 
-                    initial={{ scale: 0 }}
-                    animate={{ scale: 1 }}
-                    className="inline-flex items-center px-2.5 py-1 rounded-full text-xs sm:text-sm font-medium bg-red-500/20 text-red-400 border border-red-500/30 shadow-[0_0_15px_rgba(239,68,68,0.3)] self-start sm:self-auto"
-                  >
-                    <CrossCircledIcon className="h-3.5 w-3.5 mr-1" />
-                    Failed
-                  </motion.span>
-                ) : task.deployment_status === 'deploying' || task.deployment_status === 'initializing' ? (
-                  <motion.span 
-                    initial={{ scale: 0 }}
-                    animate={{ scale: 1 }}
-                    className="inline-flex items-center px-2.5 py-1 rounded-full text-xs sm:text-sm font-medium bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 shadow-[0_0_15px_rgba(245,158,11,0.3)] self-start sm:self-auto"
-                  >
-                    <UpdateIcon className="h-3.5 w-3.5 mr-1 animate-spin" />
-                    In Progress
-                  </motion.span>
-                ) : (
-                  <motion.span 
-                    initial={{ scale: 0 }}
-                    animate={{ scale: 1 }}
-                    className="inline-flex items-center px-2.5 py-1 rounded-full text-xs sm:text-sm font-medium bg-gray-500/20 text-gray-400 border border-gray-500/30 self-start sm:self-auto"
-                  >
-                    <ClockIcon className="h-3.5 w-3.5 mr-1" />
-                    Queued
-                  </motion.span>
-                )}
-              </div>
-              
-              {/* Retry Button - Mobile Positioned */}
+        {/* Main Header Content */}
+        <div className="px-4 sm:px-5 pt-4 pb-3">
+          {/* Top Row: Breadcrumb + Actions */}
+          <div className="flex items-center justify-between mb-3">
+            <nav className="flex items-center text-xs font-mono text-muted-foreground">
+              <Link href="/" className="hover:text-cyan-400 transition-colors">projects</Link>
+              <span className="mx-1.5 text-border">/</span>
+              <Link href={`/p/${projectId}`} className="hover:text-cyan-400 transition-colors">{projectSlug}</Link>
+              <span className="mx-1.5 text-border">/</span>
+              <span className="text-foreground">{taskSlug}</span>
+            </nav>
+
+            {/* Right Actions */}
+            <div className="flex items-center gap-2">
               {task.deployment_status === 'failed' && (
                 <Button
                   onClick={() => api.retryTaskDeployment(taskId).then(() => refetchTask())}
                   size="sm"
-                  className="self-start sm:self-auto bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white border-0 shadow-lg text-xs sm:text-sm"
+                  variant="ghost"
+                  className="h-7 px-2 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10"
                 >
                   <ReloadIcon className="h-3 w-3 mr-1" />
                   Retry
                 </Button>
               )}
             </div>
-            
-            {/* Task Metadata Grid - Responsive */}
-            <div className="grid grid-cols-2 gap-3 mb-4">
-              <div className="bg-black/20 rounded-lg p-2.5 sm:p-3 border border-border/30">
-                <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-muted-foreground mb-0.5">
-                  <CommitIcon className="h-3 w-3" />
-                  <span>Task ID</span>
-                </div>
-                <span className="font-mono text-xs sm:text-sm text-cyan-400">{task.id.slice(0, 8)}</span>
-              </div>
-              
-              <div className="bg-black/20 rounded-lg p-2.5 sm:p-3 border border-border/30">
-                <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-muted-foreground mb-0.5">
-                  <ClockIcon className="h-3 w-3" />
-                  <span>Created</span>
-                </div>
-                <span className="text-xs sm:text-sm">
-                  {new Date(task.created_at).toLocaleDateString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                  })}
-                </span>
-              </div>
-              
-              {task.deployment_completed_at && (
-                <div className="bg-black/20 rounded-lg p-2.5 sm:p-3 border border-border/30">
-                  <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-muted-foreground mb-0.5">
-                    <LightningBoltIcon className="h-3 w-3" />
-                    <span>Duration</span>
-                  </div>
-                  <span className="text-xs sm:text-sm text-yellow-400">
-                    {formatDuration(
-                      new Date(task.deployment_started_at || task.created_at),
-                      new Date(task.deployment_completed_at)
-                    )}
-                  </span>
-                </div>
-              )}
-              
-              {deploymentData && (() => {
-                const totalCost = deploymentData.hooks.reduce((sum, hook) => 
-                  sum + (hook.data?.total_cost_usd || 0), 0
-                )
-                return totalCost > 0 ? (
-                  <div className="bg-black/20 rounded-lg p-2.5 sm:p-3 border border-border/30">
-                    <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-muted-foreground mb-0.5">
-                      <ActivityLogIcon className="h-3 w-3" />
-                      <span>Total Cost</span>
-                    </div>
-                    <span className="text-xs sm:text-sm text-green-400">${totalCost.toFixed(4)}</span>
-                  </div>
-                ) : null
-              })()}
-            </div>
-            
-            {/* MCP Servers - Mobile Optimized */}
-            {task.mcp_servers && task.mcp_servers.length > 0 && (
-              <div className="space-y-2">
-                <span className="text-xs sm:text-sm text-muted-foreground">MCP Servers:</span>
-                <div className="flex flex-wrap gap-2">
-                  {task.mcp_servers.map((server: any) => (
-                    <motion.span
-                      key={server.server_type}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] sm:text-xs font-medium bg-gradient-to-r from-blue-500/20 to-purple-500/20 text-blue-400 border border-blue-500/30"
-                    >
-                      <CubeIcon className="h-3 w-3 mr-1" />
-                      {server.server_type}
-                      {server.access_token && <LockClosedIcon className="h-3 w-3 ml-1 text-yellow-400" />}
-                    </motion.span>
-                  ))}
-                </div>
-              </div>
-            )}
-            
-            {/* Progress Bar for Active Deployments */}
-            {(task.deployment_status === 'deploying' || task.deployment_status === 'initializing') && deploymentData && (
-              <div className="mt-4">
-                <div className="flex items-center justify-between text-[10px] sm:text-xs text-muted-foreground mb-2">
-                  <span>Deployment Progress</span>
-                  <span>{deploymentData.hooks.length} events</span>
-                </div>
-                <div className="h-1.5 sm:h-2 bg-black/30 rounded-full overflow-hidden">
-                  <motion.div 
-                    className="h-full bg-gradient-to-r from-cyan-500 to-purple-500"
-                    initial={{ width: '0%' }}
-                    animate={{ width: '60%' }}
-                    transition={{ duration: 0.5 }}
-                  />
-                </div>
-              </div>
-            )}
+          </div>
+
+          {/* Title Row */}
+          <div className="flex items-center gap-3 mb-2">
+            <h1 className="text-xl sm:text-2xl font-semibold text-foreground">{task.name}</h1>
+            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${
+              task.deployment_status === 'completed' ? 'bg-green-500/15 text-green-400' :
+              task.deployment_status === 'failed' ? 'bg-red-500/15 text-red-400' :
+              task.deployment_status === 'deploying' || task.deployment_status === 'initializing' ? 'bg-amber-500/15 text-amber-400' :
+              'bg-muted text-muted-foreground'
+            }`}>
+              {task.deployment_status === 'completed' && <CheckCircledIcon className="h-3 w-3" />}
+              {task.deployment_status === 'failed' && <CrossCircledIcon className="h-3 w-3" />}
+              {(task.deployment_status === 'deploying' || task.deployment_status === 'initializing') && <UpdateIcon className="h-3 w-3 animate-spin" />}
+              {task.deployment_status === 'pending' && <ClockIcon className="h-3 w-3" />}
+              {task.deployment_status === 'completed' ? 'Success' : task.deployment_status}
+            </span>
+          </div>
+
+          {/* Metadata Row */}
+          <div className="flex items-center gap-3 text-xs text-muted-foreground mb-4">
+            <span className="font-mono text-cyan-400/80">{task.id.slice(0, 8)}</span>
+            <span className="text-border">•</span>
+            <span>{new Date(task.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+            {deploymentData && (() => {
+              const totalCost = deploymentData.hooks.reduce((sum, hook) => sum + (hook.data?.total_cost_usd || 0), 0)
+              return totalCost > 0 ? (
+                <>
+                  <span className="text-border">•</span>
+                  <span className="text-green-400">${totalCost.toFixed(4)}</span>
+                </>
+              ) : null
+            })()}
+          </div>
+
+          {/* Tab Navigation - Integrated */}
+          <div className="flex items-center gap-1 -mb-3 overflow-x-auto scrollbar-none">
+            {[
+              ...(task.task_type === 'issue_resolution' && !requestsNormalTab ? [
+                { id: 'issue-resolution', label: 'Issue', icon: <FileTextIcon className="h-3.5 w-3.5" /> },
+                { id: 'messages', label: 'Messages', icon: <ChatBubbleIcon className="h-3.5 w-3.5" /> },
+              ] : []),
+              ...(task.task_type !== 'issue_resolution' || requestsNormalTab ? [
+                { id: 'deployment', label: 'Summary', icon: <ActivityLogIcon className="h-3.5 w-3.5" /> },
+                { id: 'chat', label: 'Chat', icon: <ChatBubbleIcon className="h-3.5 w-3.5" /> },
+              ] : []),
+              { id: 'deploy', label: 'Deploy', icon: <RocketIcon className="h-3.5 w-3.5" /> },
+              { id: 'knowledge-base', label: 'Knowledge', icon: <ReaderIcon className="h-3.5 w-3.5" /> },
+              { id: 'test-cases', label: 'Tests', icon: <PlayIcon className="h-3.5 w-3.5" /> },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as any)}
+                className={`relative flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors whitespace-nowrap ${
+                  activeTab === tab.id
+                    ? 'text-foreground'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {tab.icon}
+                <span>{tab.label}</span>
+                {activeTab === tab.id && (
+                  <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-cyan-500 rounded-full" />
+                )}
+              </button>
+            ))}
           </div>
         </div>
       </div>
 
-      {/* Modern Tab Navigation - Mobile Optimized */}
-      <div className="bg-card/50 backdrop-blur-sm rounded-lg sm:rounded-xl border border-border/50 p-1 mb-6 sm:mb-8 overflow-x-auto">
-        <div className="flex space-x-1 min-w-max">
-          {[
-            // Show Issue Resolution tab first for issue tasks (only if not viewing normal tabs)
-            ...(task.task_type === 'issue_resolution' && !requestsNormalTab ? [
-              { id: 'issue-resolution', label: 'Issue Resolution', icon: <FileTextIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
-            ] : []),
-            // Show Messages tab for issue resolution tasks (only if not viewing normal tabs)
-            ...(task.task_type === 'issue_resolution' && !requestsNormalTab ? [
-              { id: 'messages', label: 'Messages', icon: <ChatBubbleIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
-            ] : []),
-            // Show deployment tab for non-issue tasks OR when explicitly viewing normal tabs
-            ...(task.task_type !== 'issue_resolution' || requestsNormalTab ? [
-              { id: 'deployment', label: 'Summary', icon: <ActivityLogIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
-            ] : []),
-            // Show Chat tab for non-issue tasks OR when explicitly viewing normal tabs
-            ...(task.task_type !== 'issue_resolution' || requestsNormalTab ? [
-              { id: 'chat', label: 'Chat', icon: <ChatBubbleIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
-            ] : []),
-            // Custom Domain tab for all tasks
-            { id: 'custom-domain', label: 'Custom Domain', icon: <CubeIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
-            // Deploy tab for all tasks
-            { id: 'deploy', label: 'Deploy', icon: <RocketIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
-            { id: 'knowledge-base', label: 'Knowledge Base', icon: <ReaderIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
-            { id: 'test-cases', label: 'Test Cases', icon: <PlayIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
-              className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-md sm:rounded-lg text-xs sm:text-sm font-medium transition-all whitespace-nowrap ${
-                activeTab === tab.id
-                  ? 'bg-gradient-to-r from-cyan-500/20 to-purple-500/20 text-foreground border border-cyan-500/30 shadow-lg'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
-              }`}
-            >
-              {tab.icon}
-              <span>{tab.label}</span>
-            </button>
-          ))}
-        </div>
-      </div>
+      {/* Custom Domain - Always visible, compact */}
+      <CustomDomainSection taskId={taskId} task={task} />
 
       {/* Tab Content */}
       <div className="space-y-6">
@@ -705,10 +587,6 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
               )}
             </div>
           </motion.div>
-        )}
-
-        {activeTab === 'custom-domain' && task && (
-          <CustomDomainTab taskId={taskId} task={task} />
         )}
 
         {activeTab === 'deploy' && task && (
