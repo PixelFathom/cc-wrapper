@@ -19,6 +19,8 @@ import { TestCaseGenerationModal } from './test-case-generation-modal'
 import { useApiError } from '@/lib/hooks/useApiError'
 import { toast } from 'sonner'
 import { CreditCost } from './ui/credit-cost'
+import { MobileWaitingResponse, MobileInputStatus, FloatingWaitingIndicator } from './mobile-waiting-response'
+import { useMobile } from '@/lib/hooks/useMobile'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -97,6 +99,7 @@ const truncateText = (text: string, maxLength: number = TAB_LABEL_MAX_CHARS) => 
 }
 
 export function SubProjectChat({ projectName, taskName, subProjectId, initialSessionId, taskId }: SubProjectChatProps) {
+  const isMobile = useMobile()
   const queryClient = useQueryClient()
   const { handleApiError } = useApiError()
   const [messages, setMessages] = useState<Message[]>([])
@@ -1387,10 +1390,12 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                               })}
                             </span>
                             {message.isProcessing && (
-                              <span className="text-xs text-cyan-500 flex items-center gap-1">
-                                <UpdateIcon className="h-3 w-3 animate-spin" />
-                                Processing
-                              </span>
+                              <MobileWaitingResponse
+                                isWaiting={true}
+                                isQueueProcessing={false}
+                                queueLength={0}
+                                className="ml-2"
+                              />
                             )}
                             {/* Show if this is a response to an auto-continuation */}
                             {message.parentMessageId && messages.find(m => m.id === message.parentMessageId)?.role === 'auto' && (
@@ -1812,17 +1817,29 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                 </div>
               </div>
 
-              {/* Hint text / Status indicator */}
-              <div className="mt-2 text-xs text-muted-foreground/50">
-                {isWaitingForResponse ? (
-                  <div className="flex items-center gap-2 text-amber-500">
-                    <UpdateIcon className="h-3 w-3 animate-spin" />
-                    <span>Processing... Please wait for the response to complete before sending another message.</span>
-                  </div>
+              {/* Combined status indicator with mobile optimization and credit cost */}
+              <div className="mt-2">
+                {isMobile ? (
+                  <MobileInputStatus
+                    isWaiting={isWaitingForResponse}
+                    isQueueProcessing={isQueueProcessing}
+                    queueLength={messageQueue.length}
+                    inputLength={input.length}
+                    showHints={false}
+                  />
                 ) : (
-                  <div className="flex items-center justify-between">
-                    <span>Press Enter to send • Shift+Enter for new line</span>
-                    <CreditCost cost={1} variant="context" showWarning={false} />
+                  <div className="text-xs text-muted-foreground/50">
+                    {isWaitingForResponse ? (
+                      <div className="flex items-center gap-2 text-amber-500">
+                        <UpdateIcon className="h-3 w-3 animate-spin" />
+                        <span>Processing... Please wait for the response to complete before sending another message.</span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between">
+                        <span>Press Enter to send • Shift+Enter for new line</span>
+                        <CreditCost cost={1} variant="context" showWarning={false} />
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1840,6 +1857,13 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
           taskId={taskId}
         />
       )}
+
+      {/* Floating waiting indicator for mobile */}
+      <FloatingWaitingIndicator
+        isVisible={isMobile && (isWaitingForResponse || isQueueProcessing)}
+        isQueueProcessing={isQueueProcessing}
+        queueLength={messageQueue.length}
+      />
 
       {/* Approval modals removed - approvals are now handled globally via ApprovalNotifications component */}
     </div>

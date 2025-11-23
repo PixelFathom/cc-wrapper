@@ -1,0 +1,22 @@
+version: "3.9"
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    env_file: .env
+    ports:
+      - "65170:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:9000
+      - NEXT_PUBLIC_BACKEND_HOST=http://localhost:9000
+      - BACKEND_HOST=http://backend:8000
+      - NODE_ENV=development
+networks:
+  default:
+    name: cc-wrapper
+    external: true

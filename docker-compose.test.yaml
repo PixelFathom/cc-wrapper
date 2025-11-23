@@ -1,0 +1,60 @@
+version: "3.9"
+services:
+  db:
+    image: postgres:15
+    env_file: .env
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $POSTGRES_USER"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cc-wrapper
+  cache:
+    image: redis:7
+    volumes:
+      - redis-data:/data
+    networks:
+      - cc-wrapper
+  backend:
+    build: ./backend
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_started
+    volumes:
+      - ./backend:/app
+    environment:
+      - POSTGRES_HOST=db
+      - REDIS_URL=redis://cache:6379/0
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - cc-wrapper
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    env_file: .env
+    ports:
+      - "65170:3000"  # CRITICAL: Using assigned port 65170
+    depends_on:
+      - backend
+    networks:
+      - cc-wrapper
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+
+networks:
+  cc-wrapper:
+    external: true
+
+volumes:
+  db-data:
+  redis-data:

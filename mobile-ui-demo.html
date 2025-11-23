@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mobile Waiting Response UI Demo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        border: "hsl(210 20% 20%)",
+                        input: "hsl(210 20% 16%)",
+                        ring: "hsl(180 100% 50%)",
+                        background: "hsl(225 15% 9%)",
+                        foreground: "hsl(213 31% 91%)",
+                        primary: {
+                            DEFAULT: "hsl(180 100% 50%)",
+                            foreground: "hsl(225 15% 9%)",
+                        },
+                        secondary: {
+                            DEFAULT: "hsl(210 20% 16%)",
+                            foreground: "hsl(213 31% 91%)",
+                        },
+                        destructive: {
+                            DEFAULT: "hsl(0 84% 60%)",
+                            foreground: "hsl(0 0% 98%)",
+                        },
+                        muted: {
+                            DEFAULT: "hsl(210 20% 16%)",
+                            foreground: "hsl(213 31% 64%)",
+                        },
+                        accent: {
+                            DEFAULT: "hsl(210 20% 16%)",
+                            foreground: "hsl(213 31% 91%)",
+                        },
+                        popover: {
+                            DEFAULT: "hsl(225 15% 9%)",
+                            foreground: "hsl(213 31% 91%)",
+                        },
+                        card: {
+                            DEFAULT: "hsl(225 15% 11%)",
+                            foreground: "hsl(213 31% 91%)",
+                        },
+                    },
+                },
+            },
+            darkMode: "class",
+        }
+    </script>
+</head>
+<body class="bg-background text-foreground min-h-screen dark">
+    <div class="p-4 space-y-8">
+        <h1 class="text-2xl font-bold text-cyan-500 mb-8">Mobile Waiting Response UI Demo</h1>
+
+        <!-- Before: Original Cluttered UI -->
+        <div class="space-y-4">
+            <h2 class="text-xl font-semibold text-red-500">❌ BEFORE: Cluttered Mobile UI</h2>
+            <div class="bg-card border border-border rounded-lg p-4 max-w-sm mx-auto">
+                <div class="space-y-3">
+                    <!-- Multiple waiting indicators (cluttered) -->
+                    <div class="flex items-center gap-1 text-xs">
+                        <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                        <span class="text-cyan-500">Waiting...</span>
+                    </div>
+
+                    <div class="flex items-center gap-2 text-amber-500 text-xs">
+                        <svg class="w-3 h-3 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                        </svg>
+                        <span>Waiting for response...</span>
+                    </div>
+
+                    <div class="text-xs text-muted-foreground">
+                        <div>Input disabled until completion</div>
+                    </div>
+
+                    <div class="text-xs text-amber-500 bg-amber-500/10 p-2 rounded">
+                        <span>🔄 Please wait for the current</span>
+                    </div>
+
+                    <div class="text-xs text-orange-500 bg-orange-500/10 p-2 rounded border">
+                        <div class="flex items-center gap-1">
+                            <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                <path d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 8.586V5z"></path>
+                            </svg>
+                            <span>Processing... Please wait for the response to complete before sending another message.</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- After: Clean Mobile UI -->
+        <div class="space-y-4">
+            <h2 class="text-xl font-semibold text-green-500">✅ AFTER: Clean Mobile UI</h2>
+
+            <!-- Mobile Waiting Response Component -->
+            <div class="bg-card border border-border rounded-lg p-4 max-w-sm mx-auto">
+                <div class="space-y-4">
+                    <!-- Single, clean waiting indicator -->
+                    <div class="flex items-center gap-2 px-3 py-2 rounded-full backdrop-blur-md border border-cyan-500/30 bg-cyan-500/10 text-cyan-500">
+                        <svg class="h-3 w-3 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                        </svg>
+                        <span class="font-medium text-xs whitespace-nowrap">Waiting...</span>
+
+                        <!-- Progress dots -->
+                        <div class="flex items-center gap-0.5 ml-1">
+                            <div class="w-1 h-1 rounded-full bg-cyan-500 animate-pulse" style="animation-delay: 0s;"></div>
+                            <div class="w-1 h-1 rounded-full bg-cyan-500 animate-pulse" style="animation-delay: 0.2s;"></div>
+                            <div class="w-1 h-1 rounded-full bg-cyan-500 animate-pulse" style="animation-delay: 0.4s;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Clean input status -->
+                    <div class="text-xs text-cyan-500 flex items-center gap-1">
+                        <svg class="h-3 w-3 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                        </svg>
+                        <span>Waiting...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Queue Processing State -->
+            <div class="bg-card border border-border rounded-lg p-4 max-w-sm mx-auto">
+                <div class="space-y-4">
+                    <div class="flex items-center gap-2 px-3 py-2 rounded-full backdrop-blur-md border border-amber-500/30 bg-amber-500/10 text-amber-500">
+                        <svg class="h-3 w-3 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                        </svg>
+                        <span class="font-medium text-xs whitespace-nowrap">Processing...</span>
+
+                        <!-- Progress dots -->
+                        <div class="flex items-center gap-0.5 ml-1">
+                            <div class="w-1 h-1 rounded-full bg-amber-500 animate-pulse" style="animation-delay: 0s;"></div>
+                            <div class="w-1 h-1 rounded-full bg-amber-500 animate-pulse" style="animation-delay: 0.2s;"></div>
+                            <div class="w-1 h-1 rounded-full bg-amber-500 animate-pulse" style="animation-delay: 0.4s;"></div>
+                        </div>
+                    </div>
+
+                    <div class="text-xs text-amber-500 flex items-center gap-1">
+                        <svg class="h-3 w-3 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                        </svg>
+                        <span>Processing...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Queue State -->
+            <div class="bg-card border border-border rounded-lg p-4 max-w-sm mx-auto">
+                <div class="space-y-4">
+                    <div class="flex items-center gap-2 px-3 py-2 rounded-full backdrop-blur-md border border-purple-500/30 bg-purple-500/10 text-purple-500">
+                        <svg class="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clip-rule="evenodd"></path>
+                        </svg>
+                        <span class="font-medium text-xs whitespace-nowrap">3 queued</span>
+                    </div>
+
+                    <div class="text-xs text-purple-500 flex items-center gap-1">
+                        <svg class="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clip-rule="evenodd"></path>
+                        </svg>
+                        <span>3 queued</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Floating Indicator for Mobile -->
+            <div class="relative bg-gray-900 rounded-lg p-8 max-w-sm mx-auto overflow-hidden" style="background: linear-gradient(135deg, #1e1e2e 0%, #2d3748 100%);">
+                <div class="text-xs text-gray-400 mb-4">Chat Area Preview:</div>
+                <div class="space-y-2 mb-8">
+                    <div class="bg-purple-500/10 border border-purple-500/30 rounded-lg p-2">
+                        <div class="text-xs text-purple-400">Assistant</div>
+                        <div class="text-sm">I'm working on your request...</div>
+                    </div>
+                </div>
+
+                <!-- Floating indicator -->
+                <div class="absolute bottom-4 left-1/2 transform -translate-x-1/2">
+                    <div class="flex items-center gap-3 px-4 py-3 rounded-2xl backdrop-blur-xl shadow-2xl border bg-black/60 border-white/10 text-sm">
+                        <div class="relative">
+                            <div class="w-6 h-6 rounded-full border-2 border-cyan-500/30 border-t-cyan-500 animate-spin"></div>
+                            <div class="absolute inset-0 flex items-center justify-center">
+                                <div class="w-2 h-2 bg-cyan-500 rounded-full animate-pulse"></div>
+                            </div>
+                        </div>
+                        <div class="flex flex-col">
+                            <span class="text-white font-medium text-sm">Assistant is thinking...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Key Improvements -->
+        <div class="space-y-4">
+            <h2 class="text-xl font-semibold text-cyan-500">🎯 Key Improvements</h2>
+            <div class="grid gap-4 text-sm">
+                <div class="bg-card border border-green-500/30 rounded-lg p-4">
+                    <div class="flex items-center gap-2 mb-2">
+                        <div class="w-3 h-3 bg-green-500 rounded-full"></div>
+                        <span class="font-medium text-green-500">Consolidated Status</span>
+                    </div>
+                    <p class="text-muted-foreground">Single, unified waiting indicator instead of multiple scattered status messages</p>
+                </div>
+
+                <div class="bg-card border border-blue-500/30 rounded-lg p-4">
+                    <div class="flex items-center gap-2 mb-2">
+                        <div class="w-3 h-3 bg-blue-500 rounded-full"></div>
+                        <span class="font-medium text-blue-500">Mobile-Optimized</span>
+                    </div>
+                    <p class="text-muted-foreground">Smaller text, compact layout, touch-friendly interactions for mobile devices</p>
+                </div>
+
+                <div class="bg-card border border-purple-500/30 rounded-lg p-4">
+                    <div class="flex items-center gap-2 mb-2">
+                        <div class="w-3 h-3 bg-purple-500 rounded-full"></div>
+                        <span class="font-medium text-purple-500">Visual Hierarchy</span>
+                    </div>
+                    <p class="text-muted-foreground">Clear color coding and consistent styling for different states (waiting, processing, queued)</p>
+                </div>
+
+                <div class="bg-card border border-amber-500/30 rounded-lg p-4">
+                    <div class="flex items-center gap-2 mb-2">
+                        <div class="w-3 h-3 bg-amber-500 rounded-full"></div>
+                        <span class="font-medium text-amber-500">Floating Overlay</span>
+                    </div>
+                    <p class="text-muted-foreground">Non-intrusive floating indicator for mobile that doesn't clutter the chat interface</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Simulate state changes for demo
+        setInterval(() => {
+            const dots = document.querySelectorAll('.animate-pulse');
+            dots.forEach((dot, index) => {
+                setTimeout(() => {
+                    dot.style.opacity = dot.style.opacity === '0.3' ? '1' : '0.3';
+                }, index * 200);
+            });
+        }, 1200);
+    </script>
+</body>
+</html>

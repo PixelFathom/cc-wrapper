@@ -14,10 +14,10 @@ export class ApiError extends Error {
 const getApiBaseUrl = () => {
   // Client-side: Use environment variable or fallback
   if (typeof window !== 'undefined') {
-    return process.env.NEXT_PUBLIC_BACKEND_HOST || 'http://localhost:8000';
+    return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:9000';
   }
   // Server-side: Use backend service name for container-to-container communication
-  return process.env.BACKEND_HOST || 'http://localhost:8000';
+  return process.env.BACKEND_HOST || 'http://backend:8000';
 };
 
 const API_BASE_URL = getApiBaseUrl()
@@ -860,6 +860,23 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify(data),
     })
+  }
+
+  // Pricing (public endpoint, no auth required)
+  getPricingPlans = async (): Promise<{
+    plans: Array<{
+      id: string
+      name: string
+      price: string
+      period: string
+      description: string
+      features: string[]
+      cta: string
+      is_popular: boolean
+      sort_order: number
+    }>
+  }> => {
+    return this.request('/pricing/plans')
   }
 }
 

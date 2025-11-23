@@ -8,14 +8,14 @@ from app.core.settings import get_settings
 from app.core.redis import close_redis
 from app.core.scheduler import start_scheduler, shutdown_scheduler
 from app.deps import engine
-from app.api import projects, tasks, chat, files, approvals, auto_continuation, test_cases, contest_harvesting, github_auth, github_repositories, github_issues, issue_resolution, subscriptions, payments, webhooks_cashfree, users, hosting
+from app.api import projects, tasks, chat, files, approvals, auto_continuation, test_cases, contest_harvesting, github_auth, github_repositories, github_issues, issue_resolution, subscriptions, payments, webhooks_cashfree, users, hosting, pricing
 from app.api.v1 import webhooks, mcp_approvals
 
 # Import models to ensure they are registered with SQLAlchemy
 from app.models import (
     TestCaseHook, ContestHarvestingSession, HarvestingQuestion,
     User, UserToken, AuditLog, GitHubRepository, GitHubIssue, IssueResolution,
-    CoinTransaction, Payment
+    CoinTransaction, Payment, PricingPlan
 )  # Ensure tables are created
 
 settings = get_settings()
@@ -87,6 +87,7 @@ app.include_router(payments.router, prefix="/api", tags=["payments"])
 app.include_router(webhooks_cashfree.router, prefix="/api", tags=["webhooks-cashfree"])
 app.include_router(users.router, prefix="/api", tags=["users"])
 app.include_router(hosting.router, prefix="/api", tags=["hosting"])
+app.include_router(pricing.router, prefix="/api", tags=["pricing"])
 
 
 @app.get("/")
