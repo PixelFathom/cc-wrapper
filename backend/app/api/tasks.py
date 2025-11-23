@@ -68,7 +68,21 @@ async def create_task(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You don't have permission to create tasks in this project"
         )
-    
+
+    # Check for duplicate task name within the same project
+    existing_task_result = await session.execute(
+        select(Task).where(
+            Task.project_id == task.project_id,
+            Task.name == task.name
+        )
+    )
+    existing_task = existing_task_result.scalar_one_or_none()
+    if existing_task:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"A task with the name '{task.name}' already exists in this project"
+        )
+
     db_task = Task(**task.dict())
     session.add(db_task)
     await session.commit()
@@ -150,11 +164,28 @@ async def update_task(
     session: AsyncSession = Depends(get_session)
 ):
     task = await verify_task_ownership(task_id, current_user, session)
-    
+
     update_data = task_update.dict(exclude_unset=True)
+
+    # If name is being updated, check for duplicates within the same project
+    if 'name' in update_data and update_data['name'] != task.name:
+        existing_task_result = await session.execute(
+            select(Task).where(
+                Task.project_id == task.project_id,
+                Task.name == update_data['name'],
+                Task.id != task_id  # Exclude current task
+            )
+        )
+        existing_task = existing_task_result.scalar_one_or_none()
+        if existing_task:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"A task with the name '{update_data['name']}' already exists in this project"
+            )
+
     for field, value in update_data.items():
         setattr(task, field, value)
-    
+
     session.add(task)
     await session.commit()
     await session.refresh(task)
