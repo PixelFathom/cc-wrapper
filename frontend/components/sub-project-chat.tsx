@@ -7,7 +7,7 @@ import {
   PaperPlaneIcon, PersonIcon, RocketIcon, UpdateIcon, ChevronRightIcon,
   CodeIcon, GearIcon, CheckCircledIcon, CrossCircledIcon, ClockIcon,
   FileTextIcon, CubeIcon, ChevronDownIcon, DotFilledIcon, CopyIcon,
-  ChatBubbleIcon, TrashIcon, PlayIcon, PauseIcon, ListBulletIcon, MixerHorizontalIcon
+  ChatBubbleIcon, MixerHorizontalIcon
 } from '@radix-ui/react-icons'
 import { api, ChatHook } from '@/lib/api'
 import { Button } from './ui/button'
@@ -47,12 +47,7 @@ interface Message {
   parentMessageId?: string
 }
 
-interface QueuedMessage {
-  id: string
-  content: string
-  timestamp: string
-  agent?: string | null
-}
+// QueuedMessage interface removed - using blocking input instead
 
 interface WebhookLog {
   id: string
@@ -121,10 +116,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
   // Test case generation modal state
   const [showTestCaseModal, setShowTestCaseModal] = useState(false)
   
-  // Message Queue State
-  const [messageQueue, setMessageQueue] = useState<QueuedMessage[]>([])
-  const [isQueueProcessing, setIsQueueProcessing] = useState(false)
-  const [showQueue, setShowQueue] = useState(false)
+  // Message queue state removed - input is now blocked when waiting for response
   
   // Auto-scroll state management
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true)
@@ -605,14 +597,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
     }
   }, [messages, autoContinuationEnabled, sessionId])
 
-  // Auto-show queue when messages are added
-  useEffect(() => {
-    if (messageQueue.length > 0 && !showQueue) {
-      setShowQueue(true)
-    }
-  }, [messageQueue.length])
-
-  // Moved to after processNextInQueue definition to avoid temporal dead zone
+  // Queue functionality removed - using blocking input instead
 
   const loadChatHistory = async (loadSessionId: string) => {
     setLoadingHistory(true)
@@ -649,27 +634,27 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
     setChatId(null)
   }
 
-  const handleSubmit = (e: React.FormEvent, forceQueue: boolean = false) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!input.trim()) return
+
+    // Block submission if waiting for a response
+    if (isWaitingForResponse) {
+      console.log('⚠️ Submission blocked: waiting for response')
+      return
+    }
 
     const userInput = input
     const agentToUse = selectedAgent
     setInput('')
-    
+
     // Reset textarea height after clearing input
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
       textareaRef.current.style.height = '24px' // Reset to min-height
     }
-    
-    // If we're waiting for a response or force queue, add to queue
-    if (isWaitingForResponse || isQueueProcessing || forceQueue) {
-      addToQueue(userInput, agentToUse)
-      return
-    }
 
-    // Otherwise, process immediately
+    // Process the message
     processMessage(userInput, agentToUse)
   }
 
@@ -848,27 +833,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
     }
   }
 
-  // Queue Management Functions
-  const addToQueue = (content: string, agent?: string | null) => {
-    const queuedMessage: QueuedMessage = {
-      id: `queue-${Date.now()}-${Math.random()}`,
-      content: content.trim(),
-      timestamp: new Date().toISOString(),
-      agent
-    }
-    setMessageQueue(prev => [...prev, queuedMessage])
-    console.log('📋 Added message to queue:', { id: queuedMessage.id, content: content.substring(0, 50) + '...' })
-  }
-
-  const removeFromQueue = (messageId: string) => {
-    setMessageQueue(prev => prev.filter(msg => msg.id !== messageId))
-    console.log('🗑️ Removed message from queue:', messageId)
-  }
-
-  const clearQueue = () => {
-    setMessageQueue([])
-    console.log('🧹 Cleared message queue')
-  }
+  // Queue management functions removed - using blocking input instead
 
   const processMessage = useCallback(async (userInput: string, agent?: string | null) => {
     const resolveSessionId = () => {
@@ -939,43 +904,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
     }, 100)
   }, [sessionId, messages, sendMutation, setMessages, setSessionId, scrollToBottom])
 
-  const processNextInQueue = useCallback(async () => {
-    if (messageQueue.length === 0 || isWaitingForResponse || isQueueProcessing) {
-      return
-    }
-
-    const nextMessage = messageQueue[0]
-    if (!nextMessage) return
-
-    setIsQueueProcessing(true)
-    console.log('🎯 Processing next message from queue:', nextMessage.id)
-
-    // Remove the message from queue
-    setMessageQueue(prev => prev.slice(1))
-
-    // Process the message using the same logic as handleSubmit
-    await processMessage(nextMessage.content, nextMessage.agent)
-    
-    setIsQueueProcessing(false)
-  }, [messageQueue, isWaitingForResponse, isQueueProcessing, processMessage])
-
-  // Automatic Queue Processing - Process next message when current completes
-  useEffect(() => {
-    // Only process queue when:
-    // 1. Not currently waiting for a response
-    // 2. Not already processing queue
-    // 3. There are messages in the queue
-    // 4. Have a session (not first message)
-    if (!isWaitingForResponse && !isQueueProcessing && messageQueue.length > 0 && sessionId) {
-      console.log('🚀 Auto-processing next queued message. Queue length:', messageQueue.length)
-      // Add a small delay to ensure UI updates are complete
-      const timeoutId = setTimeout(() => {
-        processNextInQueue()
-      }, 500)
-      
-      return () => clearTimeout(timeoutId)
-    }
-  }, [isWaitingForResponse, isQueueProcessing, messageQueue.length, sessionId])
+  // Queue processing removed - using blocking input instead
 
   return (
     <div className="flex flex-col h-[calc(100vh-8rem)] sm:h-[calc(100vh-10rem)] md:h-[calc(100vh-12rem)]">
@@ -1581,165 +1510,31 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
           </AnimatePresence>
         </div>
 
-        {/* Message Queue Display */}
-        <AnimatePresence>
-          {messageQueue.length > 0 && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.3, ease: 'easeInOut' }}
-              className="border-t border-border/30 bg-gradient-to-r from-amber-500/10 to-orange-500/10 backdrop-blur-sm"
-            >
-              <div className="px-3 sm:px-4 py-2">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <motion.div
-                      animate={{ rotate: isQueueProcessing ? 360 : 0 }}
-                      transition={{ duration: 1, repeat: isQueueProcessing ? Infinity : 0, ease: "linear" }}
-                    >
-                      <ListBulletIcon className="h-4 w-4 text-amber-500" />
-                    </motion.div>
-                    <span className="text-sm font-medium text-amber-500 flex items-center gap-1">
-                      Queue ({messageQueue.length})
-                      {isQueueProcessing && (
-                        <motion.span
-                          initial={{ scale: 0.8, opacity: 0.7 }}
-                          animate={{ scale: 1, opacity: 1 }}
-                          transition={{ duration: 0.5, repeat: Infinity, repeatType: "reverse" }}
-                          className="text-xs"
-                        >
-                          Processing...
-                        </motion.span>
-                      )}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setShowQueue(!showQueue)}
-                      className="text-xs h-6 px-2 text-amber-500 hover:text-amber-400 hover:bg-amber-500/10"
-                    >
-                      <ChevronDownIcon className={cn(
-                        "h-3 w-3 transition-transform",
-                        showQueue && "rotate-180"
-                      )} />
-                      <span className="hidden sm:inline ml-1">{showQueue ? 'Hide' : 'Show'}</span>
-                    </Button>
-                    {messageQueue.length > 0 && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={clearQueue}
-                        className="text-xs h-6 px-2 text-red-400 hover:text-red-300 hover:bg-red-500/10"
-                      >
-                        <TrashIcon className="h-3 w-3" />
-                        <span className="hidden sm:inline ml-1">Clear</span>
-                      </Button>
-                    )}
-                  </div>
-                </div>
-                
-                {/* Queue Messages */}
-                <AnimatePresence>
-                  {showQueue && messageQueue.length > 0 && (
-                    <motion.div
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      exit={{ opacity: 0, height: 0 }}
-                      transition={{ duration: 0.2 }}
-                      className="space-y-2 max-h-32 overflow-y-auto pr-2"
-                      style={{ scrollbarWidth: 'thin' }}
-                    >
-                      {messageQueue.map((queuedMsg, index) => (
-                        <motion.div
-                          key={queuedMsg.id}
-                          initial={{ opacity: 0, x: -20, scale: 0.95 }}
-                          animate={{ opacity: 1, x: 0, scale: 1 }}
-                          exit={{ opacity: 0, x: 20, scale: 0.95 }}
-                          transition={{ duration: 0.2, delay: index * 0.05 }}
-                          className={cn(
-                            "flex items-start gap-2 p-2 rounded-lg border transition-all duration-200",
-                            index === 0 && isQueueProcessing
-                              ? "bg-amber-500/20 border-amber-500/30 animate-pulse"
-                              : "bg-card/50 border-border/30 hover:bg-card/70"
-                          )}
-                        >
-                          <div className="flex-shrink-0 w-6 h-6 rounded-full bg-amber-500/20 flex items-center justify-center">
-                            {index === 0 && isQueueProcessing ? (
-                              <UpdateIcon className="h-3 w-3 text-amber-500 animate-spin" />
-                            ) : (
-                              <span className="text-xs font-mono text-amber-500">{index + 1}</span>
-                            )}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between mb-1">
-                              <div className="flex items-center gap-2">
-                                {queuedMsg.agent && (
-                                  <span className="text-xs bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded">
-                                    {AVAILABLE_AGENTS.find(a => a.value === queuedMsg.agent)?.label || 'Agent'}
-                                  </span>
-                                )}
-                                <span className="text-xs text-muted-foreground">
-                                  {new Date(queuedMsg.timestamp).toLocaleTimeString('en-US', { 
-                                    hour: 'numeric', 
-                                    minute: '2-digit',
-                                    hour12: true 
-                                  })}
-                                </span>
-                              </div>
-                              <button
-                                onClick={() => removeFromQueue(queuedMsg.id)}
-                                className="text-red-400 hover:text-red-300 p-0.5 rounded hover:bg-red-500/10 transition-colors"
-                              >
-                                <TrashIcon className="h-3 w-3" />
-                              </button>
-                            </div>
-                            <p className="text-sm text-foreground/90 leading-relaxed" style={{ 
-                              display: '-webkit-box',
-                              WebkitLineClamp: 2,
-                              WebkitBoxOrient: 'vertical',
-                              overflow: 'hidden'
-                            }}>
-                              {queuedMsg.content}
-                            </p>
-                            {index === 0 && (isWaitingForResponse || isQueueProcessing) && (
-                              <div className="mt-1 text-xs text-amber-500 flex items-center gap-1">
-                                <ClockIcon className="h-3 w-3" />
-                                {isQueueProcessing ? 'Processing now...' : 'Next in line'}
-                              </div>
-                            )}
-                          </div>
-                        </motion.div>
-                      ))}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-                
-                {/* Queue Status Bar */}
-                {messageQueue.length > 0 && !showQueue && (
-                  <div className="text-xs text-amber-500/70 text-center mt-1">
-                    {messageQueue.length} message{messageQueue.length !== 1 ? 's' : ''} queued
-                    {isWaitingForResponse && ' • Processing current message...'}
-                  </div>
-                )}
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {/* Message Queue Display removed - input is now blocked when waiting for response */}
 
         {/* Modern X-style Input Area */}
         <div className={cn(
           "border-t border-border/50 bg-black/40 backdrop-blur-sm transition-all duration-200",
-          isWaitingForResponse && "opacity-75 bg-black/60"
+          isWaitingForResponse && "opacity-60 bg-black/70"
         )}>
+          {/* Pending Response Overlay */}
+          {isWaitingForResponse && (
+            <div className="px-3 sm:px-4 py-2 bg-gradient-to-r from-amber-500/10 to-orange-500/10 border-b border-amber-500/20">
+              <div className="flex items-center gap-2 text-amber-500">
+                <UpdateIcon className="h-4 w-4 animate-spin" />
+                <span className="text-sm font-medium">Waiting for response...</span>
+                <span className="text-xs text-amber-500/70">Input disabled until completion</span>
+              </div>
+            </div>
+          )}
           <form onSubmit={handleSubmit} className="p-3 sm:p-4">
             <div className="relative">
               <Textarea
                 ref={textareaRef}
                 value={input}
                 onChange={(e) => {
+                  // Block input changes when waiting for response
+                  if (isWaitingForResponse) return
                   setInput(e.target.value)
                   // Auto-resize textarea
                   if (textareaRef.current) {
@@ -1748,30 +1543,33 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                   }
                 }}
                 onKeyDown={(e) => {
-                  // Submit on Enter (without modifiers) - will queue if processing
+                  // Block all submissions when waiting for response
+                  if (isWaitingForResponse) {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                    }
+                    return
+                  }
+                  // Submit on Enter (without modifiers)
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault()
                     handleSubmit(e as any)
                   }
-                  // Ctrl/Cmd + Enter to force queue
-                  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                    e.preventDefault()
-                    handleSubmit(e as any, true)
-                  }
                 }}
                 placeholder={
-                  isWaitingForResponse || isQueueProcessing
-                    ? (messageQueue.length > 0 
-                        ? `Message will be queued (${messageQueue.length + 1} total)...` 
-                        : "Processing... Your message will be queued")
+                  isWaitingForResponse
+                    ? "⏳ Please wait for the current response to complete..."
                     : "What's happening with your code?"
                 }
-                disabled={sendMutation.isPending && messageQueue.length === 0}
-                className="w-full bg-transparent border-0 focus:ring-0 resize-none 
-                  placeholder:text-muted-foreground/50 text-base leading-relaxed
-                  font-sans min-h-[24px] max-h-[200px] p-0 pr-12"
+                disabled={isWaitingForResponse}
+                className={cn(
+                  "w-full bg-transparent border-0 focus:ring-0 resize-none",
+                  "placeholder:text-muted-foreground/50 text-base leading-relaxed",
+                  "font-sans min-h-[24px] max-h-[200px] p-0 pr-12",
+                  isWaitingForResponse && "cursor-not-allowed opacity-50"
+                )}
                 rows={1}
-                style={{ 
+                style={{
                   outline: 'none',
                   boxShadow: 'none',
                   scrollbarWidth: 'thin'
@@ -1800,7 +1598,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                 
                 <div className="flex items-center gap-3">
                   {/* Character/status indicator */}
-                  {input.length > 0 && (
+                  {input.length > 0 && !isWaitingForResponse && (
                     <span className={cn(
                       "text-xs transition-colors",
                       input.length > 500 ? "text-orange-500" : "text-muted-foreground"
@@ -1808,17 +1606,20 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                       {input.length}
                     </span>
                   )}
-                  
-                  {/* Agent selector dropdown */}
+
+                  {/* Agent selector dropdown - disabled when waiting */}
                   <div className="relative" ref={agentDropdownRef}>
                     <Button
                       type="button"
-                      onClick={() => setShowAgentDropdown(!showAgentDropdown)}
+                      onClick={() => !isWaitingForResponse && setShowAgentDropdown(!showAgentDropdown)}
+                      disabled={isWaitingForResponse}
                       className={cn(
                         "h-8 sm:h-9 px-2 sm:px-3 rounded-full text-xs font-medium flex items-center gap-1 min-w-0",
-                        selectedAgent 
-                          ? "bg-purple-500/20 text-purple-400 hover:bg-purple-500/30" 
-                          : "bg-muted/50 text-muted-foreground hover:bg-muted"
+                        isWaitingForResponse
+                          ? "bg-muted/30 text-muted-foreground/50 cursor-not-allowed"
+                          : selectedAgent
+                            ? "bg-purple-500/20 text-purple-400 hover:bg-purple-500/30"
+                            : "bg-muted/50 text-muted-foreground hover:bg-muted"
                       )}
                       size="sm"
                     >
@@ -1949,55 +1750,31 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                     )}
                   </div>
                   
-                  {/* Send/Queue Button */}
+                  {/* Send Button - disabled when waiting for response */}
                   <div className="flex items-center gap-1">
-                    {/* Queue Button - visible when processing or when user might want to force queue */}
-                    {(isWaitingForResponse || isQueueProcessing || messageQueue.length > 0) && (
-                      <Button 
-                        type="button"
-                        onClick={(e) => handleSubmit(e as any, true)}
-                        disabled={!input.trim()}
-                        className={cn(
-                          "rounded-full h-9 w-9 sm:h-9 sm:w-auto sm:px-3 transition-all duration-200 touch-manipulation",
-                          "font-medium text-sm",
-                          input.trim()
-                            ? "bg-amber-500 hover:bg-amber-600 text-black" 
-                            : "bg-amber-500/20 text-amber-500/50 cursor-not-allowed"
-                        )}
-                        size="sm"
-                        title={`Add to queue (${messageQueue.length + 1} total) - Ctrl+Enter`}
-                      >
-                        <ListBulletIcon className="h-4 w-4 sm:hidden" />
-                        <span className="hidden sm:inline">Queue</span>
-                      </Button>
-                    )}
-                    
-                    {/* Main Send Button */}
                     <Button
                       type="submit"
-                      disabled={!input.trim()}
+                      disabled={!input.trim() || isWaitingForResponse}
                       className={cn(
                         "rounded-full h-9 w-9 sm:h-9 sm:w-auto sm:px-4 transition-all duration-200 touch-manipulation",
                         "font-medium text-sm gap-2",
-                        input.trim()
-                          ? (isWaitingForResponse || isQueueProcessing
-                              ? "bg-amber-500 hover:bg-amber-600 text-black" // Will queue
-                              : "bg-cyan-500 hover:bg-cyan-600 text-black") // Will send immediately
-                          : "bg-cyan-500/20 text-cyan-500/50 cursor-not-allowed"
+                        isWaitingForResponse
+                          ? "bg-gray-500/30 text-gray-500 cursor-not-allowed"
+                          : input.trim()
+                            ? "bg-cyan-500 hover:bg-cyan-600 text-black"
+                            : "bg-cyan-500/20 text-cyan-500/50 cursor-not-allowed"
                       )}
                       size="sm"
                       title={
-                        isWaitingForResponse || isQueueProcessing
-                          ? "Will add to queue - Press Enter"
+                        isWaitingForResponse
+                          ? "Please wait for the current response to complete"
                           : "Send message (1 credit) - Press Enter"
                       }
                     >
-                      {sendMutation.isPending && messageQueue.length === 0 ? (
-                        <UpdateIcon className="h-4 w-4 animate-spin" />
-                      ) : isWaitingForResponse || isQueueProcessing ? (
+                      {isWaitingForResponse ? (
                         <>
-                          <ListBulletIcon className="h-4 w-4 sm:hidden" />
-                          <span className="hidden sm:inline">Queue</span>
+                          <ClockIcon className="h-4 w-4 sm:hidden" />
+                          <span className="hidden sm:inline">Wait...</span>
                         </>
                       ) : (
                         <>
@@ -2012,25 +1789,13 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                   </div>
                 </div>
               </div>
-              
+
               {/* Hint text / Status indicator */}
               <div className="mt-2 text-xs text-muted-foreground/50">
-                {isWaitingForResponse || isQueueProcessing ? (
+                {isWaitingForResponse ? (
                   <div className="flex items-center gap-2 text-amber-500">
                     <UpdateIcon className="h-3 w-3 animate-spin" />
-                    {isQueueProcessing
-                      ? 'Processing queued message...'
-                      : 'Processing current message...'}
-                    {messageQueue.length > 0 && (
-                      <span className="text-amber-400">
-                        • {messageQueue.length} message{messageQueue.length !== 1 ? 's' : ''} in queue
-                      </span>
-                    )}
-                  </div>
-                ) : messageQueue.length > 0 ? (
-                  <div className="flex items-center gap-2 text-amber-500">
-                    <ListBulletIcon className="h-3 w-3" />
-                    {messageQueue.length} message{messageQueue.length !== 1 ? 's' : ''} queued • Will process automatically
+                    <span>Processing... Please wait for the response to complete before sending another message.</span>
                   </div>
                 ) : (
                   <div className="flex items-center justify-between">
