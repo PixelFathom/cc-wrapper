@@ -1545,15 +1545,6 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
           isWaitingForResponse && "opacity-60 bg-black/70"
         )}>
           {/* Pending Response Overlay */}
-          {isWaitingForResponse && (
-            <div className="px-3 sm:px-4 py-2 bg-gradient-to-r from-amber-500/10 to-orange-500/10 border-b border-amber-500/20">
-              <div className="flex items-center gap-2 text-amber-500">
-                <UpdateIcon className="h-4 w-4 animate-spin" />
-                <span className="text-sm font-medium">Waiting for response...</span>
-                <span className="text-xs text-amber-500/70">Input disabled until completion</span>
-              </div>
-            </div>
-          )}
           <form onSubmit={handleSubmit} className="p-3 sm:p-4">
             <div className="relative">
               <Textarea
