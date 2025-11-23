@@ -936,65 +936,69 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
       <div className="flex-1 overflow-hidden flex flex-col gradient-border-neon rounded-lg relative bg-black/30">
         {/* Modern Chat Header - Clean & Minimal */}
         <div className="bg-card/80 backdrop-blur-xl border-b border-border/40">
-          <div className="flex items-center h-11 px-2 sm:px-3">
-            {/* Session Tabs Container */}
-            <div className="flex items-center flex-1 min-w-0 overflow-x-auto scrollbar-none">
-              {/* New Session Tab */}
-              <button
-                type="button"
-                onClick={startNewSession}
-                className="flex items-center gap-1 h-7 px-2.5 mr-1 rounded-md text-xs font-medium text-muted-foreground hover:text-cyan-400 hover:bg-cyan-500/10 transition-all shrink-0"
-              >
-                <span className="text-sm">+</span>
-                <span className="hidden sm:inline">New</span>
-              </button>
+          <div className="flex items-center h-9 sm:h-11 px-1.5 sm:px-3">
+            {/* Session Tabs Container with scroll fade */}
+            <div className="relative flex-1 min-w-0">
+              {/* Scroll fade indicator - right side */}
+              <div className="absolute right-0 top-0 bottom-0 w-4 bg-gradient-to-l from-card/80 to-transparent pointer-events-none z-10 sm:hidden" />
+              <div className="flex items-center overflow-x-auto scrollbar-none">
+                {/* New Session Tab */}
+                <button
+                  type="button"
+                  onClick={startNewSession}
+                  className="flex items-center gap-0.5 sm:gap-1 h-6 sm:h-7 px-1.5 sm:px-2.5 mr-0.5 sm:mr-1 rounded-md text-[10px] sm:text-xs font-medium text-muted-foreground hover:text-cyan-400 hover:bg-cyan-500/10 transition-all shrink-0"
+                >
+                  <span className="text-xs sm:text-sm">+</span>
+                  <span className="hidden sm:inline">New</span>
+                </button>
 
-              {/* Divider */}
-              {sessionTabs.length > 0 && (
-                <div className="w-px h-4 bg-border/50 mx-1 shrink-0" />
-              )}
+                {/* Divider */}
+                {sessionTabs.length > 0 && (
+                  <div className="w-px h-3 sm:h-4 bg-border/50 mx-0.5 sm:mx-1 shrink-0" />
+                )}
 
-              {/* Session Tabs */}
-              <div className="flex items-center gap-0.5">
-                {sessionTabs.map((session, index) => {
-                  const isActive = session.session_id === sessionId
-                  const messageCount = getSessionTabMessageCount(session)
-                  const label = getSessionTabLabel(session, index)
-                  return (
-                    <button
-                      type="button"
-                      key={session.session_id ?? `session-${index}`}
-                      onClick={() => {
-                        if (!session.session_id || session.session_id === sessionId) return
-                        loadChatHistory(session.session_id)
-                      }}
-                      className={cn(
-                        "group relative flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs transition-all duration-150 shrink-0 max-w-[160px]",
-                        isActive
-                          ? "bg-muted/80 text-foreground"
-                          : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
-                      )}
-                      title={getSessionTabTooltip(session)}
-                    >
-                      {/* Active indicator */}
-                      {isActive && (
-                        <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-cyan-500 rounded-full" />
-                      )}
-                      <span className="truncate">{label}</span>
-                      <span className={cn(
-                        "text-[10px] tabular-nums",
-                        isActive ? "text-cyan-400" : "text-muted-foreground/60"
-                      )}>
-                        {messageCount}
-                      </span>
-                    </button>
-                  )
-                })}
+                {/* Session Tabs */}
+                <div className="flex items-center gap-0.5">
+                  {sessionTabs.map((session, index) => {
+                    const isActive = session.session_id === sessionId
+                    const messageCount = getSessionTabMessageCount(session)
+                    const label = getSessionTabLabel(session, index)
+                    return (
+                      <button
+                        type="button"
+                        key={session.session_id ?? `session-${index}`}
+                        onClick={() => {
+                          if (!session.session_id || session.session_id === sessionId) return
+                          loadChatHistory(session.session_id)
+                        }}
+                        className={cn(
+                          "group relative flex items-center gap-1 sm:gap-1.5 h-6 sm:h-7 px-1.5 sm:px-2.5 rounded-md text-[10px] sm:text-xs transition-all duration-150 shrink-0 max-w-[100px] sm:max-w-[160px]",
+                          isActive
+                            ? "bg-muted/80 text-foreground"
+                            : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                        )}
+                        title={getSessionTabTooltip(session)}
+                      >
+                        {/* Active indicator */}
+                        {isActive && (
+                          <span className="absolute bottom-0 left-1.5 sm:left-2 right-1.5 sm:right-2 h-0.5 bg-cyan-500 rounded-full" />
+                        )}
+                        <span className="truncate">{label}</span>
+                        <span className={cn(
+                          "text-[9px] sm:text-[10px] tabular-nums",
+                          isActive ? "text-cyan-400" : "text-muted-foreground/60"
+                        )}>
+                          {messageCount}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
             </div>
 
             {/* Right Controls */}
-            <div className="flex items-center gap-1.5 ml-2 shrink-0">
+            <div className="flex items-center gap-1 sm:gap-1.5 ml-1 sm:ml-2 shrink-0">
               {/* Connection Status */}
               {sessionId && (
                 <span className={cn(
@@ -1003,22 +1007,22 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                 )} title={sessionError ? 'Connection error' : 'Connected'} />
               )}
 
-              {/* Test Generation */}
+              {/* Test Generation - hidden on very small screens */}
               {sessionId && (
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => setShowTestCaseModal(true)}
-                  className="h-7 w-7 p-0 rounded-md text-muted-foreground hover:text-purple-400 hover:bg-purple-500/10"
+                  className="hidden xs:flex h-6 sm:h-7 w-6 sm:w-7 p-0 rounded-md text-muted-foreground hover:text-purple-400 hover:bg-purple-500/10"
                   title="Generate test cases"
                 >
-                  <MixerHorizontalIcon className="h-3.5 w-3.5" />
+                  <MixerHorizontalIcon className="h-3 sm:h-3.5 w-3 sm:w-3.5" />
                 </Button>
               )}
 
               {/* Mode Indicator */}
               <span className={cn(
-                "hidden sm:inline-flex items-center gap-1 h-6 px-2 rounded text-[10px] font-medium",
+                "hidden sm:inline-flex items-center gap-1 h-5 sm:h-6 px-1.5 sm:px-2 rounded text-[9px] sm:text-[10px] font-medium",
                 permissionMode === 'bypassPermissions'
                   ? "bg-amber-500/15 text-amber-400"
                   : permissionMode === 'plan'

@@ -219,85 +219,89 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
         }`} />
 
         {/* Main Header Content */}
-        <div className="px-4 sm:px-5 pt-4 pb-3">
+        <div className="px-3 sm:px-5 pt-3 sm:pt-4 pb-2 sm:pb-3">
           {/* Top Row: Breadcrumb + Actions */}
-          <div className="flex items-center justify-between mb-3">
-            <nav className="flex items-center text-xs font-mono text-muted-foreground">
-              <Link href="/" className="hover:text-cyan-400 transition-colors">projects</Link>
-              <span className="mx-1.5 text-border">/</span>
-              <Link href={`/p/${projectId}`} className="hover:text-cyan-400 transition-colors">{projectSlug}</Link>
-              <span className="mx-1.5 text-border">/</span>
-              <span className="text-foreground">{taskSlug}</span>
+          <div className="flex items-center justify-between mb-2 sm:mb-3">
+            <nav className="flex items-center text-[10px] sm:text-xs font-mono text-muted-foreground min-w-0">
+              {/* Mobile: Collapsed breadcrumb */}
+              <Link href="/" className="hover:text-cyan-400 transition-colors shrink-0">~</Link>
+              <span className="mx-1 sm:mx-1.5 text-border shrink-0">/</span>
+              <Link href={`/p/${projectId}`} className="hover:text-cyan-400 transition-colors truncate max-w-[60px] sm:max-w-none">{projectSlug}</Link>
+              <span className="mx-1 sm:mx-1.5 text-border shrink-0">/</span>
+              <span className="text-foreground truncate">{taskSlug}</span>
             </nav>
 
             {/* Right Actions */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 sm:gap-2 shrink-0 ml-2">
               {task.deployment_status === 'failed' && (
                 <Button
                   onClick={() => api.retryTaskDeployment(taskId).then(() => refetchTask())}
                   size="sm"
                   variant="ghost"
-                  className="h-7 px-2 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                  className="h-6 sm:h-7 px-1.5 sm:px-2 text-[10px] sm:text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10"
                 >
-                  <ReloadIcon className="h-3 w-3 mr-1" />
-                  Retry
+                  <ReloadIcon className="h-3 w-3 sm:mr-1" />
+                  <span className="hidden sm:inline">Retry</span>
                 </Button>
               )}
             </div>
           </div>
 
           {/* Title Row */}
-          <div className="flex items-center gap-3 mb-2">
-            <h1 className="text-xl sm:text-2xl font-semibold text-foreground">{task.name}</h1>
-            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-1.5 sm:mb-2">
+            <h1 className="text-lg sm:text-xl md:text-2xl font-semibold text-foreground leading-tight">{task.name}</h1>
+            <span className={`inline-flex items-center gap-1 px-1.5 sm:px-2 py-0.5 rounded text-[10px] sm:text-xs font-medium shrink-0 ${
               task.deployment_status === 'completed' ? 'bg-green-500/15 text-green-400' :
               task.deployment_status === 'failed' ? 'bg-red-500/15 text-red-400' :
               task.deployment_status === 'deploying' || task.deployment_status === 'initializing' ? 'bg-amber-500/15 text-amber-400' :
               'bg-muted text-muted-foreground'
             }`}>
-              {task.deployment_status === 'completed' && <CheckCircledIcon className="h-3 w-3" />}
-              {task.deployment_status === 'failed' && <CrossCircledIcon className="h-3 w-3" />}
-              {(task.deployment_status === 'deploying' || task.deployment_status === 'initializing') && <UpdateIcon className="h-3 w-3 animate-spin" />}
-              {task.deployment_status === 'pending' && <ClockIcon className="h-3 w-3" />}
-              {task.deployment_status === 'completed' ? 'Success' : task.deployment_status}
+              {task.deployment_status === 'completed' && <CheckCircledIcon className="h-2.5 sm:h-3 w-2.5 sm:w-3" />}
+              {task.deployment_status === 'failed' && <CrossCircledIcon className="h-2.5 sm:h-3 w-2.5 sm:w-3" />}
+              {(task.deployment_status === 'deploying' || task.deployment_status === 'initializing') && <UpdateIcon className="h-2.5 sm:h-3 w-2.5 sm:w-3 animate-spin" />}
+              {task.deployment_status === 'pending' && <ClockIcon className="h-2.5 sm:h-3 w-2.5 sm:w-3" />}
+              <span className="hidden sm:inline">{task.deployment_status === 'completed' ? 'Success' : task.deployment_status}</span>
             </span>
           </div>
 
-          {/* Metadata Row */}
-          <div className="flex items-center gap-3 text-xs text-muted-foreground mb-4">
-            <span className="font-mono text-cyan-400/80">{task.id.slice(0, 8)}</span>
-            <span className="text-border">•</span>
-            <span>{new Date(task.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+          {/* Metadata Row - More compact on mobile */}
+          <div className="flex items-center gap-2 sm:gap-3 text-[10px] sm:text-xs text-muted-foreground mb-3 sm:mb-4 overflow-x-auto scrollbar-none">
+            <span className="font-mono text-cyan-400/80 shrink-0">{task.id.slice(0, 8)}</span>
+            <span className="text-border shrink-0">•</span>
+            <span className="shrink-0">{new Date(task.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
             {deploymentData && (() => {
               const totalCost = deploymentData.hooks.reduce((sum, hook) => sum + (hook.data?.total_cost_usd || 0), 0)
               return totalCost > 0 ? (
                 <>
-                  <span className="text-border">•</span>
-                  <span className="text-green-400">${totalCost.toFixed(4)}</span>
+                  <span className="text-border shrink-0">•</span>
+                  <span className="text-green-400 shrink-0">${totalCost.toFixed(4)}</span>
                 </>
               ) : null
             })()}
           </div>
 
-          {/* Tab Navigation - Integrated */}
-          <div className="flex items-center gap-1 -mb-3 overflow-x-auto scrollbar-none">
+          {/* Tab Navigation - Mobile optimized with scroll indicator */}
+          <div className="relative -mb-2 sm:-mb-3">
+            {/* Scroll fade indicator - right side */}
+            <div className="absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l from-card/80 to-transparent pointer-events-none z-10 sm:hidden" />
+            <div className="flex items-center gap-0.5 sm:gap-1 overflow-x-auto scrollbar-none pb-0.5">
             {[
               ...(task.task_type === 'issue_resolution' && !requestsNormalTab ? [
-                { id: 'issue-resolution', label: 'Issue', icon: <FileTextIcon className="h-3.5 w-3.5" /> },
-                { id: 'messages', label: 'Messages', icon: <ChatBubbleIcon className="h-3.5 w-3.5" /> },
+                { id: 'issue-resolution', label: 'Issue', icon: <FileTextIcon className="h-3 sm:h-3.5 w-3 sm:w-3.5" /> },
+                { id: 'messages', label: 'Msgs', icon: <ChatBubbleIcon className="h-3 sm:h-3.5 w-3 sm:w-3.5" /> },
               ] : []),
               ...(task.task_type !== 'issue_resolution' || requestsNormalTab ? [
-                { id: 'deployment', label: 'Summary', icon: <ActivityLogIcon className="h-3.5 w-3.5" /> },
-                { id: 'chat', label: 'Chat', icon: <ChatBubbleIcon className="h-3.5 w-3.5" /> },
+                { id: 'deployment', label: 'Summary', icon: <ActivityLogIcon className="h-3 sm:h-3.5 w-3 sm:w-3.5" /> },
+                { id: 'chat', label: 'Chat', icon: <ChatBubbleIcon className="h-3 sm:h-3.5 w-3 sm:w-3.5" /> },
               ] : []),
-              { id: 'deploy', label: 'Deploy', icon: <RocketIcon className="h-3.5 w-3.5" /> },
-              { id: 'knowledge-base', label: 'Knowledge', icon: <ReaderIcon className="h-3.5 w-3.5" /> },
-              { id: 'test-cases', label: 'Tests', icon: <PlayIcon className="h-3.5 w-3.5" /> },
+              { id: 'deploy', label: 'Deploy', icon: <RocketIcon className="h-3 sm:h-3.5 w-3 sm:w-3.5" /> },
+              { id: 'knowledge-base', label: 'KB', icon: <ReaderIcon className="h-3 sm:h-3.5 w-3 sm:w-3.5" /> },
+              { id: 'test-cases', label: 'Tests', icon: <PlayIcon className="h-3 sm:h-3.5 w-3 sm:w-3.5" /> },
             ].map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
-                className={`relative flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors whitespace-nowrap ${
+                className={`relative flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm font-medium transition-colors whitespace-nowrap shrink-0 ${
                   activeTab === tab.id
                     ? 'text-foreground'
                     : 'text-muted-foreground hover:text-foreground'
@@ -306,10 +310,11 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
                 {tab.icon}
                 <span>{tab.label}</span>
                 {activeTab === tab.id && (
-                  <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-cyan-500 rounded-full" />
+                  <span className="absolute bottom-0 left-1.5 sm:left-2 right-1.5 sm:right-2 h-0.5 bg-cyan-500 rounded-full" />
                 )}
               </button>
             ))}
+            </div>
           </div>
         </div>
       </div>

@@ -1,40 +1,20 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { motion } from "framer-motion";
 import { useTransactionHistory, useSubscription } from "@/lib/hooks/useSubscription";
 import { TransactionType } from "@/lib/subscription-types";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Coins, TrendingUp, TrendingDown, RefreshCw, Settings, Zap, ExternalLink } from "lucide-react";
+import {
+  CheckCircledIcon,
+  CrossCircledIcon,
+  UpdateIcon,
+  ExternalLinkIcon,
+  MinusIcon,
+  PlusIcon
+} from "@radix-ui/react-icons";
 import { format } from "date-fns";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-
-const TRANSACTION_ICONS = {
-  [TransactionType.ALLOCATION]: TrendingUp,
-  [TransactionType.USAGE]: TrendingDown,
-  [TransactionType.REFUND]: RefreshCw,
-  [TransactionType.ADJUSTMENT]: Settings,
-  [TransactionType.EXPIRY]: Zap,
-};
-
-const TRANSACTION_COLORS = {
-  [TransactionType.ALLOCATION]: "text-green-600 dark:text-green-400",
-  [TransactionType.USAGE]: "text-red-600 dark:text-red-400",
-  [TransactionType.REFUND]: "text-blue-600 dark:text-blue-400",
-  [TransactionType.ADJUSTMENT]: "text-purple-600 dark:text-purple-400",
-  [TransactionType.EXPIRY]: "text-gray-600 dark:text-gray-400",
-};
-
-const TRANSACTION_BG = {
-  [TransactionType.ALLOCATION]: "bg-green-50 dark:bg-green-950/20",
-  [TransactionType.USAGE]: "bg-red-50 dark:bg-red-950/20",
-  [TransactionType.REFUND]: "bg-blue-50 dark:bg-blue-950/20",
-  [TransactionType.ADJUSTMENT]: "bg-purple-50 dark:bg-purple-950/20",
-  [TransactionType.EXPIRY]: "bg-gray-50 dark:bg-gray-950/20",
-};
 
 /**
  * Helper function to generate navigation link for a transaction
@@ -42,21 +22,15 @@ const TRANSACTION_BG = {
 function getTransactionLink(transaction: any): string | null {
   const { reference_type, reference_id, metadata } = transaction;
 
-  // For chat usage, navigate to the chat session
   if (reference_type === "chat" && reference_id && metadata?.session_id) {
-    // Use project_id and task_id_ref from metadata
     const projectId = metadata.project_id;
     const taskId = metadata.task_id_ref;
-
     if (projectId && taskId) {
       return `/p/${projectId}/t/${taskId}?session=${metadata.session_id}&highlight=${reference_id}`;
     }
-
-    // Fallback: Can't navigate without project/task IDs
     return null;
   }
 
-  // For task-related transactions
   if (reference_type === "task" && reference_id && metadata?.project_id) {
     return `/p/${metadata.project_id}/t/${reference_id}`;
   }
@@ -69,24 +43,13 @@ function getTransactionLink(transaction: any): string | null {
  */
 function getMetadataDescription(transaction: any): string | null {
   const { metadata } = transaction;
-
   if (!metadata) return null;
 
   const parts: string[] = [];
+  if (metadata.project_name) parts.push(metadata.project_name);
+  if (metadata.task_name) parts.push(metadata.task_name);
 
-  if (metadata.project_name) {
-    parts.push(`Project: ${metadata.project_name}`);
-  }
-
-  if (metadata.task_name) {
-    parts.push(`Task: ${metadata.task_name}`);
-  }
-
-  if (metadata.prompt_length) {
-    parts.push(`Message length: ${metadata.prompt_length} chars`);
-  }
-
-  return parts.length > 0 ? parts.join(" • ") : null;
+  return parts.length > 0 ? parts.join(" / ") : null;
 }
 
 export default function TransactionsPage() {
@@ -100,208 +63,249 @@ export default function TransactionsPage() {
     setIsAuthenticated(!!localStorage.getItem('github_user'));
   }, []);
 
-  // Show loading during SSR and initial mount
-  if (!mounted) {
+  // Loading state
+  if (!mounted || isLoading) {
     return (
-      <div className="container mx-auto px-4 py-8">
-        <Skeleton className="h-10 w-64 mb-6" />
-        <Skeleton className="h-32 w-full mb-4" />
-        <div className="space-y-3">
-          {[...Array(5)].map((_, i) => (
-            <Skeleton key={i} className="h-20 w-full" />
-          ))}
+      <div className="min-h-screen py-12 px-4 sm:px-6">
+        <div className="container mx-auto max-w-4xl">
+          <div className="terminal-bg rounded-lg border border-border p-4 max-w-md mb-8">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="flex gap-1.5">
+                <span className="w-3 h-3 rounded-full bg-red-500/80" />
+                <span className="w-3 h-3 rounded-full bg-yellow-500/80" />
+                <span className="w-3 h-3 rounded-full bg-green-500/80" />
+              </div>
+              <span className="text-xs font-mono text-muted-foreground ml-2">~/transactions</span>
+            </div>
+            <div className="font-mono text-sm flex items-center gap-2">
+              <UpdateIcon className="h-4 w-4 animate-spin text-cyan-400" />
+              <span className="text-muted-foreground">Loading transactions...</span>
+            </div>
+          </div>
+          <div className="space-y-3">
+            {[...Array(5)].map((_, i) => (
+              <div key={i} className="h-16 bg-card/30 rounded-lg border border-border/30 animate-pulse" />
+            ))}
+          </div>
         </div>
       </div>
     );
   }
 
+  // Not authenticated
   if (!isAuthenticated) {
     return (
-      <div className="container mx-auto px-4 py-8">
-        <Card className="border-red-200 dark:border-red-800">
-          <CardHeader>
-            <CardTitle className="text-red-600 dark:text-red-400">Authentication Required</CardTitle>
-            <CardDescription>
+      <div className="min-h-screen py-12 px-4 sm:px-6">
+        <div className="container mx-auto max-w-4xl">
+          <div className="terminal-bg rounded-lg border border-red-500/30 p-6">
+            <div className="flex items-center gap-2 text-red-400 font-mono text-sm mb-2">
+              <CrossCircledIcon className="h-4 w-4" />
+              <span>Authentication required</span>
+            </div>
+            <p className="text-muted-foreground text-sm">
               Please log in with GitHub to view your transaction history.
-            </CardDescription>
-          </CardHeader>
-        </Card>
-      </div>
-    );
-  }
-
-  if (isLoading) {
-    return (
-      <div className="container mx-auto px-4 py-8">
-        <Skeleton className="h-10 w-64 mb-6" />
-        <Skeleton className="h-32 w-full mb-4" />
-        <div className="space-y-3">
-          {[...Array(5)].map((_, i) => (
-            <Skeleton key={i} className="h-20 w-full" />
-          ))}
+            </p>
+          </div>
         </div>
       </div>
     );
   }
 
+  // Error state
   if (transactionsError || subscriptionError) {
     return (
-      <div className="container mx-auto px-4 py-8">
-        <Card className="border-red-200 dark:border-red-800">
-          <CardHeader>
-            <CardTitle className="text-red-600 dark:text-red-400">Error Loading Data</CardTitle>
-            <CardDescription>
-              {transactionsError?.toString() || subscriptionError?.toString() || "Failed to load subscription data"}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button onClick={() => window.location.reload()}>
+      <div className="min-h-screen py-12 px-4 sm:px-6">
+        <div className="container mx-auto max-w-4xl">
+          <div className="terminal-bg rounded-lg border border-red-500/30 p-6">
+            <div className="flex items-center gap-2 text-red-400 font-mono text-sm mb-2">
+              <CrossCircledIcon className="h-4 w-4" />
+              <span>Error loading data</span>
+            </div>
+            <p className="text-muted-foreground text-sm mb-4">
+              {transactionsError?.toString() || subscriptionError?.toString() || "Failed to load data"}
+            </p>
+            <Button
+              onClick={() => window.location.reload()}
+              variant="outline"
+              size="sm"
+              className="border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/10"
+            >
               Reload Page
             </Button>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold mb-2">Transaction History</h1>
-        <p className="text-gray-600 dark:text-gray-400">
-          View all your coin transactions and usage history
-        </p>
-      </div>
+    <div className="min-h-screen py-12 px-4 sm:px-6">
+      <div className="container mx-auto max-w-4xl">
+        {/* Terminal Header */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6 }}
+          className="mb-8"
+        >
+          <div className="terminal-bg rounded-lg border border-border p-4 max-w-md">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="flex gap-1.5">
+                <span className="w-3 h-3 rounded-full bg-red-500/80" />
+                <span className="w-3 h-3 rounded-full bg-yellow-500/80" />
+                <span className="w-3 h-3 rounded-full bg-green-500/80" />
+              </div>
+              <span className="text-xs font-mono text-muted-foreground ml-2">~/account/transactions</span>
+            </div>
+            <div className="font-mono text-sm">
+              <span className="text-green-400">➜</span>
+              <span className="text-cyan-400 ml-2">tediux</span>
+              <span className="text-muted-foreground ml-2">credits --history</span>
+            </div>
+          </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <Card>
-          <CardHeader className="pb-3">
-            <CardDescription>Current Balance</CardDescription>
-            <CardTitle className="text-3xl flex items-center gap-2">
-              <Coins className="h-6 w-6 text-amber-600" />
+          <div className="mt-6">
+            <h1 className="text-2xl font-bold text-foreground mb-1">Transaction History</h1>
+            <p className="text-muted-foreground text-sm">Credit usage and allocation log</p>
+          </div>
+        </motion.div>
+
+        {/* Stats Row */}
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.1 }}
+          className="grid grid-cols-3 gap-4 mb-8"
+        >
+          <div className="bg-card/50 rounded-lg border border-border/50 p-4">
+            <div className="text-xs text-muted-foreground font-mono mb-1">balance</div>
+            <div className="text-2xl font-bold text-cyan-400 font-mono">
               {subscription?.coins_balance || 0}
-            </CardTitle>
-          </CardHeader>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-3">
-            <CardDescription>Total Allocated</CardDescription>
-            <CardTitle className="text-3xl text-green-600 dark:text-green-400">
+            </div>
+          </div>
+          <div className="bg-card/50 rounded-lg border border-border/50 p-4">
+            <div className="text-xs text-muted-foreground font-mono mb-1">allocated</div>
+            <div className="text-2xl font-bold text-green-400 font-mono">
               +{subscription?.coins_total_allocated || 0}
-            </CardTitle>
-          </CardHeader>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-3">
-            <CardDescription>Total Used</CardDescription>
-            <CardTitle className="text-3xl text-red-600 dark:text-red-400">
+            </div>
+          </div>
+          <div className="bg-card/50 rounded-lg border border-border/50 p-4">
+            <div className="text-xs text-muted-foreground font-mono mb-1">used</div>
+            <div className="text-2xl font-bold text-red-400 font-mono">
               -{subscription?.coins_total_used || 0}
-            </CardTitle>
-          </CardHeader>
-        </Card>
-      </div>
+            </div>
+          </div>
+        </motion.div>
 
-      {/* Transactions List */}
-      <Card>
-        <CardHeader>
-          <CardTitle>All Transactions</CardTitle>
-          <CardDescription>
-            Complete history of all coin transactions
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+        {/* Transactions List */}
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.2 }}
+        >
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-mono text-muted-foreground">
+              {transactions.length} transactions
+            </h2>
+          </div>
+
           {transactions.length === 0 ? (
-            <div className="text-center py-12 text-gray-500 dark:text-gray-400">
-              <Coins className="h-12 w-12 mx-auto mb-3 opacity-50" />
-              <p>No transactions yet</p>
+            <div className="bg-card/30 rounded-lg border border-border/50 p-12 text-center">
+              <div className="text-muted-foreground font-mono text-sm">
+                <span className="text-cyan-400">~</span> No transactions yet
+              </div>
             </div>
           ) : (
-            <div className="space-y-3">
-              {transactions.map((transaction) => {
-                const Icon = TRANSACTION_ICONS[transaction.transaction_type];
-                const colorClass = TRANSACTION_COLORS[transaction.transaction_type];
-                const bgClass = TRANSACTION_BG[transaction.transaction_type];
+            <div className="space-y-2">
+              {transactions.map((transaction, index) => {
+                const isPositive = transaction.amount > 0;
                 const navLink = getTransactionLink(transaction);
                 const metadataDesc = getMetadataDescription(transaction);
 
                 return (
-                  <div
+                  <motion.div
                     key={transaction.id}
-                    className={`flex items-center justify-between p-4 rounded-lg border ${bgClass}`}
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ duration: 0.3, delay: index * 0.02 }}
+                    className="group bg-card/30 hover:bg-card/50 rounded-lg border border-border/40 hover:border-cyan-500/20 transition-all duration-200"
                   >
-                    <div className="flex items-start gap-3 flex-1">
-                      <div className={`p-2 rounded-full ${bgClass}`}>
-                        <Icon className={`h-5 w-5 ${colorClass}`} />
-                      </div>
-
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1 flex-wrap">
-                          <p className="font-medium text-sm">
-                            {transaction.description}
-                          </p>
-                          <Badge variant="outline" className="text-xs">
-                            {transaction.transaction_type}
-                          </Badge>
+                    <div className="flex items-center justify-between p-4">
+                      {/* Left: Icon + Details */}
+                      <div className="flex items-start gap-3 flex-1 min-w-0">
+                        <div className={`p-1.5 rounded-md ${isPositive ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+                          {isPositive ? (
+                            <PlusIcon className="h-4 w-4 text-green-400" />
+                          ) : (
+                            <MinusIcon className="h-4 w-4 text-red-400" />
+                          )}
                         </div>
 
-                        <p className="text-xs text-gray-500 dark:text-gray-400">
-                          {format(new Date(transaction.created_at), "PPp")}
-                        </p>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm text-foreground">{transaction.description}</span>
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${
+                              transaction.transaction_type === TransactionType.ALLOCATION
+                                ? 'bg-green-500/10 text-green-400'
+                                : transaction.transaction_type === TransactionType.USAGE
+                                  ? 'bg-red-500/10 text-red-400'
+                                  : 'bg-muted text-muted-foreground'
+                            }`}>
+                              {transaction.transaction_type}
+                            </span>
+                          </div>
 
-                        {metadataDesc && (
-                          <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                            {metadataDesc}
-                          </p>
-                        )}
-
-                        {transaction.reference_type && (
-                          <div className="flex items-center gap-2 mt-2">
-                            {navLink ? (
-                              <Link href={navLink}>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-6 px-2 text-xs"
-                                >
-                                  <ExternalLink className="h-3 w-3 mr-1" />
-                                  View {transaction.reference_type}
-                                </Button>
-                              </Link>
-                            ) : (
-                              <span className="text-xs text-gray-500 dark:text-gray-400">
-                                Related to: {transaction.reference_type}
-                              </span>
+                          <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
+                            <span className="font-mono">
+                              {format(new Date(transaction.created_at), "MMM d, HH:mm")}
+                            </span>
+                            {metadataDesc && (
+                              <>
+                                <span className="text-border">•</span>
+                                <span className="truncate">{metadataDesc}</span>
+                              </>
                             )}
                           </div>
-                        )}
-                      </div>
-                    </div>
 
-                    <div className="text-right ml-4">
-                      <div
-                        className={`text-lg font-bold ${
-                          transaction.amount > 0
-                            ? "text-green-600 dark:text-green-400"
-                            : "text-red-600 dark:text-red-400"
-                        }`}
-                      >
-                        {transaction.amount > 0 ? "+" : ""}
-                        {transaction.amount}
+                          {navLink && (
+                            <Link href={navLink} className="inline-flex items-center gap-1 mt-2 text-xs text-cyan-400 hover:text-cyan-300">
+                              <ExternalLinkIcon className="h-3 w-3" />
+                              <span>View {transaction.reference_type}</span>
+                            </Link>
+                          )}
+                        </div>
                       </div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">
-                        Balance: {transaction.balance_after}
+
+                      {/* Right: Amount */}
+                      <div className="text-right ml-4 shrink-0">
+                        <div className={`text-lg font-bold font-mono ${isPositive ? 'text-green-400' : 'text-red-400'}`}>
+                          {isPositive ? '+' : ''}{transaction.amount}
+                        </div>
+                        <div className="text-[10px] text-muted-foreground font-mono">
+                          bal: {transaction.balance_after}
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  </motion.div>
                 );
               })}
             </div>
           )}
-        </CardContent>
-      </Card>
+        </motion.div>
+
+        {/* Footer Status */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.6, delay: 0.4 }}
+          className="mt-8 text-center"
+        >
+          <div className="inline-flex items-center gap-2 font-mono text-sm text-muted-foreground">
+            <CheckCircledIcon className="h-4 w-4 text-green-500" />
+            <span>Transaction log complete</span>
+          </div>
+        </motion.div>
+      </div>
     </div>
   );
 }
