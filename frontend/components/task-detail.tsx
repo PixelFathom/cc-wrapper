@@ -10,7 +10,7 @@ import {
   PlayIcon, StopIcon, DownloadIcon, CommitIcon,
   ReaderIcon, UpdateIcon, LightningBoltIcon, CubeIcon,
   CodeIcon, TrashIcon, ChevronDownIcon, ChevronRightIcon,
-  FileTextIcon, QuestionMarkCircledIcon
+  FileTextIcon
 } from '@radix-ui/react-icons'
 import { motion } from 'framer-motion'
 import { api, DeploymentHook } from '@/lib/api'
@@ -24,7 +24,6 @@ import { DeploymentLogs } from './deployment-logs'
 import { TestCaseModal } from './test-case-modal'
 import { ExecutionResultModal } from './execution-result-modal'
 import { MarkdownRenderer } from './markdown-renderer'
-import { ContestHarvestingTab } from './contest-harvesting-tab'
 import { IssueResolutionView } from './issue-resolution-view'
 import { MessagesTab } from './messages-tab'
 import { VSCodeLinkModal } from './vscode-link-modal'
@@ -41,11 +40,11 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
   const tabParam = searchParams.get('tab')
 
   // Will be set to 'issue-resolution' for issue tasks after loading
-  const [activeTab, setActiveTab] = useState<'deployment' | 'deployment-task' | 'chat' | 'knowledge-base' | 'test-cases' | 'contest-harvesting' | 'issue-resolution' | 'messages'>('deployment')
+  const [activeTab, setActiveTab] = useState<'deployment' | 'deployment-task' | 'chat' | 'knowledge-base' | 'test-cases' | 'issue-resolution' | 'messages'>('deployment')
 
   // Set tab from URL parameter if provided
   useEffect(() => {
-    if (tabParam && ['deployment', 'deployment-task', 'chat', 'knowledge-base', 'test-cases', 'contest-harvesting', 'issue-resolution', 'messages'].includes(tabParam)) {
+    if (tabParam && ['deployment', 'deployment-task', 'chat', 'knowledge-base', 'test-cases', 'issue-resolution', 'messages'].includes(tabParam)) {
       setActiveTab(tabParam as any)
     }
   }, [tabParam])
@@ -188,7 +187,7 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
 
   // For issue resolution tasks, render the dedicated issue resolution UI
   // UNLESS a specific tab is requested (to allow access to normal task features)
-  const allowedNormalTabs = ['chat', 'deployment-task', 'knowledge-base', 'test-cases', 'deployment', 'contest-harvesting']
+  const allowedNormalTabs = ['chat', 'deployment-task', 'knowledge-base', 'test-cases', 'deployment']
   const requestsNormalTab = tabParam && allowedNormalTabs.includes(tabParam)
 
   if (task.task_type === 'issue_resolution' && !requestsNormalTab) {
@@ -416,7 +415,6 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
             ] : []),
             { id: 'knowledge-base', label: 'Knowledge Base', icon: <ReaderIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
             { id: 'test-cases', label: 'Test Cases', icon: <PlayIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
-            { id: 'contest-harvesting', label: 'Context Harvesting', icon: <QuestionMarkCircledIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -708,10 +706,6 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
 
         {activeTab === 'deployment-task' && task && (
           <DeploymentTaskTab taskId={taskId} task={task} />
-        )}
-
-        {activeTab === 'contest-harvesting' && (
-          <ContestHarvestingTab taskId={taskId} />
         )}
 
         {activeTab === 'issue-resolution' && (

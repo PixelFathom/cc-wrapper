@@ -12,7 +12,6 @@ export enum Feature {
   GITHUB_ISSUES = "github_issues",
   TEST_CASES = "test_cases",
   VSCODE_ACCESS = "vscode_access",
-  CONTEXT_HARVESTING = "context_harvesting",
 }
 
 export enum TransactionType {
@@ -75,7 +74,6 @@ export const TIER_CONFIGS: Record<SubscriptionTier, TierConfig> = {
       { name: "Test Cases", included: false },
       { name: "VS Code Access", included: false },
       { name: "GitHub Issues", included: false },
-      { name: "Context Harvesting", included: false },
     ],
   },
   [SubscriptionTier.PREMIUM]: {
@@ -91,7 +89,6 @@ export const TIER_CONFIGS: Record<SubscriptionTier, TierConfig> = {
       { name: "Deployment Host", included: true },
       { name: "Test Cases", included: true },
       { name: "VS Code Access", included: true },
-      { name: "Context Harvesting", included: true },
       { name: "GitHub Issues", included: false },
     ],
     benefits: [
@@ -157,17 +154,5 @@ export const FEATURE_CONFIGS: Record<Feature, {
       "Automatic PR creation",
     ],
     requiredTier: SubscriptionTier.PREMIUM, // Not currently available
-  },
-  [Feature.CONTEXT_HARVESTING]: {
-    name: "Context Harvesting",
-    icon: "🌾",
-    description: "Extract and organize knowledge from conversations",
-    benefits: [
-      "Extract structured knowledge",
-      "Build knowledge base automatically",
-      "Question-answer collection",
-      "Context-aware AI responses",
-    ],
-    requiredTier: SubscriptionTier.PREMIUM,
   },
 };

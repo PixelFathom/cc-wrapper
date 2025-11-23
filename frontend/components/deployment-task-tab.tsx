@@ -13,6 +13,7 @@ import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { DeploymentLogs } from './deployment-logs'
 import { cn } from '@/lib/utils'
+import { CreditCost } from './ui/credit-cost'
 
 interface DeploymentTaskTabProps {
   taskId: string
@@ -450,7 +451,7 @@ export function DeploymentTaskTab({ taskId, task }: DeploymentTaskTabProps) {
             <Button
               onClick={handleProvisionHosting}
               disabled={provisionHostingMutation.isPending || !task.deployment_port}
-              className="font-mono w-full"
+              className="font-mono w-full gap-2 bg-violet-600 hover:bg-violet-700 text-white"
             >
               {provisionHostingMutation.isPending ? (
                 <>
@@ -459,8 +460,9 @@ export function DeploymentTaskTab({ taskId, task }: DeploymentTaskTabProps) {
                 </>
               ) : (
                 <>
-                  <LockClosedIcon className="h-4 w-4 mr-2" />
+                  <LockClosedIcon className="h-4 w-4" />
                   Setup Custom Domain with SSL
+                  <CreditCost cost={1} variant="badge-subtle" />
                 </>
               )}
             </Button>
@@ -470,9 +472,12 @@ export function DeploymentTaskTab({ taskId, task }: DeploymentTaskTabProps) {
                 Deployment port required. Deploy the task first.
               </p>
             )}
-            <p className="text-xs text-muted-foreground mt-2">
-              Auto-generates a unique subdomain, creates DNS record, configures Nginx reverse proxy, and sets up SSL certificate.
-            </p>
+            <div className="mt-3">
+              <p className="text-xs text-muted-foreground mb-2">
+                Auto-generates a unique subdomain, creates DNS record, configures Nginx reverse proxy, and sets up SSL certificate.
+              </p>
+              <CreditCost cost={1} variant="context" />
+            </div>
           </>
         ) : (
           <div className="space-y-3">
@@ -685,21 +690,24 @@ export function DeploymentTaskTab({ taskId, task }: DeploymentTaskTabProps) {
           <Button
             onClick={() => deployMutation.mutate()}
             disabled={disableDeployButton}
-            className="font-mono"
+            className="font-mono gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
           >
             {deployMutation.isPending ? (
               <>
-                <UpdateIcon className="h-4 w-4 mr-2 animate-spin" />
+                <UpdateIcon className="h-4 w-4 animate-spin" />
                 Deploying...
               </>
             ) : (
               <>
-                <RocketIcon className="h-4 w-4 mr-2" />
+                <RocketIcon className="h-4 w-4" />
                 Deploy
+                <CreditCost cost={1} variant="badge-subtle" />
               </>
             )}
           </Button>
-
+        </div>
+        <div className="mt-3">
+          <CreditCost cost={1} variant="context" />
         </div>
 
         {hasUnsavedChanges && (

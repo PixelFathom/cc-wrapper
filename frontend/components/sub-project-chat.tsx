@@ -18,6 +18,7 @@ import { AssistantMessage } from './assistant-message'
 import { TestCaseGenerationModal } from './test-case-generation-modal'
 import { useApiError } from '@/lib/hooks/useApiError'
 import { toast } from 'sonner'
+import { CreditCost } from './ui/credit-cost'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -1972,12 +1973,12 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                     )}
                     
                     {/* Main Send Button */}
-                    <Button 
-                      type="submit" 
+                    <Button
+                      type="submit"
                       disabled={!input.trim()}
                       className={cn(
                         "rounded-full h-9 w-9 sm:h-9 sm:w-auto sm:px-4 transition-all duration-200 touch-manipulation",
-                        "font-medium text-sm",
+                        "font-medium text-sm gap-2",
                         input.trim()
                           ? (isWaitingForResponse || isQueueProcessing
                               ? "bg-amber-500 hover:bg-amber-600 text-black" // Will queue
@@ -1988,7 +1989,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                       title={
                         isWaitingForResponse || isQueueProcessing
                           ? "Will add to queue - Press Enter"
-                          : "Send message - Press Enter"
+                          : "Send message (1 credit) - Press Enter"
                       }
                     >
                       {sendMutation.isPending && messageQueue.length === 0 ? (
@@ -2001,7 +2002,10 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                       ) : (
                         <>
                           <PaperPlaneIcon className="h-4 w-4 sm:hidden" />
-                          <span className="hidden sm:inline">Send</span>
+                          <span className="hidden sm:inline-flex items-center gap-1.5">
+                            Send
+                            <CreditCost cost={1} variant="badge-subtle" />
+                          </span>
                         </>
                       )}
                     </Button>
@@ -2014,7 +2018,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                 {isWaitingForResponse || isQueueProcessing ? (
                   <div className="flex items-center gap-2 text-amber-500">
                     <UpdateIcon className="h-3 w-3 animate-spin" />
-                    {isQueueProcessing 
+                    {isQueueProcessing
                       ? 'Processing queued message...'
                       : 'Processing current message...'}
                     {messageQueue.length > 0 && (
@@ -2029,7 +2033,10 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                     {messageQueue.length} message{messageQueue.length !== 1 ? 's' : ''} queued • Will process automatically
                   </div>
                 ) : (
-                  <div>Press Enter to send • Shift+Enter for new line • Ctrl+Enter to queue</div>
+                  <div className="flex items-center justify-between">
+                    <span>Press Enter to send • Shift+Enter for new line</span>
+                    <CreditCost cost={1} variant="context" showWarning={false} />
+                  </div>
                 )}
               </div>
             </div>

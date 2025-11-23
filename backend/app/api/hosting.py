@@ -8,6 +8,7 @@ import logging
 from app.deps import get_session, get_current_user, get_admin_user
 from app.services.hosting_service import hosting_service
 from app.services.hostinger_service import hostinger_dns_service
+from app.services.coin_service import coin_service, InsufficientCoinsError
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -60,12 +61,34 @@ async def provision_hosting(
     Provision complete hosting for a task.
 
     This will:
-    1. Create a DNS A record via Hostinger API
-    2. Configure Nginx reverse proxy
-    3. Setup SSL certificate via Certbot
+    1. Deduct 1 credit from user's balance
+    2. Create a DNS A record via Hostinger API
+    3. Configure Nginx reverse proxy
+    4. Setup SSL certificate via Certbot
 
     The subdomain will be auto-generated based on task name if not provided.
     """
+    # Deduct 1 credit for custom domain deployment
+    try:
+        await coin_service.deduct_coins(
+            session=db,
+            user_id=current_user.id,
+            amount=1,
+            description="Custom domain deployment",
+            reference_id=str(request.task_id),
+            reference_type="hosting_provision"
+        )
+    except InsufficientCoinsError:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "error": "insufficient_coins",
+                "message": "Insufficient credits for custom domain deployment",
+                "required": 1,
+                "available": current_user.coins_balance
+            }
+        )
+
     try:
         result = await hosting_service.provision_hosting(
             db=db,
