@@ -16,15 +16,15 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 const features = [
   {
     icon: RocketIcon,
-    title: 'AI-Powered Development',
-    description: 'Leverage Claude AI to build, update, and optimize your projects automatically. From code generation to bug fixes, let AI handle the heavy lifting.',
-    capabilities: ['Code generation & refactoring', 'Automated testing', 'Bug detection & fixes', 'Documentation generation']
+    title: 'AI-Powered Queries',
+    description: 'Chat with AI agents to build, update, and optimize your projects. Each query uses credits based on complexity. From code generation to bug fixes.',
+    capabilities: ['Code generation & refactoring', 'Automated testing', 'Bug detection & fixes', 'Credit-based usage']
   },
   {
     icon: CodeIcon,
-    title: 'End-to-End Project Orchestration',
-    description: 'Seamlessly manage the entire project lifecycle from creation to deployment with intelligent workflow automation.',
-    capabilities: ['Project initialization', 'Dependency management', 'Build automation', 'Deployment pipelines']
+    title: 'Automated Deployments',
+    description: 'One-click deployments that build and deploy your applications. Credits cover the build process, container setup, and deployment orchestration.',
+    capabilities: ['Build automation', 'Container orchestration', 'Zero-downtime deploys', 'Deployment credits']
   },
   {
     icon: GitHubLogoIcon,
@@ -46,9 +46,9 @@ const features = [
   },
   {
     icon: LightningBoltIcon,
-    title: 'Rapid Prototyping',
-    description: 'Go from idea to working prototype in minutes with AI-assisted development and automated testing.',
-    capabilities: ['Quick project setup', 'Template generation', 'Instant deployments', 'A/B testing']
+    title: 'Cloud Hosting',
+    description: 'Host your applications with credits. Your services stay live as long as you have hosting credits. Scale up or down as needed.',
+    capabilities: ['Managed hosting', 'Auto-scaling', 'SSL certificates', 'Hosting credits']
   },
   {
     icon: MixIcon,

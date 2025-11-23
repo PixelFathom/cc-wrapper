@@ -107,8 +107,11 @@ export function Hero() {
             </div>
           </div>
 
-          <p className="text-lg sm:text-xl md:text-2xl text-muted-foreground mb-8 max-w-3xl mx-auto">
-            The developer-first project management platform. Write code, not status reports.
+          <p className="text-lg sm:text-xl md:text-2xl text-muted-foreground mb-4 max-w-3xl mx-auto">
+            The AI-powered development platform. Build, deploy, and host with intelligent agents.
+          </p>
+          <p className="text-sm sm:text-base text-muted-foreground/80 mb-8 max-w-2xl mx-auto font-mono">
+            Use credits for AI queries, deployments, and hosting
           </p>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center mb-12 sm:mb-16">
