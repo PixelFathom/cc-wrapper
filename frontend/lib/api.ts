@@ -1357,7 +1357,9 @@ Object.assign(api, {
   getCreditPackages: async () => {
     const response = await fetch(`${API_BASE_URL}/api/payments/credit-packages`, {
       method: 'GET',
-      headers: getAuthHeaders(),
+      headers: {
+        'Content-Type': 'application/json',
+      },
     })
     if (!response.ok) {
       throw new Error('Failed to fetch credit packages')

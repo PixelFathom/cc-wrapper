@@ -2,11 +2,10 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useSubscription } from "@/lib/hooks/useSubscription";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Check, Loader2, Clock, Sparkles } from "lucide-react";
+import { Check, Loader2, Clock, Sparkles, Github } from "lucide-react";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import { openCashfreeCheckout } from "@/lib/cashfree";
@@ -22,11 +21,34 @@ interface CreditPackage {
 
 export default function PricingPage() {
   const router = useRouter();
-  const { tier: currentTier, isLoading: subscriptionLoading } = useSubscription();
   const [packages, setPackages] = useState<CreditPackage[]>([]);
   const [selectedPackage, setSelectedPackage] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isLoadingPackages, setIsLoadingPackages] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [currentTier, setCurrentTier] = useState<string | null>(null);
+
+  // Check if user is authenticated and get subscription info only if needed
+  useEffect(() => {
+    const storedUser = localStorage.getItem('github_user');
+    const authStatus = !!storedUser;
+    setIsAuthenticated(authStatus);
+
+    // Only fetch subscription info if authenticated
+    if (authStatus) {
+      // Fetch subscription tier for authenticated users
+      const fetchSubscription = async () => {
+        try {
+          const response = await api.getSubscription();
+          setCurrentTier(response.subscription_tier);
+        } catch (error) {
+          console.error('Failed to fetch subscription:', error);
+          // Don't show error, just proceed without tier info
+        }
+      };
+      fetchSubscription();
+    }
+  }, []);
 
   // Fetch credit packages on mount
   useEffect(() => {
@@ -50,6 +72,14 @@ export default function PricingPage() {
     setIsProcessing(true);
 
     try {
+      // Check if user is authenticated first
+      if (!isAuthenticated) {
+        toast.error("Please log in with GitHub to purchase credits");
+        setIsProcessing(false);
+        setSelectedPackage(null);
+        return;
+      }
+
       // Step 1: Validate payment requirements (email and phone)
       toast.loading("Checking profile...");
 
@@ -107,6 +137,8 @@ export default function PricingPage() {
         setTimeout(() => {
           router.push("/profile");
         }, 2000);
+      } else if (error.message.includes("not authenticated")) {
+        toast.error("Please log in with GitHub to purchase credits");
       } else {
         toast.error(error.message || "Failed to initiate payment. Please try again.");
       }
@@ -116,7 +148,8 @@ export default function PricingPage() {
     }
   };
 
-  if (subscriptionLoading || isLoadingPackages) {
+  // Show loading only for packages, subscription loading is optional
+  if (isLoadingPackages) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <Loader2 className="h-8 w-8 animate-spin" />
@@ -136,7 +169,7 @@ export default function PricingPage() {
         <p className="text-xl text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
           Purchase credits to access premium features. Credits are valid for 30 days.
         </p>
-        {currentTier === "premium" && (
+        {isAuthenticated && currentTier === "premium" && (
           <Badge className="mt-4 bg-purple-500 text-white">
             <Sparkles className="h-3 w-3 mr-1 inline" />
             Premium Active
@@ -230,6 +263,11 @@ export default function PricingPage() {
                     <>
                       <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                       Processing...
+                    </>
+                  ) : !isAuthenticated ? (
+                    <>
+                      <Github className="h-4 w-4 mr-2" />
+                      Sign in to Buy
                     </>
                   ) : (
                     "Buy Now"
