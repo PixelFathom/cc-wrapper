@@ -52,6 +52,12 @@ class Settings(BaseSettings):
     default_dns_ttl: int = 300  # TTL in seconds
 
 
+    # Better Stack Logging Configuration
+    better_stack_source_token: str = ""
+    better_stack_enabled: bool = True
+    log_level: str = "INFO"
+
+
     @property
     def database_url(self) -> str:
         return f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"

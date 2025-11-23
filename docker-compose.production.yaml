@@ -112,6 +112,11 @@ services:
       # Production optimizations
       - PYTHONUNBUFFERED=1
       - PYTHONDONTWRITEBYTECODE=1
+      # Better Stack Logging
+      - BETTER_STACK_SOURCE_TOKEN=${BETTER_STACK_SOURCE_TOKEN}
+      - BETTER_STACK_HOST=${BETTER_STACK_HOST:-https://in.logs.betterstack.com}
+      - BETTER_STACK_ENABLED=${BETTER_STACK_ENABLED:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
@@ -144,6 +149,12 @@ services:
       # Enable BuildKit for better caching and performance
       args:
         BUILDKIT_INLINE_CACHE: 1
+        # Backend API URL for production (REQUIRED - no default!)
+        NEXT_PUBLIC_BACKEND_HOST: ${NEXT_PUBLIC_BACKEND_HOST}
+        # Cashfree environment for build-time embedding
+        NEXT_PUBLIC_CASHFREE_ENV: ${NEXT_PUBLIC_CASHFREE_ENV:-production}
+        # Better Stack token for build-time embedding
+        NEXT_PUBLIC_BETTER_STACK_SOURCE_TOKEN: ${NEXT_PUBLIC_BETTER_STACK_SOURCE_TOKEN}
     image: cfpj-frontend:production
     env_file: .env
     ports:
@@ -154,6 +165,8 @@ services:
     environment:
       - NODE_ENV=production
       - NEXT_TELEMETRY_DISABLED=1
+      # Better Stack Logging
+      - NEXT_PUBLIC_BETTER_STACK_SOURCE_TOKEN=${NEXT_PUBLIC_BETTER_STACK_SOURCE_TOKEN}
     networks:
       - cc-wrapper
     restart: unless-stopped
