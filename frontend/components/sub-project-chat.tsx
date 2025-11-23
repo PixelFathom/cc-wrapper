@@ -120,7 +120,10 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
   const [showTestCaseModal, setShowTestCaseModal] = useState(false)
   
   // Message queue state removed - input is now blocked when waiting for response
-  
+  // Placeholders for backward compatibility with components expecting queue state
+  const isQueueProcessing = false
+  const messageQueue: Message[] = []
+
   // Auto-scroll state management
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true)
   const [userScrolledUp, setUserScrolledUp] = useState(false)
