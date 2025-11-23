@@ -45,6 +45,9 @@ async def lifespan(app: FastAPI):
     shutdown_scheduler()
     await close_redis()
 
+    # Flush all pending logs before exit
+    logging.shutdown()
+
 
 app = FastAPI(
     title="Project Management API",

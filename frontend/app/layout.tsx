@@ -6,6 +6,7 @@ import { Navigation } from '@/components/navigation'
 import { Footer } from '@/components/footer'
 import { ApprovalCenter } from '@/components/approval-center'
 import { Toaster } from 'sonner'
+import { BetterStackWebVitals } from '@logtail/next'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -31,6 +32,7 @@ export default function RootLayout({
           <Footer />
           <ApprovalCenter />
           <Toaster position="top-right" richColors />
+          <BetterStackWebVitals />
         </Providers>
       </body>
     </html>

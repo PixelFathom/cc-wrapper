@@ -1,3 +1,5 @@
+const { withBetterStack } = require('@logtail/next');
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'standalone',
@@ -16,4 +18,4 @@ const nextConfig = {
   },
 }
 
-module.exports = nextConfig
+module.exports = withBetterStack(nextConfig)
