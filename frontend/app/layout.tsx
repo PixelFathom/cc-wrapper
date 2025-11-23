@@ -61,7 +61,11 @@ export const metadata: Metadata = {
       'max-snippet': -1,
     },
   },
-  // Icons are generated dynamically via icon.tsx and apple-icon.tsx
+  icons: {
+    icon: [
+      { url: '/favicon.svg', type: 'image/svg+xml' },
+    ],
+  },
   manifest: '/site.webmanifest',
 }
 
