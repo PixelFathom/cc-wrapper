@@ -1,10 +1,15 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from contextlib import asynccontextmanager
 from sqlmodel import SQLModel
 import logging
+import time
 
 from app.core.settings import get_settings
+
+# Logger for request logging
+request_logger = logging.getLogger("app.requests")
 from app.core.redis import close_redis
 from app.core.scheduler import start_scheduler, shutdown_scheduler
 from app.deps import engine
@@ -55,6 +60,36 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+
+# Request logging middleware
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        start_time = time.time()
+
+        # Process request
+        response = await call_next(request)
+
+        # Calculate duration
+        duration_ms = (time.time() - start_time) * 1000
+
+        # Log request details (skip health checks to reduce noise)
+        if not request.url.path.endswith("/health"):
+            request_logger.info(
+                "HTTP Request",
+                extra={
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status_code": response.status_code,
+                    "duration_ms": round(duration_ms, 2),
+                    "client_ip": request.client.host if request.client else "unknown",
+                    "user_agent": request.headers.get("user-agent", "")[:100],
+                }
+            )
+
+        return response
+
+
+app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
