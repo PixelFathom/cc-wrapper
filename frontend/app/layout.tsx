@@ -82,6 +82,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark scroll-smooth">
       <head>
+        <meta name="google-site-verification" content="-MkFFXW0NiFQDdTUV5nRvnXIjr5TNWNiu57BEsi23wY" />
         <OrganizationSchema />
         <SoftwareApplicationSchema />
         <WebsiteSchema />
