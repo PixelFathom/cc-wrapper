@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { CodeIcon, HamburgerMenuIcon, Cross2Icon, RocketIcon, ExitIcon } from '@radix-ui/react-icons'
+import { CodeIcon, HamburgerMenuIcon, Cross2Icon, RocketIcon, ExitIcon, StarFilledIcon } from '@radix-ui/react-icons'
 import { Button } from './ui/button'
 // Removed Clerk imports as basic auth is used instead
 import { usePathname } from 'next/navigation'
@@ -13,6 +13,7 @@ import { SubscriptionBadge } from './subscription/SubscriptionBadge'
 export function Navigation() {
   const [scrolled, setScrolled] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
   const pathname = usePathname()
 
   // Extract taskId from URL path like /p/[projectId]/t/[taskId]
@@ -24,6 +25,12 @@ export function Navigation() {
     }
     window.addEventListener('scroll', handleScroll)
     return () => window.removeEventListener('scroll', handleScroll)
+  }, [])
+
+  useEffect(() => {
+    // Check authentication status
+    const storedUser = localStorage.getItem('github_user')
+    setIsAuthenticated(!!storedUser)
   }, [])
 
 
@@ -61,6 +68,23 @@ export function Navigation() {
               <span className="text-muted-foreground text-xs font-mono">main</span>
             </div>
 
+            {/* Pricing Button - Show only when not authenticated */}
+            {!isAuthenticated && (
+              <Link href="/pricing">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="relative group bg-gradient-to-r from-green-500/10 to-cyan-500/10 border-green-500/30 hover:border-green-400/50 text-green-400 hover:text-green-300 hover:bg-green-500/20 transition-all duration-200 font-mono text-xs"
+                >
+                  <div className="absolute -inset-0.5 bg-gradient-to-r from-green-600 to-cyan-600 rounded-lg blur opacity-0 group-hover:opacity-20 transition duration-300"></div>
+                  <div className="relative flex items-center">
+                    <StarFilledIcon className="mr-2 h-4 w-4" />
+                    <span>$ pricing</span>
+                  </div>
+                </Button>
+              </Link>
+            )}
+
             {/* Subscription Badge */}
             <SubscriptionBadge />
 
@@ -96,6 +120,26 @@ export function Navigation() {
                 <div className="text-center py-4">
                   <span className="text-xs text-muted-foreground font-mono">v1.0.0</span>
                 </div>
+
+                {/* Pricing Button - Mobile - Show only when not authenticated */}
+                {!isAuthenticated && (
+                  <div className="px-4">
+                    <Link href="/pricing">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="w-full relative group bg-gradient-to-r from-green-500/10 to-cyan-500/10 border-green-500/30 hover:border-green-400/50 text-green-400 hover:text-green-300 hover:bg-green-500/20 transition-all duration-200 font-mono text-xs"
+                        onClick={() => setMobileMenuOpen(false)}
+                      >
+                        <div className="absolute -inset-0.5 bg-gradient-to-r from-green-600 to-cyan-600 rounded-lg blur opacity-0 group-hover:opacity-20 transition duration-300"></div>
+                        <div className="relative flex items-center">
+                          <StarFilledIcon className="mr-2 h-4 w-4" />
+                          <span>$ pricing</span>
+                        </div>
+                      </Button>
+                    </Link>
+                  </div>
+                )}
 
                 {/* Subscription Badge - Mobile */}
                 <div className="px-4 flex justify-center">

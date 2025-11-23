@@ -98,24 +98,6 @@ export function PricingSection() {
               </div>
             ))}
           </div>
-        ) : plans.length === 0 ? (
-          /* No Plans Available */
-          <div className="text-center py-20">
-            <div className="terminal-bg border border-border rounded-lg p-12 max-w-md mx-auto">
-              <h3 className="text-lg font-mono text-muted-foreground mb-4">
-                // No pricing plans available
-              </h3>
-              <p className="text-sm text-muted-foreground font-mono">
-                Please check back later or contact us directly.
-              </p>
-              <Button
-                className="mt-6 bg-gradient-to-r from-cyan-500 to-purple-500 hover:from-cyan-600 hover:to-purple-600 text-white font-mono"
-                onClick={() => window.location.reload()}
-              >
-                Retry
-              </Button>
-            </div>
-          </div>
         ) : (
           /* Pricing Cards */
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mb-20 max-w-6xl mx-auto">
