@@ -2,10 +2,10 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Check, Loader2, Clock, Sparkles, Github } from "lucide-react";
+import { CheckCircledIcon, UpdateIcon } from "@radix-ui/react-icons";
+import { Loader2, Github } from "lucide-react";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import { openCashfreeCheckout } from "@/lib/cashfree";
@@ -28,29 +28,24 @@ export default function PricingPage() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentTier, setCurrentTier] = useState<string | null>(null);
 
-  // Check if user is authenticated and get subscription info only if needed
   useEffect(() => {
     const storedUser = localStorage.getItem('github_user');
     const authStatus = !!storedUser;
     setIsAuthenticated(authStatus);
 
-    // Only fetch subscription info if authenticated
     if (authStatus) {
-      // Fetch subscription tier for authenticated users
       const fetchSubscription = async () => {
         try {
           const response = await api.getSubscription();
           setCurrentTier(response.subscription_tier);
         } catch (error) {
           console.error('Failed to fetch subscription:', error);
-          // Don't show error, just proceed without tier info
         }
       };
       fetchSubscription();
     }
   }, []);
 
-  // Fetch credit packages on mount
   useEffect(() => {
     const fetchPackages = async () => {
       try {
@@ -63,7 +58,6 @@ export default function PricingPage() {
         setIsLoadingPackages(false);
       }
     };
-
     fetchPackages();
   }, []);
 
@@ -72,7 +66,6 @@ export default function PricingPage() {
     setIsProcessing(true);
 
     try {
-      // Check if user is authenticated first
       if (!isAuthenticated) {
         toast.error("Please log in with GitHub to purchase credits");
         setIsProcessing(false);
@@ -80,63 +73,47 @@ export default function PricingPage() {
         return;
       }
 
-      // Step 1: Validate payment requirements (email and phone)
       toast.loading("Checking profile...");
-
       const validation = await api.validatePaymentRequirements();
 
       if (!validation.valid) {
         toast.dismiss();
         toast.error(validation.message);
-
-        // Redirect to profile page after a short delay
-        setTimeout(() => {
-          router.push("/profile");
-        }, 2000);
-
+        setTimeout(() => router.push("/profile"), 2000);
         setIsProcessing(false);
         setSelectedPackage(null);
         return;
       }
 
-      // Step 2: Create payment order
       toast.loading("Initializing payment...");
-
       const orderData = await api.createPaymentOrder({
         package_id: packageId,
         return_url: `${window.location.origin}/payment/success`,
         cancel_url: `${window.location.origin}/payment/failure`,
       });
 
-      // Clear loading toast
       toast.dismiss();
       toast.success("Opening payment checkout...");
 
-      // Step 3: Open Cashfree checkout
       await openCashfreeCheckout({
         sessionId: orderData.payment_session_id,
         orderId: orderData.order_id,
         onSuccess: () => {
-          // Payment successful - will be redirected to success page
           toast.success("Payment initiated successfully!");
         },
         onFailure: (error) => {
-          // Payment failed
           toast.error(error.message || "Payment failed. Please try again.");
           setIsProcessing(false);
           setSelectedPackage(null);
         },
       });
-
     } catch (error: any) {
       console.error("Payment initiation failed:", error);
       toast.dismiss();
 
       if (error.message.includes("Email is required") || error.message.includes("Phone number is required")) {
         toast.error("Please update your profile with email and phone number to proceed.");
-        setTimeout(() => {
-          router.push("/profile");
-        }, 2000);
+        setTimeout(() => router.push("/profile"), 2000);
       } else if (error.message.includes("not authenticated")) {
         toast.error("Please log in with GitHub to purchase credits");
       } else {
@@ -148,172 +125,221 @@ export default function PricingPage() {
     }
   };
 
-  // Show loading only for packages, subscription loading is optional
-  if (isLoadingPackages) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="h-8 w-8 animate-spin" />
-      </div>
-    );
-  }
-
-  // Determine which package is recommended
   const recommendedPackageId = "standard";
 
   return (
-    <div className="container mx-auto px-4 py-12">
-      <div className="text-center mb-12">
-        <h1 className="text-4xl font-bold mb-4">
-          Buy Credits
-        </h1>
-        <p className="text-xl text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
-          Purchase credits to access premium features. Credits are valid for 30 days.
-        </p>
-        {isAuthenticated && currentTier === "premium" && (
-          <Badge className="mt-4 bg-purple-500 text-white">
-            <Sparkles className="h-3 w-3 mr-1 inline" />
-            Premium Active
-          </Badge>
-        )}
-      </div>
+    <div className="min-h-screen py-12 px-4 sm:px-6">
+      <div className="container mx-auto max-w-6xl">
+        {/* Terminal Header */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6 }}
+          className="mb-12"
+        >
+          <div className="terminal-bg rounded-lg border border-border p-4 max-w-xl">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="flex gap-1.5">
+                <span className="w-3 h-3 rounded-full bg-red-500/80" />
+                <span className="w-3 h-3 rounded-full bg-yellow-500/80" />
+                <span className="w-3 h-3 rounded-full bg-green-500/80" />
+              </div>
+              <span className="text-xs font-mono text-muted-foreground ml-2">~/pricing</span>
+            </div>
+            <div className="font-mono text-sm">
+              <span className="text-green-400">➜</span>
+              <span className="text-cyan-400 ml-2">tediux</span>
+              <span className="text-muted-foreground ml-2">credits --packages</span>
+            </div>
+          </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 max-w-7xl mx-auto">
-        {packages.map((pkg) => {
-          const isRecommended = pkg.id === recommendedPackageId;
+          <div className="mt-6">
+            <h1 className="text-3xl font-bold text-foreground mb-2">Buy Credits</h1>
+            <p className="text-muted-foreground">
+              Credits power AI queries, deployments, and hosting. Valid for 30 days.
+            </p>
+            {isAuthenticated && currentTier === "premium" && (
+              <div className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-cyan-500/15 text-cyan-400 text-sm font-mono">
+                <span className="w-2 h-2 rounded-full bg-cyan-400" />
+                Premium Active
+              </div>
+            )}
+          </div>
+        </motion.div>
 
-          return (
-            <Card
-              key={pkg.id}
-              className={`relative flex flex-col ${
-                isRecommended
-                  ? "border-2 border-purple-500 shadow-lg scale-105"
-                  : "border border-gray-200 dark:border-gray-800"
-              }`}
-            >
-              {isRecommended && (
-                <div className="absolute -top-4 left-1/2 transform -translate-x-1/2">
-                  <Badge className="bg-purple-500 text-white px-4 py-1">
-                    <Sparkles className="h-3 w-3 mr-1 inline" />
-                    BEST VALUE
-                  </Badge>
-                </div>
-              )}
+        {/* Loading State */}
+        {isLoadingPackages ? (
+          <div className="flex items-center justify-center py-20">
+            <div className="flex items-center gap-3 text-muted-foreground font-mono">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              <span>Loading packages...</span>
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Credit Packages Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 mb-12">
+              {packages.map((pkg, index) => {
+                const isRecommended = pkg.id === recommendedPackageId;
+                const isSelected = selectedPackage === pkg.id && isProcessing;
 
-              <CardHeader className="pb-4">
-                <CardTitle className="text-2xl">{pkg.name}</CardTitle>
-                <CardDescription className="text-sm">
-                  {pkg.credits} credits for your projects
-                </CardDescription>
-              </CardHeader>
+                return (
+                  <motion.div
+                    key={pkg.id}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.4, delay: index * 0.05 }}
+                    className={`relative ${isRecommended ? 'sm:-mt-2 sm:mb-2' : ''}`}
+                  >
+                    {isRecommended && (
+                      <div className="absolute -top-3 left-1/2 -translate-x-1/2 z-10">
+                        <span className="px-3 py-1 rounded-full text-xs font-medium bg-cyan-500 text-black">
+                          Best Value
+                        </span>
+                      </div>
+                    )}
 
-              <CardContent className="flex-1">
-                <div className="mb-6">
+                    <div className={`h-full flex flex-col rounded-lg border bg-card/50 transition-all duration-200 ${
+                      isRecommended
+                        ? 'border-cyan-500/50 shadow-lg shadow-cyan-500/10'
+                        : 'border-border/50 hover:border-cyan-500/30'
+                    }`}>
+                      {/* Header */}
+                      <div className={`px-4 py-4 border-b ${isRecommended ? 'border-cyan-500/30' : 'border-border/30'}`}>
+                        <div className="font-mono text-sm text-muted-foreground mb-1">{pkg.name}</div>
+                        <div className="flex items-baseline gap-1">
+                          <span className="text-3xl font-bold text-foreground">
+                            {pkg.currency === 'INR' ? '₹' : '$'}{pkg.price}
+                          </span>
+                        </div>
+                        <div className="mt-2 inline-flex items-center gap-1.5 px-2 py-1 rounded bg-cyan-500/10 text-cyan-400 text-xs font-mono">
+                          <span>{pkg.credits} credits</span>
+                        </div>
+                      </div>
+
+                      {/* Features */}
+                      <div className="flex-1 px-4 py-4">
+                        <div className="space-y-2 text-sm">
+                          <div className="flex items-center gap-2 text-muted-foreground">
+                            <CheckCircledIcon className="h-3.5 w-3.5 text-green-500 shrink-0" />
+                            <span>Valid {pkg.validity_days} days</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-muted-foreground">
+                            <CheckCircledIcon className="h-3.5 w-3.5 text-green-500 shrink-0" />
+                            <span>AI queries</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-muted-foreground">
+                            <CheckCircledIcon className="h-3.5 w-3.5 text-green-500 shrink-0" />
+                            <span>Deployments</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-muted-foreground">
+                            <CheckCircledIcon className="h-3.5 w-3.5 text-green-500 shrink-0" />
+                            <span>Cloud hosting</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* CTA */}
+                      <div className="px-4 pb-4">
+                        <Button
+                          onClick={() => handlePurchase(pkg.id)}
+                          disabled={isSelected}
+                          className={`w-full ${
+                            isRecommended
+                              ? 'bg-cyan-500 hover:bg-cyan-600 text-black'
+                              : 'bg-transparent border border-border hover:border-cyan-500/50 hover:bg-cyan-500/10 text-foreground'
+                          }`}
+                          size="sm"
+                        >
+                          {isSelected ? (
+                            <>
+                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                              Processing...
+                            </>
+                          ) : !isAuthenticated ? (
+                            <>
+                              <Github className="h-4 w-4 mr-2" />
+                              Sign in
+                            </>
+                          ) : (
+                            'Buy Now'
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
+
+            {/* Info Sections */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-4xl mx-auto">
+              {/* How Credits Work */}
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4, delay: 0.3 }}
+                className="bg-card/30 rounded-lg border border-border/50 p-5"
+              >
+                <div className="flex items-start gap-3">
+                  <div className="p-2 rounded-md bg-cyan-500/10 text-cyan-400">
+                    <UpdateIcon className="h-4 w-4" />
+                  </div>
                   <div>
-                    <span className="text-4xl font-bold">
-                      {pkg.currency === 'INR' ? '₹' : '$'}{pkg.price}
-                    </span>
-                  </div>
-                  <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    One-time purchase
-                  </div>
-
-                  <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-950/20 rounded-lg">
-                    <div className="flex items-center gap-2 text-sm font-semibold text-amber-600 dark:text-amber-400">
-                      <Clock className="h-4 w-4" />
-                      {pkg.credits} credits
-                    </div>
-                    <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                      Valid for {pkg.validity_days} days
-                    </div>
+                    <h3 className="font-medium text-foreground mb-2">How Credits Work</h3>
+                    <ul className="text-sm text-muted-foreground space-y-1.5">
+                      <li className="flex items-start gap-2">
+                        <span className="text-cyan-400">•</span>
+                        <span>Valid for 30 days from purchase</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-cyan-400">•</span>
+                        <span>Premium tier activates with credits</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-cyan-400">•</span>
+                        <span>Credits stack across purchases</span>
+                      </li>
+                    </ul>
                   </div>
                 </div>
+              </motion.div>
 
-                <ul className="space-y-3">
-                  <li className="flex items-start gap-2 text-sm">
-                    <Check className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                    <span>All premium features</span>
-                  </li>
-                  <li className="flex items-start gap-2 text-sm">
-                    <Check className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                    <span>Deployment hosting</span>
-                  </li>
-                  <li className="flex items-start gap-2 text-sm">
-                    <Check className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                    <span>Test case generation</span>
-                  </li>
-                  <li className="flex items-start gap-2 text-sm">
-                    <Check className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                    <span>VS Code access</span>
-                  </li>
-                </ul>
-              </CardContent>
-
-              <CardFooter className="pt-4">
-                <Button
-                  onClick={() => handlePurchase(pkg.id)}
-                  disabled={isProcessing && selectedPackage === pkg.id}
-                  className={`w-full ${
-                    isRecommended
-                      ? "bg-purple-600 hover:bg-purple-700 text-white"
-                      : ""
-                  }`}
-                  variant={isRecommended ? "default" : "outline"}
-                >
-                  {isProcessing && selectedPackage === pkg.id ? (
-                    <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      Processing...
-                    </>
-                  ) : !isAuthenticated ? (
-                    <>
-                      <Github className="h-4 w-4 mr-2" />
-                      Sign in to Buy
-                    </>
-                  ) : (
-                    "Buy Now"
-                  )}
-                </Button>
-              </CardFooter>
-            </Card>
-          );
-        })}
-      </div>
-
-      {/* Important Notice */}
-      <div className="mt-12 max-w-3xl mx-auto space-y-4">
-        <Card className="bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
-          <CardContent className="pt-6">
-            <div className="flex items-start gap-3">
-              <div className="text-2xl">ℹ️</div>
-              <div>
-                <h3 className="font-semibold mb-2">How Credits Work</h3>
-                <ul className="text-sm text-gray-700 dark:text-gray-300 space-y-1">
-                  <li>• Credits are valid for 30 days from purchase</li>
-                  <li>• Premium tier is activated automatically when you have credits</li>
-                  <li>• When credits expire, you'll be downgraded to the free tier</li>
-                  <li>• You can purchase multiple packages - credits stack and each has its own 30-day validity</li>
-                </ul>
-              </div>
+              {/* Secure Payment */}
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4, delay: 0.4 }}
+                className="bg-card/30 rounded-lg border border-border/50 p-5"
+              >
+                <div className="flex items-start gap-3">
+                  <div className="p-2 rounded-md bg-green-500/10 text-green-400">
+                    <CheckCircledIcon className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-medium text-foreground mb-2">Secure Payment</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Payments processed securely via Cashfree. All transactions are encrypted and PCI DSS compliant. Credits allocated immediately.
+                    </p>
+                  </div>
+                </div>
+              </motion.div>
             </div>
-          </CardContent>
-        </Card>
 
-        <Card className="bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800">
-          <CardContent className="pt-6">
-            <div className="flex items-start gap-3">
-              <div className="text-2xl">💳</div>
-              <div>
-                <h3 className="font-semibold mb-2">Secure Payment Processing</h3>
-                <p className="text-sm text-gray-700 dark:text-gray-300">
-                  Payments are processed securely via Cashfree Payment Gateway.
-                  All transactions are encrypted and PCI DSS compliant. Your credits
-                  will be allocated immediately after successful payment. For billing inquiries,
-                  please contact support.
-                </p>
+            {/* Terminal Footer */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.6, delay: 0.5 }}
+              className="mt-8 text-center"
+            >
+              <div className="inline-flex items-center gap-2 font-mono text-sm text-muted-foreground">
+                <span className="w-2 h-2 rounded-full bg-green-500" />
+                <span>Secure checkout ready</span>
               </div>
-            </div>
-          </CardContent>
-        </Card>
+            </motion.div>
+          </>
+        )}
       </div>
     </div>
   );

@@ -110,9 +110,6 @@ export function Hero() {
           <p className="text-lg sm:text-xl md:text-2xl text-muted-foreground mb-4 max-w-3xl mx-auto">
             The AI-powered development platform. Build, deploy, and host with intelligent agents.
           </p>
-          <p className="text-sm sm:text-base text-muted-foreground/80 mb-8 max-w-2xl mx-auto font-mono">
-            Use credits for AI queries, deployments, and hosting
-          </p>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center mb-12 sm:mb-16">
             {user ? (
@@ -138,30 +135,30 @@ export function Hero() {
                 </div>
                 <Button
                   size="lg"
-                  className="bg-cyan-500 hover:bg-cyan-600 text-black font-medium rounded-lg hover:glow-cyan transition-all group font-mono"
+                  className="bg-cyan-500 hover:bg-cyan-600 text-black font-medium rounded-lg hover:glow-cyan transition-all group"
                   onClick={() => setRepoSelectorOpen(true)}
                 >
                   <RocketIcon className="mr-2 h-5 w-5" />
-                  $ npm run build
+                  $ Initiate New Project
                   <ArrowRightIcon className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
                 </Button>
               </>
             ) : (
               <Button
                 size="lg"
-                className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-medium rounded-lg shadow-lg hover:shadow-purple-500/50 transition-all group"
+                className="bg-cyan-500 hover:bg-cyan-600 text-black font-medium rounded-lg hover:glow-cyan transition-all group"
                 onClick={handleGitHubLogin}
                 disabled={githubLoading}
               >
                 {githubLoading ? (
                   <>
                     <span className="animate-spin mr-2">⚡</span>
-                    <span className="font-mono">Connecting to GitHub...</span>
+                    <span className="font-mono">Connecting...</span>
                   </>
                 ) : (
                   <>
                     <GitHubLogoIcon className="mr-2 h-5 w-5" />
-                    Sign in with GitHub
+                    Continue with GitHub
                     <ArrowRightIcon className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
                   </>
                 )}

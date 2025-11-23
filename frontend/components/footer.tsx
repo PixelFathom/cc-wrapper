@@ -47,14 +47,6 @@ export function Footer() {
                   Pricing
                 </Link>
               </li>
-              <li>
-                <Link
-                  href="/account/transactions"
-                  className="text-sm text-muted-foreground hover:text-cyan-500 transition-colors"
-                >
-                  Account
-                </Link>
-              </li>
             </ul>
           </div>
 

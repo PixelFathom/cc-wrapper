@@ -3,159 +3,147 @@
 import { motion } from 'framer-motion'
 import {
   RocketIcon,
-  CodeIcon,
   GitHubLogoIcon,
   ChatBubbleIcon,
   CheckCircledIcon,
   LightningBoltIcon,
-  MixIcon,
-  UpdateIcon
+  CubeIcon
 } from '@radix-ui/react-icons'
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 
 const features = [
   {
-    icon: RocketIcon,
-    title: 'AI-Powered Queries',
-    description: 'Chat with AI agents to build, update, and optimize your projects. Each query uses credits based on complexity. From code generation to bug fixes.',
-    capabilities: ['Code generation & refactoring', 'Automated testing', 'Bug detection & fixes', 'Credit-based usage']
+    icon: ChatBubbleIcon,
+    name: 'ai-queries',
+    description: 'Chat with AI agents to build and optimize',
   },
   {
-    icon: CodeIcon,
-    title: 'Automated Deployments',
-    description: 'One-click deployments that build and deploy your applications. Credits cover the build process, container setup, and deployment orchestration.',
-    capabilities: ['Build automation', 'Container orchestration', 'Zero-downtime deploys', 'Deployment credits']
+    icon: RocketIcon,
+    name: 'deployments',
+    description: 'One-click build and deploy automation',
   },
   {
     icon: GitHubLogoIcon,
-    title: 'Git Integration',
-    description: 'Deep GitHub integration for repository management, issue tracking, and collaborative development workflows.',
-    capabilities: ['Repository cloning & sync', 'Branch management', 'Pull request automation', 'Issue tracking']
-  },
-  {
-    icon: ChatBubbleIcon,
-    title: 'Real-Time Collaboration',
-    description: 'Interactive chat sessions with live code execution, streaming updates, and collaborative problem-solving.',
-    capabilities: ['Live chat interface', 'Code streaming', 'Real-time updates', 'Session continuity']
-  },
-  {
-    icon: CheckCircledIcon,
-    title: 'Approval Workflows',
-    description: 'Built-in approval system for critical operations with pause/resume capabilities and comprehensive audit trails.',
-    capabilities: ['Tool use approvals', 'Multi-stage reviews', 'Audit logging', 'Compliance tracking']
+    name: 'git-sync',
+    description: 'Deep GitHub repository integration',
   },
   {
     icon: LightningBoltIcon,
-    title: 'Cloud Hosting',
-    description: 'Host your applications with credits. Your services stay live as long as you have hosting credits. Scale up or down as needed.',
-    capabilities: ['Managed hosting', 'Auto-scaling', 'SSL certificates', 'Hosting credits']
+    name: 'hosting',
+    description: 'Managed cloud hosting with SSL',
   },
   {
-    icon: MixIcon,
-    title: 'Multi-Framework Support',
-    description: 'Support for multiple programming languages and frameworks with intelligent dependency management.',
-    capabilities: ['React/Next.js', 'Python/FastAPI', 'Node.js/Express', 'Docker containers']
+    icon: CheckCircledIcon,
+    name: 'approvals',
+    description: 'Built-in approval workflows',
   },
   {
-    icon: UpdateIcon,
-    title: 'Continuous Integration',
-    description: 'Automated testing, building, and deployment with comprehensive monitoring and rollback capabilities.',
-    capabilities: ['Automated testing', 'Build pipelines', 'Deployment automation', 'Health monitoring']
-  }
+    icon: CubeIcon,
+    name: 'containers',
+    description: 'Docker-based environments',
+  },
 ]
 
 export function FeaturesSection() {
   return (
-    <section className="py-24 px-4 sm:px-6 bg-gradient-to-b from-background to-muted/20">
-      <div className="container mx-auto">
+    <section className="py-20 px-4 sm:px-6 border-t border-border/30">
+      <div className="container mx-auto max-w-6xl">
+        {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8 }}
+          transition={{ duration: 0.6 }}
           viewport={{ once: true }}
-          className="text-center mb-16"
+          className="mb-12"
         >
-          <h2 className="text-4xl md:text-5xl font-bold mb-6">
-            <span className="font-mono text-muted-foreground">{'<'}</span>
-            <span className="bg-gradient-to-r from-cyan-400 via-purple-500 to-pink-500 bg-clip-text text-transparent">
-              Powerful Features
-            </span>
-            <span className="font-mono text-muted-foreground">{' />'}</span>
-          </h2>
-          <p className="text-xl text-muted-foreground max-w-3xl mx-auto font-mono">
-            // Everything you need to build, test, and deploy modern applications
-          </p>
+          <div className="terminal-bg rounded-lg border border-border p-4 max-w-xl">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="flex gap-1.5">
+                <span className="w-3 h-3 rounded-full bg-red-500/80" />
+                <span className="w-3 h-3 rounded-full bg-yellow-500/80" />
+                <span className="w-3 h-3 rounded-full bg-green-500/80" />
+              </div>
+              <span className="text-xs font-mono text-muted-foreground ml-2">~/features</span>
+            </div>
+            <div className="font-mono text-sm">
+              <span className="text-green-400">➜</span>
+              <span className="text-cyan-400 ml-2">tediux</span>
+              <span className="text-muted-foreground ml-2">features --all</span>
+            </div>
+          </div>
         </motion.div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        {/* Features Grid - Minimal Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {features.map((feature, index) => (
             <motion.div
-              key={feature.title}
-              initial={{ opacity: 0, y: 20 }}
+              key={feature.name}
+              initial={{ opacity: 0, y: 10 }}
               whileInView={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: index * 0.1 }}
+              transition={{ duration: 0.4, delay: index * 0.05 }}
               viewport={{ once: true }}
             >
-              <Card className="h-full terminal-bg border border-border hover:border-cyan-500/50 transition-all duration-300 group">
-                <CardHeader>
-                  <div className="flex items-center space-x-3 mb-3">
-                    <div className="p-2 rounded-lg bg-gradient-to-r from-cyan-500/20 to-purple-500/20 group-hover:from-cyan-500/30 group-hover:to-purple-500/30 transition-colors">
-                      <feature.icon className="h-6 w-6 text-cyan-400" />
-                    </div>
-                  </div>
-                  <CardTitle className="text-lg font-mono text-cyan-400">
-                    {feature.title}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <p className="text-sm text-muted-foreground leading-relaxed">
-                    {feature.description}
-                  </p>
-                  <div className="space-y-2">
-                    {feature.capabilities.map((capability, capIndex) => (
-                      <div key={capIndex} className="flex items-center space-x-2 text-xs">
-                        <CheckCircledIcon className="h-3 w-3 text-green-400 flex-shrink-0" />
-                        <span className="text-muted-foreground font-mono">{capability}</span>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
+              <div className="group flex items-start gap-4 p-4 rounded-lg border border-border/40 bg-card/30 hover:border-cyan-500/30 hover:bg-card/50 transition-all duration-200">
+                <div className="p-2 rounded-md bg-cyan-500/10 text-cyan-400 group-hover:bg-cyan-500/20 transition-colors">
+                  <feature.icon className="h-5 w-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-mono text-sm text-cyan-400 mb-1">{feature.name}</div>
+                  <p className="text-sm text-muted-foreground leading-relaxed">{feature.description}</p>
+                </div>
+              </div>
             </motion.div>
           ))}
         </div>
 
-        {/* Call to Action */}
+        {/* Terminal CTA */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8 }}
+          transition={{ duration: 0.6, delay: 0.2 }}
           viewport={{ once: true }}
-          className="text-center mt-16"
+          className="mt-12"
         >
-          <div className="max-w-4xl mx-auto terminal-bg rounded-lg border border-border p-8">
-            <h3 className="text-2xl font-mono font-bold mb-4">
-              <span className="text-green-400">$</span>
-              <span className="ml-2 text-cyan-400">npm install</span>
-              <span className="ml-2 text-purple-400">@project-hub/cli</span>
-            </h3>
-            <p className="text-muted-foreground font-mono text-sm mb-6">
-              // Get started in seconds with our command-line tool
-            </p>
-            <div className="bg-card/50 rounded border border-border p-4 font-mono text-sm text-left max-w-2xl mx-auto">
-              <div className="text-green-400">
-                <span>✓</span> <span className="text-muted-foreground ml-2">Project initialized</span>
+          <div className="terminal-bg rounded-lg border border-border p-6 max-w-2xl mx-auto">
+            <div className="font-mono text-sm space-y-2">
+              <div>
+                <span className="text-green-400">➜</span>
+                <span className="text-cyan-400 ml-2">tediux</span>
+                <span className="text-muted-foreground ml-2">init my-project</span>
               </div>
-              <div className="text-green-400 mt-1">
-                <span>✓</span> <span className="text-muted-foreground ml-2">Dependencies installed</span>
+              <div className="pl-4 text-muted-foreground">
+                <div className="flex items-center gap-2">
+                  <CheckCircledIcon className="h-3.5 w-3.5 text-green-500" />
+                  <span>Project initialized</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <CheckCircledIcon className="h-3.5 w-3.5 text-green-500" />
+                  <span>AI agents connected</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <CheckCircledIcon className="h-3.5 w-3.5 text-green-500" />
+                  <span>Ready to deploy</span>
+                </div>
               </div>
-              <div className="text-green-400 mt-1">
-                <span>✓</span> <span className="text-muted-foreground ml-2">Development server started</span>
-              </div>
-              <div className="text-cyan-400 mt-2">
-                <span>→</span> <span className="text-muted-foreground ml-2">Ready to build amazing things!</span>
+              <div className="pt-2">
+                <span className="text-cyan-400">→</span>
+                <span className="text-muted-foreground ml-2">Start building at</span>
+                <span className="text-cyan-400 ml-1">localhost:3000</span>
               </div>
             </div>
+          </div>
+        </motion.div>
+
+        {/* Bottom Status */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          whileInView={{ opacity: 1 }}
+          transition={{ duration: 0.6, delay: 0.4 }}
+          viewport={{ once: true }}
+          className="mt-8 text-center"
+        >
+          <div className="inline-flex items-center gap-2 font-mono text-sm text-muted-foreground">
+            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+            <span>All systems operational</span>
           </div>
         </motion.div>
       </div>
