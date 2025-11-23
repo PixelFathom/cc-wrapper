@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from sqlmodel import SQLModel
 import logging
+import os
 
 from app.core.settings import get_settings
 from app.core.redis import close_redis
@@ -51,6 +52,26 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+# Add monitoring middleware if in production
+try:
+    if os.getenv("ENVIRONMENT") == "production":
+        from app.middleware.metrics import setup_metrics_middleware
+        from prometheus_client import generate_latest
+        from fastapi import Response
+        from app.core.grafana_config import prometheus_registry
+
+        setup_metrics_middleware(app)
+
+        @app.get("/metrics")
+        async def metrics():
+            """Prometheus metrics endpoint."""
+            return Response(
+                generate_latest(prometheus_registry),
+                media_type="text/plain"
+            )
+except ImportError as e:
+    logging.warning(f"Monitoring middleware not available: {e}")
 
 app.add_middleware(
     CORSMiddleware,

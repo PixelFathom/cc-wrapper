@@ -1,49 +1,112 @@
 version: "3.9"
 services:
   db:
-    image: postgres:15
-    env_file: .env
+    image: postgres:15-alpine
+    container_name: cc-wrapper-test-db
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=testpassword
+      - POSTGRES_DB=project_mgr
     volumes:
-      - db-data:/var/lib/postgresql/data
+      - test-db-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $POSTGRES_USER"]
-      interval: 5s
+      test: ["CMD-SHELL", "pg_isready -U postgres -d project_mgr"]
+      interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
     networks:
       - cc-wrapper
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "2"
+
   cache:
-    image: redis:7
+    image: redis:7-alpine
+    container_name: cc-wrapper-test-redis
     volumes:
-      - redis-data:/data
+      - test-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     networks:
       - cc-wrapper
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "2"
+
   backend:
-    build: ./backend
-    env_file: .env
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.production
+      args:
+        BUILDKIT_INLINE_CACHE: 1
+    image: cfpj-backend:test-monitoring
+    container_name: cc-wrapper-test-backend
+    ports:
+      - "61979:8000"  # Use assigned port for testing
     depends_on:
       db:
         condition: service_healthy
       cache:
-        condition: service_started
-    volumes:
-      - ./backend:/app
+        condition: service_healthy
     environment:
+      - ENVIRONMENT=production
       - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=testpassword
+      - POSTGRES_DB=project_mgr
       - REDIS_URL=redis://cache:6379/0
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+      - APP_NAME=cc-wrapper
+      - INSTANCE_NAME=cc-wrapper-test
+      # Mock Grafana credentials for testing (won't actually send data)
+      - GRAFANA_LOKI_URL=https://logs-prod-028.grafana.net/loki/api/v1/push
+      - GRAFANA_LOKI_USER=1404926
+      - GRAFANA_PROMETHEUS_URL=https://prometheus-prod-43-prod-ap-south-1.grafana.net/api/prom/push
+      - GRAFANA_PROMETHEUS_USER=2818499
     networks:
       - cc-wrapper
+    restart: unless-stopped
+    labels:
+      - "com.docker.compose.project=cc-wrapper"
+      - "com.docker.compose.service=backend"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "2"
+        labels: "com.docker.compose.project,com.docker.compose.service"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8000/health\").read()' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile.dev
-    env_file: .env
+    container_name: cc-wrapper-test-frontend
     ports:
-      - "65170:3000"  # CRITICAL: Using assigned port 65170
+      - "65170:3000"  # Keep original frontend port
     depends_on:
       - backend
+    environment:
+      - NODE_ENV=development
+      - NEXT_PUBLIC_API_URL=http://localhost:61979
     networks:
       - cc-wrapper
     volumes:
@@ -56,5 +119,7 @@ networks:
     external: true
 
 volumes:
-  db-data:
-  redis-data:
+  test-db-data:
+    driver: local
+  test-redis-data:
+    driver: local

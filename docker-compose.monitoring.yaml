@@ -1,0 +1,258 @@
+version: "3.9"
+
+services:
+  # Grafana Alloy for metrics and logs collection
+  alloy:
+    image: grafana/alloy:latest
+    container_name: cc-wrapper-alloy
+    restart: unless-stopped
+    ports:
+      - "12345:12345"  # Alloy UI
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./monitoring/alloy-config.alloy:/etc/alloy/config.alloy:ro
+      - alloy-data:/var/lib/alloy
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - GRAFANA_LOKI_URL=${GRAFANA_LOKI_URL:-https://logs-prod-028.grafana.net/loki/api/v1/push}
+      - GRAFANA_LOKI_USER=${GRAFANA_LOKI_USER:-1404926}
+      - GRAFANA_LOKI_API_KEY=${GRAFANA_LOKI_API_KEY}
+      - GRAFANA_PROMETHEUS_URL=${GRAFANA_PROMETHEUS_URL:-https://prometheus-prod-43-prod-ap-south-1.grafana.net/api/prom/push}
+      - GRAFANA_PROMETHEUS_USER=${GRAFANA_PROMETHEUS_USER:-2818499}
+      - GRAFANA_PROMETHEUS_API_KEY=${GRAFANA_PROMETHEUS_API_KEY}
+    command:
+      - "run"
+      - "/etc/alloy/config.alloy"
+      - "--storage.path=/var/lib/alloy"
+      - "--server.http.listen-addr=0.0.0.0:12345"
+      - "--stability.level=public-preview"
+    networks:
+      - cc-wrapper
+    depends_on:
+      - backend
+      - frontend
+    labels:
+      - "com.docker.compose.project=cc-wrapper"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:12345/-/healthy || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Application services with enhanced logging
+  db:
+    image: postgres:15-alpine
+    container_name: cc-wrapper-db
+    env_file: .env
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - cc-wrapper
+    restart: unless-stopped
+    labels:
+      - "com.docker.compose.project=cc-wrapper"
+      - "com.docker.compose.service=db"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "com.docker.compose.project,com.docker.compose.service"
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    command:
+      - "postgres"
+      - "-c"
+      - "log_destination=stderr"
+      - "-c"
+      - "log_statement=mod"
+      - "-c"
+      - "log_min_duration_statement=1000"
+      - "-c"
+      - "shared_buffers=128MB"
+      - "-c"
+      - "effective_cache_size=256MB"
+      - "-c"
+      - "maintenance_work_mem=64MB"
+
+  cache:
+    image: redis:7-alpine
+    container_name: cc-wrapper-redis
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - cc-wrapper
+    restart: unless-stopped
+    labels:
+      - "com.docker.compose.project=cc-wrapper"
+      - "com.docker.compose.service=cache"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "com.docker.compose.project,com.docker.compose.service"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    command:
+      - "redis-server"
+      - "--maxmemory"
+      - "200mb"
+      - "--maxmemory-policy"
+      - "allkeys-lru"
+      - "--save"
+      - "60 1000"
+      - "--appendonly"
+      - "yes"
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.production
+      args:
+        BUILDKIT_INLINE_CACHE: 1
+    image: cfpj-backend:monitoring
+    container_name: cc-wrapper-backend
+    env_file: .env
+    ports:
+      - "9000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+    environment:
+      - ENVIRONMENT=production
+      - POSTGRES_HOST=db
+      - REDIS_URL=redis://cache:6379/0
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+      # Grafana Cloud configuration
+      - GRAFANA_LOKI_URL=${GRAFANA_LOKI_URL}
+      - GRAFANA_LOKI_USER=${GRAFANA_LOKI_USER}
+      - GRAFANA_LOKI_API_KEY=${GRAFANA_LOKI_API_KEY}
+      - GRAFANA_PROMETHEUS_URL=${GRAFANA_PROMETHEUS_URL}
+      - GRAFANA_PROMETHEUS_USER=${GRAFANA_PROMETHEUS_USER}
+      - GRAFANA_PROMETHEUS_API_KEY=${GRAFANA_PROMETHEUS_API_KEY}
+      - APP_NAME=cc-wrapper
+      - INSTANCE_NAME=cc-wrapper-backend
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - cc-wrapper
+    restart: unless-stopped
+    labels:
+      - "com.docker.compose.project=cc-wrapper"
+      - "com.docker.compose.service=backend"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+        labels: "com.docker.compose.project,com.docker.compose.service"
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+        reservations:
+          cpus: '1.0'
+          memory: 512M
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8000/health\").read()' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.production
+      args:
+        BUILDKIT_INLINE_CACHE: 1
+    image: cfpj-frontend:monitoring
+    container_name: cc-wrapper-frontend
+    env_file: .env
+    ports:
+      - "2000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      - NODE_ENV=production
+      - NEXT_TELEMETRY_DISABLED=1
+    networks:
+      - cc-wrapper
+    restart: unless-stopped
+    labels:
+      - "com.docker.compose.project=cc-wrapper"
+      - "com.docker.compose.service=frontend"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+        labels: "com.docker.compose.project,com.docker.compose.service"
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/api/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+networks:
+  cc-wrapper:
+    external: true
+
+volumes:
+  db-data:
+    driver: local
+  redis-data:
+    driver: local
+  alloy-data:
+    driver: local

@@ -1,0 +1,329 @@
+// Grafana Alloy configuration for CC-Wrapper application monitoring
+// This configuration collects logs and metrics from Docker containers and sends them to Grafana Cloud
+
+// ============================================================================
+// DISCOVERY AND RELABELING
+// ============================================================================
+
+// Discover Docker containers for the cc-wrapper application
+discovery.docker "cc_wrapper_containers" {
+    host = "unix:///var/run/docker.sock"
+
+    filter {
+        name   = "label"
+        values = ["com.docker.compose.project=cc-wrapper"]
+    }
+}
+
+// Relabel discovered containers for consistent labeling
+discovery.relabel "cc_wrapper_relabel" {
+    targets = discovery.docker.cc_wrapper_containers.targets
+
+    // Add application labels
+    rule {
+        target_label = "app"
+        replacement  = "cc-wrapper"
+    }
+
+    rule {
+        target_label = "environment"
+        replacement  = env("ENVIRONMENT")
+    }
+
+    rule {
+        source_labels = ["__meta_docker_container_name"]
+        target_label  = "container"
+        regex         = "/(.*)"
+        replacement   = "${1}"
+    }
+
+    rule {
+        source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+        target_label  = "service"
+    }
+
+    rule {
+        target_label = "instance"
+        replacement  = constants.hostname
+    }
+
+    rule {
+        target_label = "job"
+        replacement  = "cc-wrapper/containers"
+    }
+}
+
+// ============================================================================
+// LOG COLLECTION
+// ============================================================================
+
+// Collect Docker container logs
+loki.source.docker "cc_wrapper_logs" {
+    host             = "unix:///var/run/docker.sock"
+    targets          = discovery.relabel.cc_wrapper_relabel.output
+    forward_to       = [loki.process.cc_wrapper_process.receiver]
+    relabel_rules    = discovery.relabel.cc_wrapper_relabel.rules
+}
+
+// Process and structure logs
+loki.process "cc_wrapper_process" {
+    forward_to = [loki.write.grafana_cloud_loki.receiver]
+
+    // Parse JSON logs (for backend service)
+    stage.match {
+        selector = "{service=\"backend\"}"
+
+        stage.json {
+            expressions = {
+                timestamp = "timestamp",
+                level     = "level",
+                logger    = "logger",
+                message   = "message",
+                module    = "module",
+                function  = "function",
+                line      = "line"
+            }
+        }
+
+        stage.labels {
+            values = {
+                level = "",
+            }
+        }
+    }
+
+    // Parse nginx/frontend logs
+    stage.match {
+        selector = "{service=\"frontend\"}"
+
+        stage.regex {
+            expression = "^(?P<timestamp>\\S+ \\S+) \\[(?P<level>\\w+)\\] (?P<message>.*)"
+        }
+
+        stage.labels {
+            values = {
+                level = "",
+            }
+        }
+    }
+
+    // Add processing timestamp
+    stage.timestamp {
+        source = "timestamp"
+        format = "RFC3339"
+    }
+}
+
+// ============================================================================
+// METRICS COLLECTION
+// ============================================================================
+
+// Collect container metrics
+prometheus.exporter.docker "cc_wrapper_docker" {
+    docker_host = "unix:///var/run/docker.sock"
+}
+
+// Scrape Docker metrics
+prometheus.scrape "cc_wrapper_docker_metrics" {
+    targets    = prometheus.exporter.docker.cc_wrapper_docker.targets
+    forward_to = [prometheus.relabel.cc_wrapper_metrics.receiver]
+    scrape_interval = "30s"
+
+    relabel_configs {
+        source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+        target_label  = "__tmp_project"
+        regex         = "cc-wrapper"
+        action        = "keep"
+    }
+}
+
+// Application metrics endpoint (FastAPI /metrics)
+discovery.relabel "cc_wrapper_app_metrics" {
+    targets = [{
+        __address__ = "backend:8000",
+        __metrics_path__ = "/metrics",
+        service = "backend",
+        app = "cc-wrapper"
+    }]
+}
+
+prometheus.scrape "cc_wrapper_app_metrics" {
+    targets         = discovery.relabel.cc_wrapper_app_metrics.output
+    forward_to      = [prometheus.relabel.cc_wrapper_metrics.receiver]
+    scrape_interval = "30s"
+    metrics_path    = "/metrics"
+}
+
+// Relabel metrics for Grafana Cloud
+prometheus.relabel "cc_wrapper_metrics" {
+    forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+
+    // Add application labels
+    rule {
+        target_label = "app"
+        replacement  = "cc-wrapper"
+    }
+
+    rule {
+        target_label = "environment"
+        replacement  = env("ENVIRONMENT")
+    }
+
+    rule {
+        target_label = "instance"
+        replacement  = constants.hostname
+    }
+
+    // Keep only relevant metrics
+    rule {
+        source_labels = ["__name__"]
+        regex         = "(api_requests_total|api_request_duration_seconds.*|active_connections|database_connections_active|redis_connections_active|chat_sessions_active|chat_messages_total|file_uploads_total|file_upload_size_bytes.*|container_.*|docker_.*)"
+        action        = "keep"
+    }
+}
+
+// ============================================================================
+// SYSTEM METRICS
+// ============================================================================
+
+// Node exporter for system metrics
+prometheus.exporter.unix "system_metrics" {
+    disable_collectors = ["ipvs", "btrfs", "infiniband", "xfs", "zfs"]
+
+    filesystem {
+        fs_types_exclude     = "^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|tmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs)$"
+        mount_points_exclude = "^/(dev|proc|run/credentials/.+|sys|var/lib/docker/.+)($|/)"
+        mount_timeout        = "5s"
+    }
+
+    netclass {
+        ignored_devices = "^(veth.*|cali.*|[a-f0-9]{15})$"
+    }
+
+    netdev {
+        device_exclude = "^(veth.*|cali.*|[a-f0-9]{15})$"
+    }
+}
+
+discovery.relabel "system_metrics" {
+    targets = prometheus.exporter.unix.system_metrics.targets
+
+    rule {
+        target_label = "instance"
+        replacement  = constants.hostname
+    }
+
+    rule {
+        target_label = "job"
+        replacement = "cc-wrapper/node-exporter"
+    }
+
+    rule {
+        target_label = "app"
+        replacement  = "cc-wrapper"
+    }
+
+    rule {
+        target_label = "environment"
+        replacement  = env("ENVIRONMENT")
+    }
+}
+
+prometheus.scrape "system_metrics" {
+    targets    = discovery.relabel.system_metrics.output
+    forward_to = [prometheus.relabel.system_metrics_relabel.receiver]
+    scrape_interval = "30s"
+}
+
+prometheus.relabel "system_metrics_relabel" {
+    forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+
+    rule {
+        source_labels = ["__name__"]
+        regex         = "node_scrape_collector_.+"
+        action        = "drop"
+    }
+}
+
+// ============================================================================
+// OUTPUT CONFIGURATION
+// ============================================================================
+
+// Send logs to Grafana Cloud Loki
+loki.write "grafana_cloud_loki" {
+    endpoint {
+        url = env("GRAFANA_LOKI_URL")
+
+        basic_auth {
+            username = env("GRAFANA_LOKI_USER")
+            password = env("GRAFANA_LOKI_API_KEY")
+        }
+    }
+
+    external_labels = {
+        app         = "cc-wrapper",
+        environment = env("ENVIRONMENT"),
+        instance    = constants.hostname,
+    }
+}
+
+// Send metrics to Grafana Cloud Prometheus
+prometheus.remote_write "grafana_cloud" {
+    endpoint {
+        url = env("GRAFANA_PROMETHEUS_URL")
+
+        basic_auth {
+            username = env("GRAFANA_PROMETHEUS_USER")
+            password = env("GRAFANA_PROMETHEUS_API_KEY")
+        }
+
+        write_relabel_config {
+            source_labels = ["__name__"]
+            regex         = "(up|scrape_duration_seconds|scrape_samples_scraped|scrape_samples_post_metric_relabeling|scrape_series_added)"
+            action        = "drop"
+        }
+    }
+
+    external_labels = {
+        app         = "cc-wrapper",
+        environment = env("ENVIRONMENT"),
+        instance    = constants.hostname,
+    }
+}
+
+// ============================================================================
+// HEALTH MONITORING
+// ============================================================================
+
+// Monitor Alloy itself
+prometheus.exporter.self "alloy_metrics" { }
+
+discovery.relabel "alloy_metrics" {
+    targets = prometheus.exporter.self.alloy_metrics.targets
+
+    rule {
+        target_label = "instance"
+        replacement  = constants.hostname
+    }
+
+    rule {
+        target_label = "job"
+        replacement  = "cc-wrapper/alloy"
+    }
+}
+
+prometheus.scrape "alloy_metrics" {
+    targets    = discovery.relabel.alloy_metrics.output
+    forward_to = [prometheus.relabel.alloy_relabel.receiver]
+    scrape_interval = "30s"
+}
+
+prometheus.relabel "alloy_relabel" {
+    forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+
+    rule {
+        source_labels = ["__name__"]
+        regex         = "(alloy_build_info|prometheus_target_sync_length_seconds_sum|prometheus_target_scrapes_.*|prometheus_target_interval.*|prometheus_sd_discovered_targets|prometheus_remote_write_.*)"
+        action        = "keep"
+    }
+}
