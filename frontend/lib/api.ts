@@ -1,10 +1,23 @@
+// Custom error class for API errors with status code
+export class ApiError extends Error {
+  status: number
+  responseData?: any
+
+  constructor(message: string, status: number, responseData?: any) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.responseData = responseData
+  }
+}
+
 const getApiBaseUrl = () => {
   // Client-side: Use environment variable or fallback
   if (typeof window !== 'undefined') {
-    return process.env.NEXT_PUBLIC_BACKEND_HOST || 'http://localhost:8000';
+    return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:9000';
   }
   // Server-side: Use backend service name for container-to-container communication
-  return process.env.BACKEND_HOST || 'http://localhost:8000';
+  return process.env.BACKEND_HOST || 'http://backend:8000';
 };
 
 const API_BASE_URL = getApiBaseUrl()
@@ -33,6 +46,17 @@ export interface Task {
   deployment_completed: boolean
   deployment_started_at?: string
   deployment_completed_at?: string
+  deployment_port?: number
+  deployment_host?: string
+  env_file_path?: string
+  env_variables?: Record<string, string>
+  task_type?: string
+  // Hosting fields
+  hosting_subdomain?: string
+  hosting_fqdn?: string
+  hosting_status?: 'active' | 'active_no_ssl' | 'dns_only' | 'failed' | 'removed' | null
+  hosting_provisioned_at?: string
+  hosting_removed_at?: string
 }
 
 export interface DeploymentHook {
@@ -40,6 +64,7 @@ export interface DeploymentHook {
   task_id: string
   session_id: string
   hook_type: string
+  phase: string  // "initialization" or "deployment"
   status: string
   data: any
   message?: string
@@ -262,6 +287,9 @@ class ApiClient {
     }
   }
 
+  // Note: Keeping this method for potential future use with unauthenticated endpoints
+  // @ts-ignore - Method preserved for future unauthenticated endpoints
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   private async request<T>(path: string, options?: RequestInit): Promise<T> {
     const response = await fetch(`${this.baseUrl}${path}`, {
       ...options,
@@ -272,7 +300,34 @@ class ApiClient {
     })
 
     if (!response.ok) {
-      throw new Error(`API error: ${response.statusText}`)
+      let errorData: any = null
+      try {
+        const text = await response.text()
+        errorData = text ? JSON.parse(text) : null
+      } catch (e) {
+        // If response is not JSON, use status text
+      }
+
+      // Extract error message from various response formats
+      let errorMessage: string
+      if (errorData?.detail) {
+        // Check if detail is an object with a message field (e.g., subscription errors)
+        if (typeof errorData.detail === 'object' && errorData.detail.message) {
+          errorMessage = errorData.detail.message
+        }
+        // Check if detail is a string
+        else if (typeof errorData.detail === 'string') {
+          errorMessage = errorData.detail
+        }
+        // Fallback to stringified object
+        else {
+          errorMessage = JSON.stringify(errorData.detail)
+        }
+      } else {
+        errorMessage = response.statusText || `API error (${response.status})`
+      }
+
+      throw new ApiError(errorMessage, response.status, errorData)
     }
 
     return response.json()
@@ -288,8 +343,34 @@ class ApiClient {
     })
 
     if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(`API error (${response.status}): ${errorText}`)
+      let errorData: any = null
+      try {
+        const text = await response.text()
+        errorData = text ? JSON.parse(text) : null
+      } catch (e) {
+        // If response is not JSON, use status text
+      }
+
+      // Extract error message from various response formats
+      let errorMessage: string
+      if (errorData?.detail) {
+        // Check if detail is an object with a message field (e.g., subscription errors)
+        if (typeof errorData.detail === 'object' && errorData.detail.message) {
+          errorMessage = errorData.detail.message
+        }
+        // Check if detail is a string
+        else if (typeof errorData.detail === 'string') {
+          errorMessage = errorData.detail
+        }
+        // Fallback to stringified object
+        else {
+          errorMessage = JSON.stringify(errorData.detail)
+        }
+      } else {
+        errorMessage = response.statusText || `API error (${response.status})`
+      }
+
+      throw new ApiError(errorMessage, response.status, errorData)
     }
 
     return response.json()
@@ -367,6 +448,8 @@ class ApiClient {
   sendChatQuery = async (chatId: string, data: {
     prompt: string
     session_id?: string
+    bypass_mode?: boolean
+    permission_mode?: 'interactive' | 'bypassPermissions' | 'plan'
   }): Promise<{ session_id: string; assistant_response: string }> => {
     return this.authenticatedRequest(`/chats/${chatId}/query`, {
       method: 'POST',
@@ -412,27 +495,6 @@ class ApiClient {
     })
   }
 
-  // File upload
-  uploadFile = async (file: File, orgName: string, cwd: string, remotePath?: string): Promise<any> => {
-    const formData = new FormData()
-    formData.append('file', file)
-    formData.append('org_name', orgName)
-    formData.append('cwd', cwd)
-    if (remotePath) {
-      formData.append('remote_path', remotePath)
-    }
-
-    const response = await fetch(`${this.baseUrl}/upload_file`, {
-      method: 'POST',
-      body: formData,
-    })
-
-    if (!response.ok) {
-      throw new Error(`Upload error: ${response.statusText}`)
-    }
-
-    return response.json()
-  }
 
   // SSE for chat streaming
   getEventSource = (sessionId: string): EventSource => {
@@ -450,9 +512,178 @@ class ApiClient {
     })
   }
 
+  // Deployment Task APIs
+  uploadDeploymentEnv = async (taskId: string, file: File): Promise<{
+    message: string
+    task_id: string
+    env_variables: Record<string, string>
+    file_path: string
+  }> => {
+    const formData = new FormData()
+    formData.append('file', file)
+
+    const authHeaders = this.getAuthHeaders()
+    delete authHeaders['Content-Type'] // Let browser set Content-Type with boundary for FormData
+
+    const response = await fetch(`${this.baseUrl}/tasks/${taskId}/deployment/env-upload`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: formData,
+    })
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: response.statusText }))
+      throw new Error(error.detail || `Upload error: ${response.statusText}`)
+    }
+
+    return response.json()
+  }
+
+  getDeploymentEnv = async (taskId: string): Promise<{
+    task_id: string
+    env_variables: Record<string, string>
+    file_path: string | null
+    has_env_file: boolean
+  }> => {
+    return this.authenticatedRequest(`/tasks/${taskId}/deployment/env`)
+  }
+
+  deployTask = async (taskId: string): Promise<{
+    message: string
+    task_id: string
+    session_id: string
+    port: number
+    status: string
+  }> => {
+    return this.authenticatedRequest(`/tasks/${taskId}/deployment/deploy`, {
+      method: 'POST',
+    })
+  }
+
+  updateDeploymentEnv = async (taskId: string, envVariables: Record<string, string>): Promise<{
+    message: string
+    task_id: string
+    env_variables: Record<string, string>
+    file_path: string
+  }> => {
+    return this.authenticatedRequest(`/tasks/${taskId}/deployment/env`, {
+      method: 'PUT',
+      body: JSON.stringify(envVariables),
+    })
+  }
+
+  // Hosting - Provision complete hosting for a task (DNS + Nginx + SSL) in one call
+  provisionHostingForTask = async (taskId: string, subdomain?: string, upstreamPort?: number): Promise<{
+    subdomain: string
+    fqdn: string
+    url: string
+    upstream_port: number
+    ip: string
+    steps: {
+      dns: { status: string; message?: string; error?: string }
+      nginx: { status: string; message?: string; error?: string }
+      certbot: { status: string; message?: string; error?: string }
+    }
+    status: string
+    warning?: string
+  }> => {
+    return this.authenticatedRequest('/hosting/provision', {
+      method: 'POST',
+      body: JSON.stringify({
+        task_id: taskId,
+        ...(subdomain && { subdomain }),
+        ...(upstreamPort && { upstream_port: upstreamPort }),
+      }),
+    })
+  }
+
+  // Hosting - Provision complete hosting (DNS + Nginx + SSL) in one call - Admin only
+  provisionHostingSimple = async (subdomain: string, upstreamPort: number, ip?: string): Promise<{
+    subdomain: string
+    fqdn: string
+    url: string
+    upstream_port: number
+    ip: string
+    steps: {
+      dns: { status: string; message?: string; error?: string }
+      nginx: { status: string; message?: string; error?: string }
+      certbot: { status: string; message?: string; error?: string }
+    }
+    status: string
+    warning?: string
+  }> => {
+    return this.authenticatedRequest('/hosting/provision/simple', {
+      method: 'POST',
+      body: JSON.stringify({
+        subdomain,
+        upstream_port: upstreamPort,
+        ...(ip && { ip }),
+      }),
+    })
+  }
+
+  // Check if subdomain exists
+  checkSubdomainExists = async (subdomain: string): Promise<{
+    subdomain: string
+    fqdn: string
+    exists: boolean
+  }> => {
+    return this.authenticatedRequest(`/hosting/dns/check/${subdomain}`)
+  }
+
+  // Generate unique subdomain
+  generateSubdomain = async (prefix: string = 'site'): Promise<{
+    subdomain: string
+    fqdn: string
+  }> => {
+    return this.authenticatedRequest(`/hosting/dns/generate-subdomain?prefix=${encodeURIComponent(prefix)}`)
+  }
+
+  // Retry a specific hosting step (dns, nginx, or ssl)
+  retryHostingStep = async (taskId: string, step: 'dns' | 'nginx' | 'ssl'): Promise<{
+    task_id: string
+    step: string
+    fqdn: string
+    status: string
+    message?: string
+    error?: string
+  }> => {
+    return this.authenticatedRequest(`/hosting/${taskId}/retry-step`, {
+      method: 'POST',
+      body: JSON.stringify({ step }),
+    })
+  }
+
+  // Retry all hosting steps (regenerate)
+  retryAllHostingSteps = async (taskId: string): Promise<{
+    task_id: string
+    subdomain: string
+    fqdn: string
+    steps: {
+      dns: { status: string; message?: string; error?: string }
+      nginx: { status: string; message?: string; error?: string }
+      ssl: { status: string; message?: string; error?: string }
+    }
+    status: string
+    warning?: string
+  }> => {
+    return this.authenticatedRequest(`/hosting/${taskId}/retry-all`, {
+      method: 'POST',
+    })
+  }
+
   // VS Code (requires authentication)
-  getTaskVSCodeLink = async (taskId: string, filePath?: string): Promise<{ tunnel_link: string; tunnel_name: string }> => {
-    const queryParams = filePath ? `?file_path=${encodeURIComponent(filePath)}` : ''
+  getTaskVSCodeLink = async (taskId: string, filePath?: string, userName?: string): Promise<{
+    tunnel_link: string
+    tunnel_name: string
+    authentication_required: boolean
+    authentication_url?: string
+    device_code?: string
+  }> => {
+    const params = new URLSearchParams()
+    if (filePath) params.append('file_path', filePath)
+    if (userName) params.append('user_name', userName)
+    const queryParams = params.toString() ? `?${params.toString()}` : ''
     return this.authenticatedRequest(`/tasks/${taskId}/vscode-link${queryParams}`)
   }
 
@@ -473,13 +704,20 @@ class ApiClient {
       formData.append('file_path', filePath)
     }
 
+    // Get auth headers (but don't set Content-Type for FormData)
+    const authHeaders = this.getAuthHeaders()
+
     const response = await fetch(`${this.baseUrl}/tasks/${taskId}/knowledge-base/upload`, {
       method: 'POST',
+      headers: {
+        'X-User-ID': authHeaders['X-User-ID'] as string,
+      },
       body: formData,
     })
 
     if (!response.ok) {
-      throw new Error(`Knowledge Base upload error: ${response.statusText}`)
+      const errorText = await response.text()
+      throw new Error(`Knowledge Base upload error (${response.status}): ${errorText}`)
     }
 
     return response.json()
@@ -606,29 +844,67 @@ class ApiClient {
     })
   }
 
-  // Deployment Guide (requires authentication)
-  getDeploymentGuide = async (taskId: string): Promise<{
-    content: string
+  // Commit and Push Changes (Premium Feature)
+  commitAndPushChanges = async (taskId: string, data: {
+    branch_name: string
+    commit_message: string
+    create_new_branch?: boolean
+  }): Promise<{
     task_id: string
-    updated_at: string | null
+    session_id: string
+    message: string
+    coin_transaction_id: string
+    coins_remaining: number
   }> => {
-    return this.authenticatedRequest(`/tasks/${taskId}/deployment-guide`)
+    return this.authenticatedRequest(`/tasks/${taskId}/commit-and-push`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
   }
 
-  updateDeploymentGuide = async (taskId: string, content: string): Promise<{
-    message: string
-    task_id: string
-    content: string
-    updated_at: string
+  // Pricing (public endpoint, no auth required)
+  getPricingPlans = async (): Promise<{
+    plans: Array<{
+      id: string
+      name: string
+      price: string
+      period: string
+      description: string
+      features: string[]
+      cta: string
+      is_popular: boolean
+      sort_order: number
+    }>
   }> => {
-    return this.authenticatedRequest(`/tasks/${taskId}/deployment-guide`, {
-      method: 'PUT',
-      body: JSON.stringify({ content }),
-    })
+    return this.request('/pricing/plans')
   }
 }
 
 export const api = new ApiClient() as ApiClient & ExtendedApiClient
+
+/**
+ * Helper function to get authentication headers for extended API methods
+ */
+function getAuthHeaders(): HeadersInit {
+  const storedUser = typeof window !== 'undefined' ? localStorage.getItem('github_user') : null
+  if (!storedUser) {
+    throw new Error('User not authenticated. Please log in with GitHub.')
+  }
+
+  try {
+    const user = JSON.parse(storedUser)
+    if (!user.id) {
+      throw new Error('Invalid user data. Please re-authenticate.')
+    }
+
+    return {
+      'Content-Type': 'application/json',
+      'X-User-ID': user.id,
+    }
+  } catch (e) {
+    throw new Error('Failed to parse user data. Please re-authenticate.')
+  }
+}
 
 // Extend api object with additional methods
 Object.assign(api, {
@@ -688,7 +964,7 @@ Object.assign(api, {
   }> => {
     const response = await fetch(`${API_BASE_URL}/api/chats/toggle-auto-continuation`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ session_id: sessionId, enabled })
     })
     if (!response.ok) throw new Error('Failed to toggle auto-continuation')
@@ -703,7 +979,7 @@ Object.assign(api, {
   }> => {
     const response = await fetch(`${API_BASE_URL}/api/chats/toggle-bypass-mode`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ session_id: sessionId, enabled })
     })
     if (!response.ok) throw new Error('Failed to toggle bypass mode')
@@ -718,7 +994,7 @@ Object.assign(api, {
   }> => {
     const response = await fetch(`${API_BASE_URL}/api/tasks/${taskId}/contest-harvesting/start`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify(data || {})
     })
     if (!response.ok) throw new Error('Failed to start contest harvesting')
@@ -796,7 +1072,7 @@ Object.assign(api, {
   }> => {
     const response = await fetch(`${API_BASE_URL}/api/contest-harvesting/questions/${questionId}/answer`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify(data)
     })
     if (!response.ok) throw new Error('Failed to answer question')
@@ -817,10 +1093,370 @@ Object.assign(api, {
   }> => {
     const response = await fetch(`${API_BASE_URL}/api/contest-harvesting/questions/${questionId}/skip`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ reason })
     })
     if (!response.ok) throw new Error('Failed to skip question')
     return response.json()
   },
+
+  // Five-Stage Issue Resolution Workflow Endpoints
+  getIssueResolutionStageStatus: async (projectId: string, issueNumber: number): Promise<{
+    current_stage: 'deployment' | 'planning' | 'implementation' | 'testing' | 'deploy'
+    resolution_state: string
+    stages: {
+      deployment: {
+        complete: boolean
+        started_at?: string
+        completed_at?: string
+      }
+      planning: {
+        complete: boolean
+        approved: boolean
+        session_id?: string
+        chat_id?: string
+        started_at?: string
+        completed_at?: string
+        approved_by?: string
+        approved_at?: string
+      }
+      implementation: {
+        complete: boolean
+        session_id?: string
+        chat_id?: string
+        started_at?: string
+        completed_at?: string
+      }
+      testing: {
+        complete: boolean
+        tests_generated: number
+        tests_passed: number
+        started_at?: string
+        completed_at?: string
+      }
+      deploy: {
+        complete: boolean
+        session_id?: string
+        started_at?: string
+        completed_at?: string
+      }
+    }
+    can_transition: boolean
+    next_action: string
+    retry_count: number
+    error_message?: string
+  }> => {
+    const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/issues/${issueNumber}/resolution/stage-status`, {
+      method: 'GET',
+      headers: getAuthHeaders(),
+    })
+    if (!response.ok) throw new Error('Failed to get stage status')
+    return response.json()
+  },
+
+  approvePlanAndStartImplementation: async (
+    projectId: string,
+    issueNumber: number,
+    sessionId: string,
+    notes?: string
+  ): Promise<{
+    stage: string
+    session_id: string
+    chat_id: string
+    task_id: string
+    message: string
+  }> => {
+    const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/issues/${issueNumber}/resolution/approve-plan`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ session_id: sessionId, notes })
+    })
+    if (!response.ok) throw new Error('Failed to approve plan')
+    return response.json()
+  },
+
+  retryIssueResolutionStage: async (projectId: string, issueNumber: number): Promise<{
+    success: boolean
+    message: string
+    result: any
+  }> => {
+    const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/issues/${issueNumber}/resolution/retry-stage`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    })
+    if (!response.ok) throw new Error('Failed to retry stage')
+    return response.json()
+  },
+
+  triggerPlanningStage: async (projectId: string, issueNumber: number): Promise<{
+    message: string
+    resolution_id: string
+    current_stage: string
+  }> => {
+    const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/issues/${issueNumber}/resolution/trigger-planning`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    })
+    if (!response.ok) throw new Error('Failed to trigger planning stage')
+    return response.json()
+  },
+
+  triggerDeployStage: async (projectId: string, issueNumber: number): Promise<{
+    message: string
+    resolution_id: string
+    current_stage: string
+  }> => {
+    const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/issues/${issueNumber}/resolution/trigger-deploy`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    })
+    if (!response.ok) throw new Error('Failed to trigger deploy stage')
+    return response.json()
+  },
+
+  createIssueResolutionPR: async (
+    projectId: string,
+    issueNumber: number,
+    data: { title?: string; body?: string; branch?: string }
+  ): Promise<{ pr_number: number; pr_url: string; message: string }> => {
+    const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/issues/${issueNumber}/resolution/create-pr`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data)
+    })
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Failed to create pull request' }))
+      throw new Error(error.detail || 'Failed to create pull request')
+    }
+    return response.json()
+  },
+
+  // GitHub Issue and Resolution Management
+  getGithubIssue: async (projectId: string, issueNumber: number) => {
+    const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/issues/${issueNumber}`)
+    if (!response.ok) {
+      if (response.status === 404) return null
+      throw new Error('Failed to fetch issue')
+    }
+    return response.json()
+  },
+
+  getIssueResolution: async (projectId: string, issueNumber: number) => {
+    const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/issues/${issueNumber}/resolution`)
+    if (!response.ok) {
+      if (response.status === 404) return null
+      throw new Error('Failed to fetch resolution')
+    }
+    return response.json()
+  },
+
+  // Test Case Management for Issue Resolution
+  getTaskTestCases: async (taskId: string) => {
+    const response = await fetch(`${API_BASE_URL}/api/tasks/${taskId}/test-cases`)
+    if (!response.ok) throw new Error('Failed to fetch test cases')
+    return response.json()
+  },
+
+  generateTestCases: async (taskId: string, options: {
+    test_types: string[]
+    auto_execute: boolean
+  }) => {
+    const response = await fetch(`${API_BASE_URL}/api/tasks/${taskId}/generate-test-cases`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(options),
+    })
+    if (!response.ok) throw new Error('Failed to generate test cases')
+    return response.json()
+  },
+
+  // Session and Chat APIs for Workflow
+  getSessionChat: async (sessionId: string) => {
+    const response = await fetch(`${API_BASE_URL}/api/chats/session/${sessionId}`)
+    if (!response.ok) throw new Error('Failed to fetch session chats')
+    return response.json()
+  },
+
+  getChatHooks: async (chatId: string) => {
+    const response = await fetch(`${API_BASE_URL}/api/chats/${chatId}/hooks`)
+    if (!response.ok) throw new Error('Failed to fetch chat hooks')
+    return response.json()
+  },
+
+  getTestCaseHooks: async (taskId: string) => {
+    const response = await fetch(`${API_BASE_URL}/api/tasks/${taskId}/test-case-hooks`)
+    if (!response.ok) throw new Error('Failed to fetch test case hooks')
+    return response.json()
+  },
+
+  // Subscription & Coins Management
+  getSubscription: async () => {
+    const response = await fetch(`${API_BASE_URL}/api/subscription`, {
+      headers: getAuthHeaders(),
+    })
+    if (!response.ok) throw new Error('Failed to fetch subscription')
+    return response.json()
+  },
+
+  getCoinBalance: async () => {
+    const response = await fetch(`${API_BASE_URL}/api/subscription/balance`, {
+      headers: getAuthHeaders(),
+    })
+    if (!response.ok) throw new Error('Failed to fetch coin balance')
+    return response.json()
+  },
+
+  getTransactionHistory: async (limit = 100, offset = 0, transactionType?: string) => {
+    const params = new URLSearchParams({
+      limit: limit.toString(),
+      offset: offset.toString(),
+    })
+    if (transactionType) {
+      params.append('transaction_type', transactionType)
+    }
+    const response = await fetch(`${API_BASE_URL}/api/subscription/transactions?${params}`, {
+      headers: getAuthHeaders(),
+    })
+    if (!response.ok) throw new Error('Failed to fetch transaction history')
+    return response.json()
+  },
+
+  upgradeSubscription: async (data: { tier: string; stripe_subscription_id?: string }) => {
+    const response = await fetch(`${API_BASE_URL}/api/subscription/upgrade`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    })
+    if (!response.ok) throw new Error('Failed to upgrade subscription')
+    return response.json()
+  },
+
+  cancelSubscription: async () => {
+    const response = await fetch(`${API_BASE_URL}/api/subscription/cancel`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    })
+    if (!response.ok) throw new Error('Failed to cancel subscription')
+    return response.json()
+  },
+
+  // Payment Management (Cashfree)
+  createPaymentOrder: async (data: { package_id: string; return_url?: string; cancel_url?: string }) => {
+    const response = await fetch(`${API_BASE_URL}/api/payments/create-order`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    })
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.detail || 'Failed to create payment order')
+    }
+    return response.json()
+  },
+
+  getCreditPackages: async () => {
+    const response = await fetch(`${API_BASE_URL}/api/payments/credit-packages`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    })
+    if (!response.ok) {
+      throw new Error('Failed to fetch credit packages')
+    }
+    return response.json()
+  },
+
+  verifyPayment: async (orderId: string) => {
+    const response = await fetch(`${API_BASE_URL}/api/payments/verify`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ order_id: orderId }),
+    })
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.detail || 'Failed to verify payment')
+    }
+    return response.json()
+  },
+
+  getPaymentByOrder: async (orderId: string) => {
+    const response = await fetch(`${API_BASE_URL}/api/payments/order/${orderId}`, {
+      headers: getAuthHeaders(),
+    })
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.detail || 'Failed to fetch payment details')
+    }
+    return response.json()
+  },
+
+  getMyPayments: async (statusFilter?: string, limit = 50, offset = 0) => {
+    const params = new URLSearchParams({
+      limit: limit.toString(),
+      offset: offset.toString(),
+    })
+    if (statusFilter) {
+      params.append('status_filter', statusFilter)
+    }
+    const response = await fetch(`${API_BASE_URL}/api/payments/my-payments?${params}`, {
+      headers: getAuthHeaders(),
+    })
+    if (!response.ok) throw new Error('Failed to fetch payments')
+    return response.json()
+  },
+
+  initiateRefund: async (data: { order_id: string; refund_amount?: number; refund_note?: string }) => {
+    const response = await fetch(`${API_BASE_URL}/api/payments/refund`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    })
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.detail || 'Failed to initiate refund')
+    }
+    return response.json()
+  },
+
+  // User Profile Management
+  getMyProfile: async () => {
+    const response = await fetch(`${API_BASE_URL}/api/users/me`, {
+      headers: getAuthHeaders(),
+    })
+    if (!response.ok) throw new Error('Failed to fetch profile')
+    return response.json()
+  },
+
+  updateMyProfile: async (data: {
+    email?: string;
+    phone?: string;
+    github_name?: string;
+    bio?: string;
+    company?: string;
+    location?: string;
+    blog?: string;
+  }) => {
+    const response = await fetch(`${API_BASE_URL}/api/users/me`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    })
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.detail?.[0]?.msg || error.detail || 'Failed to update profile')
+    }
+    return response.json()
+  },
+
+  validatePaymentRequirements: async () => {
+    const response = await fetch(`${API_BASE_URL}/api/users/me/validate-payment-requirements`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    })
+    if (!response.ok) throw new Error('Failed to validate payment requirements')
+    return response.json()
+  },
 })
+
+export default api

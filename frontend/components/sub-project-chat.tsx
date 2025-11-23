@@ -3,11 +3,11 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { motion, AnimatePresence } from 'framer-motion'
-import { 
+import {
   PaperPlaneIcon, PersonIcon, RocketIcon, UpdateIcon, ChevronRightIcon,
   CodeIcon, GearIcon, CheckCircledIcon, CrossCircledIcon, ClockIcon,
   FileTextIcon, CubeIcon, ChevronDownIcon, DotFilledIcon, CopyIcon,
-  ChatBubbleIcon, TrashIcon, PlayIcon, PauseIcon, ListBulletIcon, MixerHorizontalIcon
+  ChatBubbleIcon, MixerHorizontalIcon
 } from '@radix-ui/react-icons'
 import { api, ChatHook } from '@/lib/api'
 import { Button } from './ui/button'
@@ -16,6 +16,11 @@ import { Textarea } from './ui/textarea'
 import { cn } from '@/lib/utils'
 import { AssistantMessage } from './assistant-message'
 import { TestCaseGenerationModal } from './test-case-generation-modal'
+import { useApiError } from '@/lib/hooks/useApiError'
+import { toast } from 'sonner'
+import { CreditCost } from './ui/credit-cost'
+import { MobileWaitingResponse, MobileInputStatus, FloatingWaitingIndicator } from './mobile-waiting-response'
+import { useMobile } from '@/lib/hooks/useMobile'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -44,12 +49,7 @@ interface Message {
   parentMessageId?: string
 }
 
-interface QueuedMessage {
-  id: string
-  content: string
-  timestamp: string
-  agent?: string | null
-}
+// QueuedMessage interface removed - using blocking input instead
 
 interface WebhookLog {
   id: string
@@ -72,13 +72,40 @@ const AVAILABLE_AGENTS = [
   { value: '@agent-backend-architect', label: 'Backend Architect', description: 'Design backend systems and APIs' },
 ]
 
+const TAB_LABEL_MAX_CHARS = 32
+
+const contentToText = (content: any): string => {
+  if (!content) return ''
+  if (typeof content === 'string') return content
+  if (typeof content.text === 'string') return content.text
+  if (typeof content.message === 'string') return content.message
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === 'string') return part
+        if (part && typeof part.text === 'string') return part.text
+        return ''
+      })
+      .filter(Boolean)
+      .join(' ')
+  }
+  return ''
+}
+
+const truncateText = (text: string, maxLength: number = TAB_LABEL_MAX_CHARS) => {
+  if (!text) return ''
+  if (text.length <= maxLength) return text
+  return text.slice(0, maxLength - 3) + '...'
+}
+
 export function SubProjectChat({ projectName, taskName, subProjectId, initialSessionId, taskId }: SubProjectChatProps) {
+  const isMobile = useMobile()
   const queryClient = useQueryClient()
+  const { handleApiError } = useApiError()
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [chatId, setChatId] = useState<string | null>(null)
   const [sessions, setSessions] = useState<any[]>([])
-  const [showSessions, setShowSessions] = useState(false)
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [expandedHooks, setExpandedHooks] = useState<Set<string>>(new Set())
   // Collapse all hooks by default for cleaner UI
@@ -92,10 +119,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
   // Test case generation modal state
   const [showTestCaseModal, setShowTestCaseModal] = useState(false)
   
-  // Message Queue State
-  const [messageQueue, setMessageQueue] = useState<QueuedMessage[]>([])
-  const [isQueueProcessing, setIsQueueProcessing] = useState(false)
-  const [showQueue, setShowQueue] = useState(false)
+  // Message queue state removed - input is now blocked when waiting for response
   
   // Auto-scroll state management
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true)
@@ -267,13 +291,69 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
         setChatId(data.chat_id)
       }
     },
+    onError: (error) => {
+      console.error('❌ Query failed:', error)
+
+      // Handle rate limit errors with the banner
+      const wasRateLimitError = handleApiError(error)
+
+      if (wasRateLimitError) {
+        // Also show a toast for immediate feedback
+        toast.error('Rate Limit Exceeded', {
+          description: 'You have exceeded the rate limit. Please check the banner at the top of the page for details.',
+          duration: 5000,
+        })
+      } else {
+        // Extract detailed error information
+        const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred'
+        const errorData = (error as any)?.responseData?.detail
+
+        // Check if it's a subscription/credits error
+        if (errorData && typeof errorData === 'object' && errorData.error === 'insufficient_coins') {
+          toast.error('Insufficient Credits', {
+            description: `${errorMessage}. You need ${errorData.required} credit(s) but only have ${errorData.available}. Please upgrade your subscription or visit the pricing page.`,
+            duration: 7000,
+          })
+        } else {
+          // Handle other errors with a toast notification
+          toast.error('Failed to send message', {
+            description: errorMessage,
+          })
+        }
+      }
+
+      // Remove the processing message if there was an error
+      setMessages(prev => prev.filter(msg => !msg.isProcessing))
+    },
   })
 
   // Poll for messages in the current session
-  // Check if we're waiting for a response
-  const isWaitingForResponse = messages.some(msg => 
-    msg.role === 'assistant' && (msg.isProcessing || !msg.content?.text || msg.content?.text === '')
-  ) || sendMutation.isPending
+  // Check if we're waiting for a response - more robust detection
+  const isWaitingForResponse = useMemo(() => {
+    // If mutation is pending, we're definitely waiting
+    if (sendMutation.isPending) return true
+
+    // Check if any assistant message is still processing or lacks actual content
+    return messages.some(msg => {
+      if (msg.role !== 'assistant') return false
+
+      // Check explicit processing state
+      if (msg.isProcessing) return true
+      if (msg.content?.metadata?.status === 'processing') return true
+
+      // Check if message lacks actual content (still waiting for response)
+      const textContent = msg.content?.text || ''
+      const hasActualContent = textContent &&
+                               textContent !== '' &&
+                               textContent !== 'Processing your request...' &&
+                               textContent !== 'Waiting for response...'
+
+      // If no actual content, we're still waiting
+      if (!hasActualContent) return true
+
+      return false
+    })
+  }, [messages, sendMutation.isPending])
   
   // Query for messages when sessionId is available
   const { data: sessionMessages, error: sessionError } = useQuery({
@@ -542,14 +622,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
     }
   }, [messages, autoContinuationEnabled, sessionId])
 
-  // Auto-show queue when messages are added
-  useEffect(() => {
-    if (messageQueue.length > 0 && !showQueue) {
-      setShowQueue(true)
-    }
-  }, [messageQueue.length])
-
-  // Moved to after processNextInQueue definition to avoid temporal dead zone
+  // Queue functionality removed - using blocking input instead
 
   const loadChatHistory = async (loadSessionId: string) => {
     setLoadingHistory(true)
@@ -564,7 +637,6 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
       }))
       setMessages(historyMessages)
       setSessionId(loadSessionId)
-      setShowSessions(false)
       
       // Find the chat ID from the first message
       if (historyMessages.length > 0) {
@@ -585,30 +657,29 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
     setMessages([])
     setSessionId(null)
     setChatId(null)
-    setShowSessions(false)
   }
 
-  const handleSubmit = (e: React.FormEvent, forceQueue: boolean = false) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!input.trim()) return
+
+    // Block submission if waiting for a response
+    if (isWaitingForResponse) {
+      console.log('⚠️ Submission blocked: waiting for response')
+      return
+    }
 
     const userInput = input
     const agentToUse = selectedAgent
     setInput('')
-    
+
     // Reset textarea height after clearing input
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
       textareaRef.current.style.height = '24px' // Reset to min-height
     }
-    
-    // If we're waiting for a response or force queue, add to queue
-    if (isWaitingForResponse || isQueueProcessing || forceQueue) {
-      addToQueue(userInput, agentToUse)
-      return
-    }
 
-    // Otherwise, process immediately
+    // Process the message
     processMessage(userInput, agentToUse)
   }
 
@@ -620,6 +691,52 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
       second: '2-digit',
       hour12: false 
     })
+  }
+
+  const sessionTabs = useMemo(() => {
+    const baseSessions = Array.isArray(sessions) ? [...sessions] : []
+    if (sessionId && !baseSessions.some((session) => session.session_id === sessionId)) {
+      const firstUserMessage = messages.find((msg) => msg.role === 'user')
+      const messagePreview = firstUserMessage ? contentToText(firstUserMessage.content) : ''
+      baseSessions.unshift({
+        session_id: sessionId,
+        first_message: messagePreview || 'Active session',
+        message_count: messages.length,
+        created_at: firstUserMessage?.timestamp,
+        isVirtual: true,
+      })
+    }
+    return baseSessions
+  }, [sessions, sessionId, messages])
+
+  const getSessionTabLabel = (session: any, index: number) => {
+    const previewSource = session.first_message ?? session.firstMessage ?? session.preview
+    const previewText = previewSource ? contentToText(previewSource) : ''
+    if (previewText.trim()) {
+      return truncateText(previewText.trim())
+    }
+    if (session.session_id) {
+      return `Session ${session.session_id.slice(0, 6)}`
+    }
+    return `Session ${index + 1}`
+  }
+
+  const getSessionTabTooltip = (session: any) => {
+    const previewSource = session.first_message ?? session.firstMessage ?? session.preview
+    const previewText = previewSource ? contentToText(previewSource) : ''
+    const idText = session.session_id ? ` (#${session.session_id.slice(0, 8)})` : ''
+    const count = session.message_count ?? session.messageCount
+    const countText = typeof count === 'number' ? ` · ${count} messages` : ''
+    if (previewText.trim()) {
+      return `${previewText.trim()}${idText}${countText}`
+    }
+    return `Session${idText}${countText}`
+  }
+
+  const getSessionTabMessageCount = (session: any) => {
+    const count = session.message_count ?? session.messageCount
+    if (typeof count === 'number') return count
+    return 0
   }
 
   // Enhanced scroll detection and management
@@ -741,27 +858,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
     }
   }
 
-  // Queue Management Functions
-  const addToQueue = (content: string, agent?: string | null) => {
-    const queuedMessage: QueuedMessage = {
-      id: `queue-${Date.now()}-${Math.random()}`,
-      content: content.trim(),
-      timestamp: new Date().toISOString(),
-      agent
-    }
-    setMessageQueue(prev => [...prev, queuedMessage])
-    console.log('📋 Added message to queue:', { id: queuedMessage.id, content: content.substring(0, 50) + '...' })
-  }
-
-  const removeFromQueue = (messageId: string) => {
-    setMessageQueue(prev => prev.filter(msg => msg.id !== messageId))
-    console.log('🗑️ Removed message from queue:', messageId)
-  }
-
-  const clearQueue = () => {
-    setMessageQueue([])
-    console.log('🧹 Cleared message queue')
-  }
+  // Queue management functions removed - using blocking input instead
 
   const processMessage = useCallback(async (userInput: string, agent?: string | null) => {
     const resolveSessionId = () => {
@@ -832,43 +929,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
     }, 100)
   }, [sessionId, messages, sendMutation, setMessages, setSessionId, scrollToBottom])
 
-  const processNextInQueue = useCallback(async () => {
-    if (messageQueue.length === 0 || isWaitingForResponse || isQueueProcessing) {
-      return
-    }
-
-    const nextMessage = messageQueue[0]
-    if (!nextMessage) return
-
-    setIsQueueProcessing(true)
-    console.log('🎯 Processing next message from queue:', nextMessage.id)
-
-    // Remove the message from queue
-    setMessageQueue(prev => prev.slice(1))
-
-    // Process the message using the same logic as handleSubmit
-    await processMessage(nextMessage.content, nextMessage.agent)
-    
-    setIsQueueProcessing(false)
-  }, [messageQueue, isWaitingForResponse, isQueueProcessing, processMessage])
-
-  // Automatic Queue Processing - Process next message when current completes
-  useEffect(() => {
-    // Only process queue when:
-    // 1. Not currently waiting for a response
-    // 2. Not already processing queue
-    // 3. There are messages in the queue
-    // 4. Have a session (not first message)
-    if (!isWaitingForResponse && !isQueueProcessing && messageQueue.length > 0 && sessionId) {
-      console.log('🚀 Auto-processing next queued message. Queue length:', messageQueue.length)
-      // Add a small delay to ensure UI updates are complete
-      const timeoutId = setTimeout(() => {
-        processNextInQueue()
-      }, 500)
-      
-      return () => clearTimeout(timeoutId)
-    }
-  }, [isWaitingForResponse, isQueueProcessing, messageQueue.length, sessionId])
+  // Queue processing removed - using blocking input instead
 
   return (
     <div className="flex flex-col h-[calc(100vh-8rem)] sm:h-[calc(100vh-10rem)] md:h-[calc(100vh-12rem)]">
@@ -1029,24 +1090,6 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                 <span className="hidden sm:inline">Tests</span>
               </Button>
             )}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowSessions(!showSessions)}
-              className="text-xs font-mono h-6 px-1 sm:px-2"
-            >
-              <span className="hidden sm:inline">{sessions.length} sessions</span>
-              <span className="sm:hidden">{sessions.length}</span>
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={startNewSession}
-              className="text-xs font-mono h-6 px-1 sm:px-2"
-            >
-              <span className="hidden sm:inline">+ New</span>
-              <span className="sm:hidden">+</span>
-            </Button>
             {sessionId && (
               <>
                 <span className={cn(
@@ -1065,48 +1108,63 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
           </div>
         </div>
 
-        {/* Sessions Dropdown */}
-        {showSessions && (
-          <div className="absolute top-12 right-2 sm:right-4 z-50 bg-card/95 backdrop-blur-sm border border-border rounded-lg shadow-xl p-2 max-h-64 overflow-y-auto min-w-[280px] sm:min-w-[300px] max-w-[calc(100vw-2rem)]">
-            <div className="text-xs font-mono text-muted-foreground mb-2 px-2">Chat Sessions:</div>
-            {sessions.length === 0 ? (
-              <div className="text-xs text-muted-foreground text-center py-4">No sessions yet</div>
-            ) : (
-              sessions.map((session) => (
-                <button
-                  key={session.session_id}
-                  onClick={() => loadChatHistory(session.session_id)}
-                  className={cn(
-                    "w-full text-left p-2 hover:bg-muted rounded text-xs font-mono mb-1 transition-colors",
-                    session.session_id === sessionId && "bg-muted border border-cyan-500/30"
-                  )}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="text-cyan-400">{session.session_id.slice(0, 8)}...</div>
-                    {session.session_id === sessionId && (
-                      <span className="text-[10px] text-green-500">active</span>
-                    )}
-                  </div>
-                  <div className="text-muted-foreground truncate">{session.first_message || 'No messages'}</div>
-                  <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span>{session.message_count} messages</span>
-                    <span>{new Date(session.created_at || Date.now()).toLocaleDateString()}</span>
-                  </div>
-                </button>
-              ))
-            )}
-            {sessions.length > 0 && (
-              <div className="border-t border-border mt-2 pt-2">
-                <button
-                  onClick={startNewSession}
-                  className="w-full text-left p-2 hover:bg-muted rounded text-xs font-mono text-cyan-500"
-                >
-                  + Start New Session
-                </button>
-              </div>
-            )}
+        {/* Session Tabs */}
+        <div className="border-b border-border/70 bg-card/70 px-2 sm:px-4 py-2">
+          <div className="flex items-center justify-between text-[11px] font-mono uppercase tracking-wide text-muted-foreground">
+            <div className="flex items-center gap-2">
+              <ChatBubbleIcon className="h-3 w-3" />
+              <span>Chat Sessions</span>
+            </div>
+            <span>{sessionTabs.length} open</span>
           </div>
-        )}
+          <div className="mt-2">
+            <div className="overflow-x-auto pb-1">
+              <div className="flex items-center gap-2 min-w-max pr-4">
+                <button
+                  type="button"
+                  onClick={startNewSession}
+                  className="shrink-0 rounded-md border border-dashed border-border px-3 py-1.5 text-xs font-mono text-muted-foreground hover:text-cyan-400 hover:border-cyan-500/50 transition-colors"
+                >
+                  + New Session
+                </button>
+                {sessionTabs.length === 0 ? (
+                  <div className="px-3 py-1.5 text-xs text-muted-foreground border border-dashed border-border rounded-md bg-card/40">
+                    No sessions yet
+                  </div>
+                ) : (
+                  sessionTabs.map((session, index) => {
+                    const isActive = session.session_id === sessionId
+                    const shortId = session.session_id ? session.session_id.slice(0, 8) : 'pending'
+                    const messageCount = getSessionTabMessageCount(session)
+                    return (
+                      <button
+                        type="button"
+                        key={session.session_id ?? `session-${index}`}
+                        onClick={() => {
+                          if (!session.session_id || session.session_id === sessionId) return
+                          loadChatHistory(session.session_id)
+                        }}
+                        className={cn(
+                          "flex min-w-[160px] max-w-[240px] flex-col rounded-md border px-3 py-1.5 text-left text-xs font-mono transition-colors duration-200 shrink-0",
+                          isActive
+                            ? "bg-card text-cyan-200 border-cyan-500/40 shadow-lg shadow-cyan-500/20"
+                            : "bg-card/30 text-muted-foreground border-border/40 hover:text-foreground hover:border-border"
+                        )}
+                        title={getSessionTabTooltip(session)}
+                        aria-current={isActive ? 'true' : undefined}
+                      >
+                        <span className="truncate font-semibold">{getSessionTabLabel(session, index)}</span>
+                        <span className="text-[10px] text-muted-foreground">
+                          {shortId} · {messageCount} msg{messageCount === 1 ? '' : 's'}
+                        </span>
+                      </button>
+                    )
+                  })
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
 
         {/* Messages */}
         <div 
@@ -1332,10 +1390,12 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                               })}
                             </span>
                             {message.isProcessing && (
-                              <span className="text-xs text-cyan-500 flex items-center gap-1">
-                                <UpdateIcon className="h-3 w-3 animate-spin" />
-                                Processing
-                              </span>
+                              <MobileWaitingResponse
+                                isWaiting={true}
+                                isQueueProcessing={false}
+                                queueLength={0}
+                                className="ml-2"
+                              />
                             )}
                             {/* Show if this is a response to an auto-continuation */}
                             {message.parentMessageId && messages.find(m => m.id === message.parentMessageId)?.role === 'auto' && (
@@ -1477,165 +1537,22 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
           </AnimatePresence>
         </div>
 
-        {/* Message Queue Display */}
-        <AnimatePresence>
-          {messageQueue.length > 0 && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.3, ease: 'easeInOut' }}
-              className="border-t border-border/30 bg-gradient-to-r from-amber-500/10 to-orange-500/10 backdrop-blur-sm"
-            >
-              <div className="px-3 sm:px-4 py-2">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <motion.div
-                      animate={{ rotate: isQueueProcessing ? 360 : 0 }}
-                      transition={{ duration: 1, repeat: isQueueProcessing ? Infinity : 0, ease: "linear" }}
-                    >
-                      <ListBulletIcon className="h-4 w-4 text-amber-500" />
-                    </motion.div>
-                    <span className="text-sm font-medium text-amber-500 flex items-center gap-1">
-                      Queue ({messageQueue.length})
-                      {isQueueProcessing && (
-                        <motion.span
-                          initial={{ scale: 0.8, opacity: 0.7 }}
-                          animate={{ scale: 1, opacity: 1 }}
-                          transition={{ duration: 0.5, repeat: Infinity, repeatType: "reverse" }}
-                          className="text-xs"
-                        >
-                          Processing...
-                        </motion.span>
-                      )}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setShowQueue(!showQueue)}
-                      className="text-xs h-6 px-2 text-amber-500 hover:text-amber-400 hover:bg-amber-500/10"
-                    >
-                      <ChevronDownIcon className={cn(
-                        "h-3 w-3 transition-transform",
-                        showQueue && "rotate-180"
-                      )} />
-                      <span className="hidden sm:inline ml-1">{showQueue ? 'Hide' : 'Show'}</span>
-                    </Button>
-                    {messageQueue.length > 0 && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={clearQueue}
-                        className="text-xs h-6 px-2 text-red-400 hover:text-red-300 hover:bg-red-500/10"
-                      >
-                        <TrashIcon className="h-3 w-3" />
-                        <span className="hidden sm:inline ml-1">Clear</span>
-                      </Button>
-                    )}
-                  </div>
-                </div>
-                
-                {/* Queue Messages */}
-                <AnimatePresence>
-                  {showQueue && messageQueue.length > 0 && (
-                    <motion.div
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      exit={{ opacity: 0, height: 0 }}
-                      transition={{ duration: 0.2 }}
-                      className="space-y-2 max-h-32 overflow-y-auto pr-2"
-                      style={{ scrollbarWidth: 'thin' }}
-                    >
-                      {messageQueue.map((queuedMsg, index) => (
-                        <motion.div
-                          key={queuedMsg.id}
-                          initial={{ opacity: 0, x: -20, scale: 0.95 }}
-                          animate={{ opacity: 1, x: 0, scale: 1 }}
-                          exit={{ opacity: 0, x: 20, scale: 0.95 }}
-                          transition={{ duration: 0.2, delay: index * 0.05 }}
-                          className={cn(
-                            "flex items-start gap-2 p-2 rounded-lg border transition-all duration-200",
-                            index === 0 && isQueueProcessing
-                              ? "bg-amber-500/20 border-amber-500/30 animate-pulse"
-                              : "bg-card/50 border-border/30 hover:bg-card/70"
-                          )}
-                        >
-                          <div className="flex-shrink-0 w-6 h-6 rounded-full bg-amber-500/20 flex items-center justify-center">
-                            {index === 0 && isQueueProcessing ? (
-                              <UpdateIcon className="h-3 w-3 text-amber-500 animate-spin" />
-                            ) : (
-                              <span className="text-xs font-mono text-amber-500">{index + 1}</span>
-                            )}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between mb-1">
-                              <div className="flex items-center gap-2">
-                                {queuedMsg.agent && (
-                                  <span className="text-xs bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded">
-                                    {AVAILABLE_AGENTS.find(a => a.value === queuedMsg.agent)?.label || 'Agent'}
-                                  </span>
-                                )}
-                                <span className="text-xs text-muted-foreground">
-                                  {new Date(queuedMsg.timestamp).toLocaleTimeString('en-US', { 
-                                    hour: 'numeric', 
-                                    minute: '2-digit',
-                                    hour12: true 
-                                  })}
-                                </span>
-                              </div>
-                              <button
-                                onClick={() => removeFromQueue(queuedMsg.id)}
-                                className="text-red-400 hover:text-red-300 p-0.5 rounded hover:bg-red-500/10 transition-colors"
-                              >
-                                <TrashIcon className="h-3 w-3" />
-                              </button>
-                            </div>
-                            <p className="text-sm text-foreground/90 leading-relaxed" style={{ 
-                              display: '-webkit-box',
-                              WebkitLineClamp: 2,
-                              WebkitBoxOrient: 'vertical',
-                              overflow: 'hidden'
-                            }}>
-                              {queuedMsg.content}
-                            </p>
-                            {index === 0 && (isWaitingForResponse || isQueueProcessing) && (
-                              <div className="mt-1 text-xs text-amber-500 flex items-center gap-1">
-                                <ClockIcon className="h-3 w-3" />
-                                {isQueueProcessing ? 'Processing now...' : 'Next in line'}
-                              </div>
-                            )}
-                          </div>
-                        </motion.div>
-                      ))}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-                
-                {/* Queue Status Bar */}
-                {messageQueue.length > 0 && !showQueue && (
-                  <div className="text-xs text-amber-500/70 text-center mt-1">
-                    {messageQueue.length} message{messageQueue.length !== 1 ? 's' : ''} queued
-                    {isWaitingForResponse && ' • Processing current message...'}
-                  </div>
-                )}
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {/* Message Queue Display removed - input is now blocked when waiting for response */}
 
         {/* Modern X-style Input Area */}
         <div className={cn(
           "border-t border-border/50 bg-black/40 backdrop-blur-sm transition-all duration-200",
-          isWaitingForResponse && "opacity-75 bg-black/60"
+          isWaitingForResponse && "opacity-60 bg-black/70"
         )}>
+          {/* Pending Response Overlay */}
           <form onSubmit={handleSubmit} className="p-3 sm:p-4">
             <div className="relative">
               <Textarea
                 ref={textareaRef}
                 value={input}
                 onChange={(e) => {
+                  // Block input changes when waiting for response
+                  if (isWaitingForResponse) return
                   setInput(e.target.value)
                   // Auto-resize textarea
                   if (textareaRef.current) {
@@ -1644,30 +1561,33 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                   }
                 }}
                 onKeyDown={(e) => {
-                  // Submit on Enter (without modifiers) - will queue if processing
+                  // Block all submissions when waiting for response
+                  if (isWaitingForResponse) {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                    }
+                    return
+                  }
+                  // Submit on Enter (without modifiers)
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault()
                     handleSubmit(e as any)
                   }
-                  // Ctrl/Cmd + Enter to force queue
-                  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                    e.preventDefault()
-                    handleSubmit(e as any, true)
-                  }
                 }}
                 placeholder={
-                  isWaitingForResponse || isQueueProcessing
-                    ? (messageQueue.length > 0 
-                        ? `Message will be queued (${messageQueue.length + 1} total)...` 
-                        : "Processing... Your message will be queued")
+                  isWaitingForResponse
+                    ? "⏳ Please wait for the current response to complete..."
                     : "What's happening with your code?"
                 }
-                disabled={sendMutation.isPending && messageQueue.length === 0}
-                className="w-full bg-transparent border-0 focus:ring-0 resize-none 
-                  placeholder:text-muted-foreground/50 text-base leading-relaxed
-                  font-sans min-h-[24px] max-h-[200px] p-0 pr-12"
+                disabled={isWaitingForResponse}
+                className={cn(
+                  "w-full bg-transparent border-0 focus:ring-0 resize-none",
+                  "placeholder:text-muted-foreground/50 text-base leading-relaxed",
+                  "font-sans min-h-[24px] max-h-[200px] p-0 pr-12",
+                  isWaitingForResponse && "cursor-not-allowed opacity-50"
+                )}
                 rows={1}
-                style={{ 
+                style={{
                   outline: 'none',
                   boxShadow: 'none',
                   scrollbarWidth: 'thin'
@@ -1696,7 +1616,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                 
                 <div className="flex items-center gap-3">
                   {/* Character/status indicator */}
-                  {input.length > 0 && (
+                  {input.length > 0 && !isWaitingForResponse && (
                     <span className={cn(
                       "text-xs transition-colors",
                       input.length > 500 ? "text-orange-500" : "text-muted-foreground"
@@ -1704,17 +1624,20 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                       {input.length}
                     </span>
                   )}
-                  
-                  {/* Agent selector dropdown */}
+
+                  {/* Agent selector dropdown - disabled when waiting */}
                   <div className="relative" ref={agentDropdownRef}>
                     <Button
                       type="button"
-                      onClick={() => setShowAgentDropdown(!showAgentDropdown)}
+                      onClick={() => !isWaitingForResponse && setShowAgentDropdown(!showAgentDropdown)}
+                      disabled={isWaitingForResponse}
                       className={cn(
                         "h-8 sm:h-9 px-2 sm:px-3 rounded-full text-xs font-medium flex items-center gap-1 min-w-0",
-                        selectedAgent 
-                          ? "bg-purple-500/20 text-purple-400 hover:bg-purple-500/30" 
-                          : "bg-muted/50 text-muted-foreground hover:bg-muted"
+                        isWaitingForResponse
+                          ? "bg-muted/30 text-muted-foreground/50 cursor-not-allowed"
+                          : selectedAgent
+                            ? "bg-purple-500/20 text-purple-400 hover:bg-purple-500/30"
+                            : "bg-muted/50 text-muted-foreground hover:bg-muted"
                       )}
                       size="sm"
                     >
@@ -1845,88 +1768,70 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                     )}
                   </div>
                   
-                  {/* Send/Queue Button */}
+                  {/* Send Button - disabled when waiting for response */}
                   <div className="flex items-center gap-1">
-                    {/* Queue Button - visible when processing or when user might want to force queue */}
-                    {(isWaitingForResponse || isQueueProcessing || messageQueue.length > 0) && (
-                      <Button 
-                        type="button"
-                        onClick={(e) => handleSubmit(e as any, true)}
-                        disabled={!input.trim()}
-                        className={cn(
-                          "rounded-full h-9 w-9 sm:h-9 sm:w-auto sm:px-3 transition-all duration-200 touch-manipulation",
-                          "font-medium text-sm",
-                          input.trim()
-                            ? "bg-amber-500 hover:bg-amber-600 text-black" 
-                            : "bg-amber-500/20 text-amber-500/50 cursor-not-allowed"
-                        )}
-                        size="sm"
-                        title={`Add to queue (${messageQueue.length + 1} total) - Ctrl+Enter`}
-                      >
-                        <ListBulletIcon className="h-4 w-4 sm:hidden" />
-                        <span className="hidden sm:inline">Queue</span>
-                      </Button>
-                    )}
-                    
-                    {/* Main Send Button */}
-                    <Button 
-                      type="submit" 
-                      disabled={!input.trim()}
+                    <Button
+                      type="submit"
+                      disabled={!input.trim() || isWaitingForResponse}
                       className={cn(
                         "rounded-full h-9 w-9 sm:h-9 sm:w-auto sm:px-4 transition-all duration-200 touch-manipulation",
-                        "font-medium text-sm",
-                        input.trim()
-                          ? (isWaitingForResponse || isQueueProcessing
-                              ? "bg-amber-500 hover:bg-amber-600 text-black" // Will queue
-                              : "bg-cyan-500 hover:bg-cyan-600 text-black") // Will send immediately
-                          : "bg-cyan-500/20 text-cyan-500/50 cursor-not-allowed"
+                        "font-medium text-sm gap-2",
+                        isWaitingForResponse
+                          ? "bg-gray-500/30 text-gray-500 cursor-not-allowed"
+                          : input.trim()
+                            ? "bg-cyan-500 hover:bg-cyan-600 text-black"
+                            : "bg-cyan-500/20 text-cyan-500/50 cursor-not-allowed"
                       )}
                       size="sm"
                       title={
-                        isWaitingForResponse || isQueueProcessing
-                          ? "Will add to queue - Press Enter"
-                          : "Send message - Press Enter"
+                        isWaitingForResponse
+                          ? "Please wait for the current response to complete"
+                          : "Send message (1 credit) - Press Enter"
                       }
                     >
-                      {sendMutation.isPending && messageQueue.length === 0 ? (
-                        <UpdateIcon className="h-4 w-4 animate-spin" />
-                      ) : isWaitingForResponse || isQueueProcessing ? (
+                      {isWaitingForResponse ? (
                         <>
-                          <ListBulletIcon className="h-4 w-4 sm:hidden" />
-                          <span className="hidden sm:inline">Queue</span>
+                          <ClockIcon className="h-4 w-4 sm:hidden" />
+                          <span className="hidden sm:inline">Wait...</span>
                         </>
                       ) : (
                         <>
                           <PaperPlaneIcon className="h-4 w-4 sm:hidden" />
-                          <span className="hidden sm:inline">Send</span>
+                          <span className="hidden sm:inline-flex items-center gap-1.5">
+                            Send
+                            <CreditCost cost={1} variant="badge-subtle" />
+                          </span>
                         </>
                       )}
                     </Button>
                   </div>
                 </div>
               </div>
-              
-              {/* Hint text / Status indicator */}
-              <div className="mt-2 text-xs text-muted-foreground/50">
-                {isWaitingForResponse || isQueueProcessing ? (
-                  <div className="flex items-center gap-2 text-amber-500">
-                    <UpdateIcon className="h-3 w-3 animate-spin" />
-                    {isQueueProcessing 
-                      ? 'Processing queued message...'
-                      : 'Processing current message...'}
-                    {messageQueue.length > 0 && (
-                      <span className="text-amber-400">
-                        • {messageQueue.length} message{messageQueue.length !== 1 ? 's' : ''} in queue
-                      </span>
+
+              {/* Combined status indicator with mobile optimization and credit cost */}
+              <div className="mt-2">
+                {isMobile ? (
+                  <MobileInputStatus
+                    isWaiting={isWaitingForResponse}
+                    isQueueProcessing={isQueueProcessing}
+                    queueLength={messageQueue.length}
+                    inputLength={input.length}
+                    showHints={false}
+                  />
+                ) : (
+                  <div className="text-xs text-muted-foreground/50">
+                    {isWaitingForResponse ? (
+                      <div className="flex items-center gap-2 text-amber-500">
+                        <UpdateIcon className="h-3 w-3 animate-spin" />
+                        <span>Processing... Please wait for the response to complete before sending another message.</span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between">
+                        <span>Press Enter to send • Shift+Enter for new line</span>
+                        <CreditCost cost={1} variant="context" showWarning={false} />
+                      </div>
                     )}
                   </div>
-                ) : messageQueue.length > 0 ? (
-                  <div className="flex items-center gap-2 text-amber-500">
-                    <ListBulletIcon className="h-3 w-3" />
-                    {messageQueue.length} message{messageQueue.length !== 1 ? 's' : ''} queued • Will process automatically
-                  </div>
-                ) : (
-                  <div>Press Enter to send • Shift+Enter for new line • Ctrl+Enter to queue</div>
                 )}
               </div>
             </div>
@@ -1943,6 +1848,13 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
           taskId={taskId}
         />
       )}
+
+      {/* Floating waiting indicator for mobile */}
+      <FloatingWaitingIndicator
+        isVisible={isMobile && (isWaitingForResponse || isQueueProcessing)}
+        isQueueProcessing={isQueueProcessing}
+        queueLength={messageQueue.length}
+      />
 
       {/* Approval modals removed - approvals are now handled globally via ApprovalNotifications component */}
     </div>

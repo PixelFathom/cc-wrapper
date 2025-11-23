@@ -55,6 +55,8 @@ export interface IssueListResponse {
 }
 
 export interface SolveIssueRequest {
+  issue_title: string;
+  issue_body: string;
   task_name?: string;
 }
 
@@ -144,7 +146,7 @@ export async function fetchProjectIssues(
 export async function solveGitHubIssue(
   projectId: string,
   issueNumber: number,
-  data: SolveIssueRequest = {}
+  data: SolveIssueRequest
 ): Promise<SolveIssueResponse> {
   const response = await fetch(
     `${API_URL}/api/projects/${projectId}/issues/${issueNumber}/solve`,

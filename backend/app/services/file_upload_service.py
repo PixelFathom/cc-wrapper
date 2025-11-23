@@ -45,11 +45,16 @@ class FileUploadService:
                 raise ValueError("Project not found")
             
             # Build the remote path
-            base_path = f"{project.name}/{task.name}-{task.id}"
-            if remote_path:
-                full_remote_path = f"{base_path}/{remote_path}/{filename}"
-            else:
+            base_path = f"{project.name}/{task.id}"
+            if remote_path is None:
+                # Default to files/ directory
                 full_remote_path = f"{base_path}/files/{filename}"
+            elif remote_path == "":
+                # Empty string means root level
+                full_remote_path = f"{base_path}/{filename}"
+            else:
+                # Custom path
+                full_remote_path = f"{base_path}/{remote_path}/{filename}"
             
             # Create temporary file
             temp_file_path = None

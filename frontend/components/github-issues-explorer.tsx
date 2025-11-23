@@ -50,7 +50,7 @@ interface IssueDetailModalProps {
   issue: GitHubIssue | null
   repo: GitHubRepository | null
   onClose: () => void
-  onSolve: (issueNumber: number) => void
+  onSolve: (issueNumber: number, issueTitle: string, issueBody: string) => void
   solving: boolean
 }
 
@@ -248,7 +248,7 @@ function IssueDetailModal({ issue, repo, onClose, onSolve, solving }: IssueDetai
         onClose={() => setShowSolveConfirmation(false)}
         onConfirm={async () => {
           setShowSolveConfirmation(false)
-          onSolve(issue.number)
+          onSolve(issue.number, issue.title, issue.body || '')
         }}
         title="Start Issue Resolution"
         description={`Ready to solve issue #${issue.number}?`}
@@ -383,12 +383,17 @@ export function GitHubIssuesExplorer() {
 
   // Solve issue mutation
   const solveMutation = useMutation({
-    mutationFn: async ({ projectId, issueNumber }: {
+    mutationFn: async ({ projectId, issueNumber, issueTitle, issueBody }: {
       projectId: string;
       issueNumber: number;
+      issueTitle: string;
+      issueBody: string;
     }) => {
       // Use the current project ID that was created when repo was clicked
-      return solveGitHubIssue(projectId, issueNumber, {})
+      return solveGitHubIssue(projectId, issueNumber, {
+        issue_title: issueTitle,
+        issue_body: issueBody
+      })
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['github-repositories'] })
@@ -398,14 +403,16 @@ export function GitHubIssuesExplorer() {
     },
   })
 
-  const handleSolveIssue = (issueNumber: number) => {
+  const handleSolveIssue = (issueNumber: number, issueTitle: string, issueBody: string) => {
     if (!currentProject) {
       console.error('No project selected')
       return
     }
     solveMutation.mutate({
       projectId: currentProject.id,
-      issueNumber
+      issueNumber,
+      issueTitle,
+      issueBody
     })
   }
 

@@ -3,16 +3,17 @@
 import Link from 'next/link'
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { CodeIcon, HamburgerMenuIcon, Cross2Icon, RocketIcon, ExitIcon } from '@radix-ui/react-icons'
+import { CodeIcon, HamburgerMenuIcon, Cross2Icon, RocketIcon, ExitIcon, StarFilledIcon } from '@radix-ui/react-icons'
 import { Button } from './ui/button'
 // Removed Clerk imports as basic auth is used instead
-import { DeploymentGuideModal } from './deployment-guide-modal'
 import { usePathname } from 'next/navigation'
 import { GitHubAuthButton } from './github-auth-button'
+import { SubscriptionBadge } from './subscription/SubscriptionBadge'
 
 export function Navigation() {
   const [scrolled, setScrolled] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
   const pathname = usePathname()
 
   // Extract taskId from URL path like /p/[projectId]/t/[taskId]
@@ -24,6 +25,12 @@ export function Navigation() {
     }
     window.addEventListener('scroll', handleScroll)
     return () => window.removeEventListener('scroll', handleScroll)
+  }, [])
+
+  useEffect(() => {
+    // Check authentication status
+    const storedUser = localStorage.getItem('github_user')
+    setIsAuthenticated(!!storedUser)
   }, [])
 
 
@@ -46,8 +53,7 @@ export function Navigation() {
                 <CodeIcon className="h-4 sm:h-5 w-4 sm:w-5 text-cyan-500" />
                 <span className="font-mono text-xs sm:text-sm">
                   <span className="text-muted-foreground">$</span>
-                  <span className="text-cyan-500 ml-1">project</span>
-                  <span className="text-muted-foreground hidden sm:inline">-hub</span>
+                  <span className="text-cyan-500 ml-1">tediux</span>
                   <span className="animate-terminal-cursor ml-0.5">_</span>
                 </span>
               </div>
@@ -62,25 +68,28 @@ export function Navigation() {
               <span className="text-muted-foreground text-xs font-mono">main</span>
             </div>
 
+            {/* Pricing Button - Show only when not authenticated */}
+            {!isAuthenticated && (
+              <Link href="/pricing">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="relative group bg-gradient-to-r from-green-500/10 to-cyan-500/10 border-green-500/30 hover:border-green-400/50 text-green-400 hover:text-green-300 hover:bg-green-500/20 transition-all duration-200 font-mono text-xs"
+                >
+                  <div className="absolute -inset-0.5 bg-gradient-to-r from-green-600 to-cyan-600 rounded-lg blur opacity-0 group-hover:opacity-20 transition duration-300"></div>
+                  <div className="relative flex items-center">
+                    <StarFilledIcon className="mr-2 h-4 w-4" />
+                    <span>$ pricing</span>
+                  </div>
+                </Button>
+              </Link>
+            )}
+
+            {/* Subscription Badge */}
+            <SubscriptionBadge />
+
             {/* GitHub Auth Button */}
             <GitHubAuthButton />
-
-            {/* Deployment Guide Button - Only show on task pages */}
-            {taskId && (
-              <DeploymentGuideModal
-                taskId={taskId}
-                trigger={
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="bg-gradient-to-r from-orange-500/10 to-red-500/10 border-orange-500/30 hover:border-orange-400/50 text-orange-400 hover:text-orange-300 hover:bg-orange-500/20 transition-all duration-200"
-                  >
-                    <RocketIcon className="h-4 w-4 mr-2" />
-                    Deployment Guide
-                  </Button>
-                }
-              />
-            )}
           </div>
 
           {/* Mobile menu button */}
@@ -112,29 +121,35 @@ export function Navigation() {
                   <span className="text-xs text-muted-foreground font-mono">v1.0.0</span>
                 </div>
 
+                {/* Pricing Button - Mobile - Show only when not authenticated */}
+                {!isAuthenticated && (
+                  <div className="px-4">
+                    <Link href="/pricing">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="w-full relative group bg-gradient-to-r from-green-500/10 to-cyan-500/10 border-green-500/30 hover:border-green-400/50 text-green-400 hover:text-green-300 hover:bg-green-500/20 transition-all duration-200 font-mono text-xs"
+                        onClick={() => setMobileMenuOpen(false)}
+                      >
+                        <div className="absolute -inset-0.5 bg-gradient-to-r from-green-600 to-cyan-600 rounded-lg blur opacity-0 group-hover:opacity-20 transition duration-300"></div>
+                        <div className="relative flex items-center">
+                          <StarFilledIcon className="mr-2 h-4 w-4" />
+                          <span>$ pricing</span>
+                        </div>
+                      </Button>
+                    </Link>
+                  </div>
+                )}
+
+                {/* Subscription Badge - Mobile */}
+                <div className="px-4 flex justify-center">
+                  <SubscriptionBadge />
+                </div>
+
                 {/* GitHub Auth Button - Mobile */}
                 <div className="px-4">
                   <GitHubAuthButton />
                 </div>
-
-                {/* Deployment Guide Button - Mobile */}
-                {taskId && (
-                  <div className="px-4">
-                    <DeploymentGuideModal
-                      taskId={taskId}
-                      trigger={
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="w-full bg-gradient-to-r from-orange-500/10 to-red-500/10 border-orange-500/30 hover:border-orange-400/50 text-orange-400 hover:text-orange-300 hover:bg-orange-500/20 transition-all duration-200"
-                        >
-                          <RocketIcon className="h-4 w-4 mr-2" />
-                          Deployment Guide
-                        </Button>
-                      }
-                    />
-                  </div>
-                )}
               </div>
             </motion.div>
           )}

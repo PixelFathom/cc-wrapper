@@ -9,7 +9,8 @@ from typing import List, Optional
 from uuid import UUID
 from datetime import datetime
 
-from app.deps import get_session
+from app.deps import get_session, get_current_user, get_admin_user
+from app.models.user import User
 from app.models.github_issue import GitHubIssue
 from app.models.github_repository import GitHubRepository
 from app.models.task import Task
@@ -72,10 +73,11 @@ async def list_issues(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=100),
     sync: bool = Query(False, description="Sync from GitHub before returning"),
+    current_user: User = Depends(get_admin_user),
     session: AsyncSession = Depends(get_session)
 ):
     """
-    List GitHub issues for user's repositories.
+    List GitHub issues for user's repositories (admin only - premium feature).
 
     Args:
         user_id: User UUID
@@ -184,6 +186,7 @@ async def list_issues(
 async def generate_task_from_issue(
     user_id: str,
     payload: GenerateTaskFromIssueRequest,
+    current_user: User = Depends(get_admin_user),
     session: AsyncSession = Depends(get_session)
 ):
     """
@@ -390,6 +393,7 @@ Please solve this issue by following these guidelines:
 async def get_issue(
     user_id: str,
     issue_id: str,
+    current_user: User = Depends(get_admin_user),
     session: AsyncSession = Depends(get_session)
 ):
     """

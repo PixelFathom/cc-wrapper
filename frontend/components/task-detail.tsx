@@ -2,14 +2,15 @@
 
 import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
-import { 
-  ChatBubbleIcon, FileIcon, RocketIcon, ActivityLogIcon, 
+import { useSearchParams } from 'next/navigation'
+import {
+  ChatBubbleIcon, FileIcon, RocketIcon, ActivityLogIcon,
   UploadIcon, ReloadIcon, LockClosedIcon, ClockIcon,
   CheckCircledIcon, CrossCircledIcon, DotFilledIcon,
   PlayIcon, StopIcon, DownloadIcon, CommitIcon,
   ReaderIcon, UpdateIcon, LightningBoltIcon, CubeIcon,
   CodeIcon, TrashIcon, ChevronDownIcon, ChevronRightIcon,
-  FileTextIcon, QuestionMarkCircledIcon
+  FileTextIcon
 } from '@radix-ui/react-icons'
 import { motion } from 'framer-motion'
 import { api, DeploymentHook } from '@/lib/api'
@@ -23,10 +24,12 @@ import { DeploymentLogs } from './deployment-logs'
 import { TestCaseModal } from './test-case-modal'
 import { ExecutionResultModal } from './execution-result-modal'
 import { MarkdownRenderer } from './markdown-renderer'
-import { DeploymentGuideTab } from './deployment-guide-tab'
-import { ContestHarvestingTab } from './contest-harvesting-tab'
 import { IssueResolutionView } from './issue-resolution-view'
 import { MessagesTab } from './messages-tab'
+import { VSCodeLinkModal } from './vscode-link-modal'
+import { CustomDomainTab } from './custom-domain-tab'
+import { DeployTab } from './deploy-tab'
+import { CommitAndPushModal } from './commit-and-push-modal'
 
 interface TaskDetailProps {
   projectId: string
@@ -34,8 +37,18 @@ interface TaskDetailProps {
 }
 
 export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
+  const searchParams = useSearchParams()
+  const tabParam = searchParams.get('tab')
+
   // Will be set to 'issue-resolution' for issue tasks after loading
-  const [activeTab, setActiveTab] = useState<'deployment' | 'chat' | 'knowledge-base' | 'test-cases' | 'deployment-guide' | 'contest-harvesting' | 'issue-resolution' | 'messages'>('deployment')
+  const [activeTab, setActiveTab] = useState<'deployment' | 'custom-domain' | 'deploy' | 'chat' | 'knowledge-base' | 'test-cases' | 'issue-resolution' | 'messages'>('deployment')
+
+  // Set tab from URL parameter if provided
+  useEffect(() => {
+    if (tabParam && ['deployment', 'custom-domain', 'deploy', 'chat', 'knowledge-base', 'test-cases', 'issue-resolution', 'messages'].includes(tabParam)) {
+      setActiveTab(tabParam as any)
+    }
+  }, [tabParam])
   
   // Helper function to format duration
   const formatDuration = (start: Date, end: Date) => {
@@ -61,6 +74,9 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
   const { data: task, isLoading, refetch: refetchTask } = useQuery({
     queryKey: ['task', taskId],
     queryFn: () => api.getTask(taskId),
+    // Poll task status to catch deployment state changes
+    refetchInterval: 5000, // Poll every 5 seconds
+    refetchIntervalInBackground: true,
   })
 
   const { data: subProjects, refetch: refetchSubProjects } = useQuery({
@@ -70,13 +86,21 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
     refetchInterval: 5000, // Poll every 5 seconds to catch new sub_projects
   })
 
-  // Fetch deployment hooks (poll if deployment is not completed)
+  // Fetch deployment hooks (always poll if deployment is not completed)
+  const shouldPollDeployment = task && task.deployment_status !== 'pending' && !task.deployment_completed
   const { data: deploymentData, refetch: refetchHooks } = useQuery({
     queryKey: ['deployment-hooks', taskId],
     queryFn: () => api.getTaskDeploymentHooks(taskId, 100), // Get more hooks
     enabled: !!task && task.deployment_status !== 'pending', // Fetch hooks if deployment has started
-    refetchInterval: task && !task.deployment_completed ? 3000 : false, // Poll every 3 seconds only if not completed
+    refetchInterval: shouldPollDeployment ? 2000 : false, // Always poll every 2 seconds when deployment is running
+    refetchIntervalInBackground: true, // Continue polling even when tab is not active
   })
+
+  // Summary tab should only surface phases not already shown inside Deployment Task (e.g. initialization)
+  const summaryHooks = useMemo(() => {
+    if (!deploymentData?.hooks) return []
+    return deploymentData.hooks.filter((hook) => hook.phase !== 'deployment')
+  }, [deploymentData?.hooks])
 
   // Fetch knowledge base files
   const { data: knowledgeBaseFiles, refetch: refetchKnowledgeBase } = useQuery({
@@ -101,6 +125,9 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
 
   // State for expanded sessions (expand first session by default)
   const [expandedSessions, setExpandedSessions] = useState<Set<string>>(new Set())
+
+  // State for commit and push modal
+  const [commitAndPushModalOpen, setCommitAndPushModalOpen] = useState(false)
 
   // Initialize expanded sessions with the first session when test cases are loaded
   useEffect(() => {
@@ -155,6 +182,19 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
             <span className="text-muted-foreground">$</span> Error: Task not found
           </div>
         </div>
+      </div>
+    )
+  }
+
+  // For issue resolution tasks, render the dedicated issue resolution UI
+  // UNLESS a specific tab is requested (to allow access to normal task features)
+  const allowedNormalTabs = ['chat', 'custom-domain', 'deploy', 'knowledge-base', 'test-cases', 'deployment']
+  const requestsNormalTab = tabParam && allowedNormalTabs.includes(tabParam)
+
+  if (task.task_type === 'issue_resolution' && !requestsNormalTab) {
+    return (
+      <div className="container mx-auto px-4 sm:px-6 py-6 sm:py-8">
+        <IssueResolutionView projectId={projectId} taskId={taskId} />
       </div>
     )
   }
@@ -356,26 +396,28 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
       <div className="bg-card/50 backdrop-blur-sm rounded-lg sm:rounded-xl border border-border/50 p-1 mb-6 sm:mb-8 overflow-x-auto">
         <div className="flex space-x-1 min-w-max">
           {[
-            // Show Issue Resolution tab first for issue tasks
-            ...(task.task_type === 'issue_resolution' ? [
+            // Show Issue Resolution tab first for issue tasks (only if not viewing normal tabs)
+            ...(task.task_type === 'issue_resolution' && !requestsNormalTab ? [
               { id: 'issue-resolution', label: 'Issue Resolution', icon: <FileTextIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
             ] : []),
-            // Show Messages tab for issue resolution tasks
-            ...(task.task_type === 'issue_resolution' ? [
+            // Show Messages tab for issue resolution tasks (only if not viewing normal tabs)
+            ...(task.task_type === 'issue_resolution' && !requestsNormalTab ? [
               { id: 'messages', label: 'Messages', icon: <ChatBubbleIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
             ] : []),
-            // Show deployment tab for non-issue tasks
-            ...(task.task_type !== 'issue_resolution' ? [
+            // Show deployment tab for non-issue tasks OR when explicitly viewing normal tabs
+            ...(task.task_type !== 'issue_resolution' || requestsNormalTab ? [
               { id: 'deployment', label: 'Summary', icon: <ActivityLogIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
             ] : []),
-            // Hide Chat tab for issue resolution tasks - they have integrated chat
-            ...(task.task_type !== 'issue_resolution' ? [
+            // Show Chat tab for non-issue tasks OR when explicitly viewing normal tabs
+            ...(task.task_type !== 'issue_resolution' || requestsNormalTab ? [
               { id: 'chat', label: 'Chat', icon: <ChatBubbleIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
             ] : []),
+            // Custom Domain tab for all tasks
+            { id: 'custom-domain', label: 'Custom Domain', icon: <CubeIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
+            // Deploy tab for all tasks
+            { id: 'deploy', label: 'Deploy', icon: <RocketIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
             { id: 'knowledge-base', label: 'Knowledge Base', icon: <ReaderIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
             { id: 'test-cases', label: 'Test Cases', icon: <PlayIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
-            { id: 'contest-harvesting', label: 'Context Harvesting', icon: <QuestionMarkCircledIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
-            { id: 'deployment-guide', label: 'Deployment Guide', icon: <RocketIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -413,7 +455,7 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
                 </div>
               ) : (
                 <DeploymentLogs 
-                  hooks={deploymentData?.hooks || []} 
+                  hooks={summaryHooks}
                   isCompleted={task.deployment_completed}
                   status={task.deployment_status}
                 />
@@ -545,28 +587,40 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
                         return gitInfo ? `${gitInfo.owner}/${gitInfo.repo}` : project.repo_url
                       })()}</span>
                     </a>
+                    <VSCodeLinkModal
+                      taskId={taskId}
+                      trigger={
+                        <button className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-black/20 hover:bg-black/30 transition-all border border-border/30 text-sm text-purple-400 hover:text-purple-300 group w-full">
+                          <CodeIcon className="h-4 w-4 group-hover:scale-110 transition-transform" />
+                          <span>Open in VS Code</span>
+                        </button>
+                      }
+                    />
                     <button
-                      onClick={async () => {
-                        try {
-                          const result = await api.getTaskVSCodeLink(taskId)
-                          window.open(result.tunnel_link, '_blank')
-                        } catch (error) {
-                          console.error('Failed to get VS Code link:', error)
-                        }
-                      }}
-                      className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-black/20 hover:bg-black/30 transition-all border border-border/30 text-sm text-purple-400 hover:text-purple-300 group w-full"
+                      onClick={() => setCommitAndPushModalOpen(true)}
+                      className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-gradient-to-r from-amber-500/20 to-orange-500/20 hover:from-amber-500/30 hover:to-orange-500/30 transition-all border border-amber-500/30 text-sm text-amber-400 hover:text-amber-300 group w-full shadow-[0_0_15px_rgba(245,158,11,0.1)] hover:shadow-[0_0_20px_rgba(245,158,11,0.2)]"
+                      title="Coming Soon"
                     >
-                      <CodeIcon className="h-4 w-4 group-hover:scale-110 transition-transform" />
-                      <span>Open in VS Code</span>
+                      <CommitIcon className="h-4 w-4 group-hover:scale-110 transition-transform" />
+                      <span>Commit & Push</span>
+                      <span className="ml-auto text-xs bg-amber-500/20 px-1.5 py-0.5 rounded text-amber-300">Coming Soon</span>
                     </button>
                   </div>
                 </motion.div>
               )}
+
+              {/* Commit and Push Modal */}
+              <CommitAndPushModal
+                taskId={taskId}
+                taskName={task.name}
+                open={commitAndPushModalOpen}
+                onOpenChange={setCommitAndPushModalOpen}
+              />
             </div>
           </motion.div>
         )}
 
-        {activeTab === 'chat' && task.task_type !== 'issue_resolution' && (
+        {activeTab === 'chat' && (task.task_type !== 'issue_resolution' || requestsNormalTab) && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -600,8 +654,6 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
             <div className="bg-card rounded-lg border border-border p-6">
               <h4 className="text-sm font-medium mb-4">Upload to Knowledge Base</h4>
               <UploadZone
-                orgName={project?.name || 'default'}
-                cwd={`${project?.name}/${task.name}-${task.id}`}
                 onUpload={async (file) => {
                   try {
                     const result = await api.uploadToKnowledgeBase(taskId, file)
@@ -618,6 +670,7 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
                   'application/json': ['.json'],
                   'application/xml': ['.xml'],
                   'application/x-yaml': ['.yaml', '.yml'],
+                  'image/*': ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.tiff', '.heic', '.heif'],
                 }}
               />
             </div>
@@ -654,12 +707,12 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
           </motion.div>
         )}
 
-        {activeTab === 'deployment-guide' && (
-          <DeploymentGuideTab taskId={taskId} />
+        {activeTab === 'custom-domain' && task && (
+          <CustomDomainTab taskId={taskId} task={task} />
         )}
 
-        {activeTab === 'contest-harvesting' && (
-          <ContestHarvestingTab taskId={taskId} />
+        {activeTab === 'deploy' && task && (
+          <DeployTab taskId={taskId} task={task} />
         )}
 
         {activeTab === 'issue-resolution' && (

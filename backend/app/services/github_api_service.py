@@ -318,6 +318,37 @@ class GitHubAPIService:
 
         await self.session.commit()
 
+    async def create_pull_request(
+        self,
+        owner: str,
+        repo: str,
+        title: str,
+        body: Optional[str],
+        head: str,
+        base: str,
+        draft: bool = False
+    ) -> Dict[str, Any]:
+        """Create a pull request on GitHub."""
+
+        headers = await self._get_headers()
+        payload = {
+            "title": title,
+            "head": head,
+            "base": base,
+            "draft": draft,
+        }
+        if body:
+            payload["body"] = body
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{self.GITHUB_API_BASE}/repos/{owner}/{repo}/pulls",
+                json=payload,
+                headers=headers,
+            )
+            response.raise_for_status()
+            return response.json()
+
     async def get_repository_structure(self, owner: str, repo: str, path: str = "") -> Dict[str, Any]:
         """
         Get repository file structure for a given path.

@@ -88,12 +88,12 @@ async def get_pending_approvals(
         all_approvals.append({
             "id": str(approval.id),
             "type": "regular",
-            "action_type": approval.action_type,
-            "details": approval.details,
+            "prompt": approval.prompt,
             "status": approval.status,
+            "response": approval.response,
+            "responded_at": approval.responded_at.isoformat() if approval.responded_at else None,
             "created_at": approval.created_at.isoformat(),
-            "sub_project_id": str(approval.sub_project_id) if approval.sub_project_id else None,
-            "cwd": approval.cwd
+            "sub_project_id": str(approval.sub_project_id) if approval.sub_project_id else None
         })
     
     # Get MCP approval requests (filtered by user's sub-projects)

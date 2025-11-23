@@ -31,10 +31,10 @@ class Task(BaseModel, table=True):
     deployment_completed: bool = Field(default=False)
     deployment_started_at: Optional[datetime] = Field(default=None)
     deployment_completed_at: Optional[datetime] = Field(default=None)
-
-    # Deployment guide fields
-    deployment_guide: Optional[str] = Field(default=None)
-    deployment_guide_updated_at: Optional[datetime] = Field(default=None)
+    deployment_port: Optional[int] = Field(default=None)  # 5-digit port number (10000-99999)
+    deployment_host: Optional[str] = Field(default=None)  # Host URL for nginx configuration
+    env_file_path: Optional[str] = Field(default=None)  # Path to uploaded .env file
+    env_variables: Optional[Dict[str, str]] = Field(default=None, sa_column=Column(JSONB))  # Parsed key-value pairs from .env
 
     # Task workflow state fields (required by database schema)
     state: str = Field(default="pending", index=True)  # pending, context_gathering, planning, executing, completed, failed
@@ -67,7 +67,14 @@ class Task(BaseModel, table=True):
 
     # Active session tracking
     active_planning_session_id: Optional[UUID] = Field(default=None)
-    
+
+    # Hosting fields
+    hosting_subdomain: Optional[str] = Field(default=None)  # e.g., 'my-app'
+    hosting_fqdn: Optional[str] = Field(default=None)  # e.g., 'my-app.example.com'
+    hosting_status: Optional[str] = Field(default=None)  # active, active_no_ssl, dns_only, failed, removed
+    hosting_provisioned_at: Optional[datetime] = Field(default=None)
+    hosting_removed_at: Optional[datetime] = Field(default=None)
+
     project: Optional["Project"] = Relationship(back_populates="tasks")
     sub_projects: List["SubProject"] = Relationship(back_populates="task")
     deployment_hooks: List["DeploymentHook"] = Relationship(back_populates="task")

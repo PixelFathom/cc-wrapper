@@ -61,8 +61,8 @@ export function GitHubIssuesList({ projectId }: GitHubIssuesListProps) {
 
   // Solve issue mutation
   const solveMutation = useMutation({
-    mutationFn: ({ issueNumber }: { issueNumber: number }) =>
-      solveGitHubIssue(projectId, issueNumber),
+    mutationFn: ({ issueNumber, issueTitle, issueBody }: { issueNumber: number; issueTitle: string; issueBody: string }) =>
+      solveGitHubIssue(projectId, issueNumber, { issue_title: issueTitle, issue_body: issueBody }),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['project-issues', projectId] })
       // Redirect to task page
@@ -77,9 +77,9 @@ export function GitHubIssuesList({ projectId }: GitHubIssuesListProps) {
     issue.labels.some(label => label.toLowerCase().includes(searchQuery.toLowerCase()))
   ) || []
 
-  const handleSolveIssue = (issueNumber: number, issueTitle: string) => {
+  const handleSolveIssue = (issueNumber: number, issueTitle: string, issueBody: string) => {
     if (confirm(`Create resolution task for issue #${issueNumber}?`)) {
-      solveMutation.mutate({ issueNumber })
+      solveMutation.mutate({ issueNumber, issueTitle, issueBody })
     }
   }
 
@@ -276,7 +276,7 @@ export function GitHubIssuesList({ projectId }: GitHubIssuesListProps) {
                   ) : issue.state === 'open' ? (
                     <Button
                       size="sm"
-                      onClick={() => handleSolveIssue(issue.number, issue.title)}
+                      onClick={() => handleSolveIssue(issue.number, issue.title, issue.body || '')}
                       disabled={solveMutation.isPending}
                       className="bg-cyan-500 hover:bg-cyan-600 text-black font-mono text-xs"
                     >

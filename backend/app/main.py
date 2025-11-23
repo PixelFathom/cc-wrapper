@@ -6,14 +6,16 @@ import logging
 
 from app.core.settings import get_settings
 from app.core.redis import close_redis
+from app.core.scheduler import start_scheduler, shutdown_scheduler
 from app.deps import engine
-from app.api import projects, tasks, chat, files, approvals, auto_continuation, test_cases, contest_harvesting, github_auth, github_repositories, github_issues, issue_resolution
+from app.api import projects, tasks, chat, files, approvals, auto_continuation, test_cases, contest_harvesting, github_auth, github_repositories, github_issues, issue_resolution, subscriptions, payments, webhooks_cashfree, users, hosting, pricing
 from app.api.v1 import webhooks, mcp_approvals
 
 # Import models to ensure they are registered with SQLAlchemy
 from app.models import (
     TestCaseHook, ContestHarvestingSession, HarvestingQuestion,
-    User, UserToken, AuditLog, GitHubRepository, GitHubIssue, IssueResolution
+    User, UserToken, AuditLog, GitHubRepository, GitHubIssue, IssueResolution,
+    CoinTransaction, Payment, PricingPlan
 )  # Ensure tables are created
 
 settings = get_settings()
@@ -30,9 +32,17 @@ sys.stderr = sys.__stderr__
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Startup
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
+
+    # Start the scheduler for background jobs (credit expiration)
+    start_scheduler()
+
     yield
+
+    # Shutdown
+    shutdown_scheduler()
     await close_redis()
 
 
@@ -47,11 +57,13 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "http://localhost:2000",
-        "https://localhost:3000", 
-        "https://code.thegetshitdone.ai",
-        "https://api-code.thegetshitdone.ai",
+        "http://localhost:65170",
+        "https://localhost:3000",
         "https://code.tanmaydeepsharma.com",
         "https://code-api.tanmaydeepsharma.com",
+        "https://tediux.com",
+        "https://api.tediux.com",
+        "https://landing-pa-k31qa3gj.tediux.com",
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
@@ -72,8 +84,24 @@ app.include_router(github_auth.router, prefix="/api", tags=["github-auth"])
 app.include_router(github_repositories.router, prefix="/api", tags=["github-repositories"])
 app.include_router(github_issues.router, prefix="/api", tags=["github-issues"])
 app.include_router(issue_resolution.router, prefix="/api", tags=["issue-resolution"])
+app.include_router(subscriptions.router, prefix="/api", tags=["subscriptions"])
+app.include_router(payments.router, prefix="/api", tags=["payments"])
+app.include_router(webhooks_cashfree.router, prefix="/api", tags=["webhooks-cashfree"])
+app.include_router(users.router, prefix="/api", tags=["users"])
+app.include_router(hosting.router, prefix="/api", tags=["hosting"])
+app.include_router(pricing.router, prefix="/api", tags=["pricing"])
 
 
 @app.get("/")
 async def root():
     return {"message": "Project Management API v1.0"}
+
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
+
+
+@app.get("/api/health")
+async def api_health_check():
+    return {"status": "healthy"}

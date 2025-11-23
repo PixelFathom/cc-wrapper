@@ -9,6 +9,8 @@ from sqlmodel import select
 from sqlalchemy import text
 
 from app.core.settings import get_settings
+from app.core.redis import get_redis
+from app.core.rate_limiter import assert_within_rate_limit
 from app.core.auto_continuation_config import get_auto_continuation_config
 from app.models import Chat, Task, Project, ChatHook
 from app.models.chat import CONTINUATION_STATUS_NONE, CONTINUATION_STATUS_NEEDED, CONTINUATION_STATUS_IN_PROGRESS, CONTINUATION_STATUS_COMPLETED
@@ -62,11 +64,59 @@ class ChatService:
             project = await db.get(Project, task.project_id)
             if not project:
                 raise ValueError("Project not found")
-            
+
+            redis_client = await get_redis()
+            await assert_within_rate_limit(
+                redis_client,
+                user_id=project.user_id,
+            )
+
             # Generate webhook URL
             webhook_url = f"{self.webhook_base_url}/api/webhooks/chat/{chat_id}"
-            
-            project_path = f"{project.name}/{task.name}-{task.id}" if include_task_id else f"{project.name}/{task.name}"
+
+            project_path = f"{project.name}/{task.id}"
+
+            # Add deployment context to prompt if task has a port assigned
+            enhanced_prompt = prompt
+            if task.deployment_port:
+                hosting_fqdn = task.hosting_fqdn or f"http://localhost:{task.deployment_port}"
+                deployment_context = (
+                    f"\n\n---\n"
+                    f"🚨 MANDATORY DEPLOYMENT CONTEXT - READ CAREFULLY 🚨\n\n"
+                    f"ASSIGNED PORT: {task.deployment_port}\n"
+                    f"SERVICE URL: {hosting_fqdn}\n\n"
+                    f"⚠️ CRITICAL RULES:\n"
+                    f"1. You MUST use port {task.deployment_port} for ALL deployment operations - NO EXCEPTIONS\n"
+                    f"2. NEVER deploy on any other port - always use {task.deployment_port}\n"
+                    f"3. If the task involves testing with Playwright MCP, the service MUST be running on port {task.deployment_port}\n\n"
+                    f"📋 REQUIRED WORKFLOW (follow in order):\n\n"
+                    f"STEP 1 - CHECK EXISTING SERVICE:\n"
+                    f"   Run: curl -s -o /dev/null -w '%{{http_code}}' {hosting_fqdn} || echo 'not running'\n"
+                    f"   Also run: docker ps --filter 'publish={task.deployment_port}' --format '{{{{.Names}}}} {{{{.Status}}}}'\n\n"
+                    f"STEP 2 - BASED ON RESULT:\n"
+                    f"   IF service is running and healthy on port {task.deployment_port}:\n"
+                    f"      → Restart it to pick up any code changes: docker restart <container_name>\n"
+                    f"      → Wait for it to be ready, then proceed to testing\n"
+                    f"   IF service is NOT running on port {task.deployment_port}:\n"
+                    f"      → Create docker-compose.yaml with port mapping: '{task.deployment_port}:80' or '{task.deployment_port}:<app_port>'\n"
+                    f"      → Use dev mode with volume mounts for hot reload\n"
+                    f"      → Run: docker compose up -d --build\n"
+                    f"      → Wait for service to be healthy before testing\n\n"
+                    f"STEP 3 - VERIFY BEFORE TESTING:\n"
+                    f"   Always confirm service responds on {hosting_fqdn} before using Playwright MCP\n"
+                    f"   Use: curl -I {hosting_fqdn}\n\n"
+                    f"STEP 4 - PLAYWRIGHT MCP TESTING:\n"
+                    f"   Navigate to: {hosting_fqdn}\n"
+                    f"   DO NOT use any other URL or port for testing\n\n"
+                    f"🚫 PROHIBITED ACTIONS:\n"
+                    f"- DO NOT use `npm run dev`, `python manage.py runserver`, or similar on random ports\n"
+                    f"- DO NOT create new deployments on different ports\n"
+                    f"- DO NOT skip the port verification step before Playwright testing\n"
+                    f"---\n"
+                )
+                enhanced_prompt = prompt + deployment_context
+
+            prompt = enhanced_prompt
 
             # Determine permission mode
             # Priority: permission_mode parameter > bypass_mode (for backward compatibility) > default to "interactive"
@@ -151,6 +201,8 @@ class ChatService:
         webhook_data: Dict[str, Any]
     ):
         """Process incoming webhook from remote service"""        
+        auto_start_deploy = False
+
         try:
             # Get the original chat to find the correct session_id and sub_project_id
             chat = await db.get(Chat, chat_id)
@@ -187,6 +239,8 @@ class ChatService:
                     step_name = "Completed response"
                 elif webhook_type == "thinking":
                     step_name = webhook_data.get("content", "Thinking...")
+                elif webhook_type == "stage_transition":
+                    step_name = f"Stage: {webhook_data.get('from_stage', 'unknown')} → {webhook_data.get('to_stage', 'unknown')}"
                 else:
                     step_name = status.replace("_", " ").title()
             
@@ -216,7 +270,54 @@ class ChatService:
             )
             
             db.add(hook)
-            
+
+            # Check if this is a completed planning hook and update planning metadata
+            if status == "completed" and webhook_type == "status":
+                # Find if this chat is associated with a planning stage
+                from app.models.issue_resolution import IssueResolution
+                stmt = select(IssueResolution).where(
+                    IssueResolution.planning_chat_id == chat_id
+                )
+                result_resolution = await db.execute(stmt)
+                resolution = result_resolution.scalar_one_or_none()
+
+                if resolution:
+                    if resolution.planning_chat_id == chat_id:
+                        resolution.planning_complete = True
+                        resolution.planning_completed_at = datetime.utcnow()  # Use naive datetime for PostgreSQL
+                        # Persist the final planning session_id if provided by the webhook
+                        final_session_id = webhook_data.get("session_id")
+                        if final_session_id:
+                            resolution.planning_session_id = final_session_id
+                        db.add(resolution)
+                        logger.info(
+                            f"✅ Marked planning complete | "
+                            f"resolution_id={str(resolution.id)[:8]}... | "
+                            f"chat_id={str(chat_id)[:8]}..."
+                        )
+                else:
+                    stmt = select(IssueResolution).where(
+                        IssueResolution.implementation_chat_id == chat_id
+                    )
+                    result_resolution = await db.execute(stmt)
+                    resolution = result_resolution.scalar_one_or_none()
+
+                    if resolution and resolution.implementation_chat_id == chat_id:
+                        resolution.implementation_complete = True
+                        resolution.implementation_completed_at = datetime.utcnow()
+                        # Persist the final implementation session as well when available
+                        final_impl_session_id = webhook_data.get("session_id")
+                        if final_impl_session_id:
+                            resolution.implementation_session_id = final_impl_session_id
+                        if resolution.current_stage == "implementation" and not resolution.deploy_started_at:
+                            auto_start_deploy = True
+                        db.add(resolution)
+                        logger.info(
+                            f"✅ Marked implementation complete | "
+                            f"resolution_id={str(resolution.id)[:8]}... | "
+                            f"chat_id={str(chat_id)[:8]}..."
+                        )
+
             # If this is a completed or failed message with result/error, update or create assistant chat
             # Check both old format and new ResultMessage format
             is_completion = (
@@ -344,6 +445,18 @@ class ChatService:
             
             await db.commit()
             await db.refresh(hook)
+
+            if auto_start_deploy and resolution:
+                try:
+                    from app.services.issue_resolution_orchestrator import IssueResolutionOrchestrator
+                    orchestrator = IssueResolutionOrchestrator(db)
+                    await orchestrator.trigger_deploy_stage(resolution.id)
+                except Exception as auto_error:
+                    logger.error(
+                        f"🚨 Failed to auto-start deploy stage | "
+                        f"resolution_id={str(resolution.id)[:8]}... | "
+                        f"error={auto_error}"
+                    )
             
             # Special handling for completed status webhook to ensure webhook_session_id is stored
             # Publish to Redis for real-time updates

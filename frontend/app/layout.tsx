@@ -3,14 +3,15 @@ import { Inter } from 'next/font/google'
 import './globals.css'
 import { Providers } from '@/components/providers'
 import { Navigation } from '@/components/navigation'
+import { Footer } from '@/components/footer'
 import { ApprovalCenter } from '@/components/approval-center'
-import { ClerkProvider } from '@clerk/nextjs'
+import { Toaster } from 'sonner'
 
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'Project Hub - Elegant Project Management',
-  description: 'A sophisticated project management platform with real-time collaboration',
+  title: 'Tediux - AI-Powered Development Platform',
+  description: 'Build, deploy, and collaborate with AI-powered development tools',
 }
 
 export default function RootLayout({
@@ -20,16 +21,17 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark scroll-smooth">
-      <body className={`${inter.className} min-h-screen`}>
-        <ClerkProvider>
-          <Providers>
-            <Navigation />
-            <main className="pt-20 pb-10">
-              {children}
-            </main>
-            <ApprovalCenter />
-          </Providers>
-        </ClerkProvider>
+      <head></head>
+      <body className={`${inter.className} min-h-screen flex flex-col`}>
+        <Providers>
+          <Navigation />
+          <main className="pt-20 pb-10 flex-1">
+            {children}
+          </main>
+          <Footer />
+          <ApprovalCenter />
+          <Toaster position="top-right" richColors />
+        </Providers>
       </body>
     </html>
   )

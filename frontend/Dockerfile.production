@@ -1,0 +1,81 @@
+# syntax=docker/dockerfile:1.4
+
+# Stage 1: Dependencies
+FROM node:20-alpine AS deps
+
+# Install libc6-compat for compatibility
+RUN apk add --no-cache libc6-compat
+
+WORKDIR /app
+
+# Copy package files
+COPY package.json package-lock.json* ./
+
+# Install ALL dependencies (including dev dependencies needed for build)
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --ignore-scripts
+
+# Stage 2: Builder
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Copy dependencies from deps stage
+COPY --from=deps /app/node_modules ./node_modules
+
+# Copy all source files
+COPY . .
+
+# Set build-time environment variables
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV NODE_ENV=production
+
+# Backend API URL (passed as build arg - REQUIRED for production)
+ARG NEXT_PUBLIC_BACKEND_HOST
+ENV NEXT_PUBLIC_BACKEND_HOST=${NEXT_PUBLIC_BACKEND_HOST}
+
+# Cashfree environment (passed as build arg or defaults to production)
+ARG NEXT_PUBLIC_CASHFREE_ENV=production
+ENV NEXT_PUBLIC_CASHFREE_ENV=${NEXT_PUBLIC_CASHFREE_ENV}
+
+# Build the application (Next.js will use standalone output)
+RUN npm run build
+
+# Stage 3: Production runner
+FROM node:20-alpine AS runner
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# Create non-root user
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nextjs
+
+# Create empty public directory (Next.js optional static files directory)
+# If you have static files in public/, they should be added to the repo
+RUN mkdir -p ./public && chown -R nextjs:nodejs ./public
+
+# Set correct permissions for prerender cache
+RUN mkdir -p .next && chown nextjs:nodejs .next
+
+# Copy standalone output
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+# Switch to non-root user
+USER nextjs
+
+# Expose port
+EXPOSE 3000
+
+ENV PORT=3000
+ENV HOSTNAME="0.0.0.0"
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD node -e "require('http').get('http://localhost:3000/api/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})" || exit 1
+
+# Start the application
+CMD ["node", "server.js"]

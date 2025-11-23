@@ -27,7 +27,29 @@ class TaskRead(TaskBase):
     deployment_completed: bool
     deployment_started_at: Optional[datetime]
     deployment_completed_at: Optional[datetime]
+    deployment_port: Optional[int] = None
+    deployment_host: Optional[str] = None
+    env_file_path: Optional[str] = None
+    env_variables: Optional[Dict[str, str]] = None
     task_type: Optional[str] = None
+    # Hosting fields
+    hosting_subdomain: Optional[str] = None
+    hosting_fqdn: Optional[str] = None
+    hosting_status: Optional[str] = None
+    hosting_provisioned_at: Optional[datetime] = None
+    hosting_removed_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class VSCodeLinkResponse(BaseModel):
+    """Response model for VS Code tunnel link generation"""
+    tunnel_link: str
+    tunnel_name: str
+    authentication_required: bool = False
+    authentication_url: Optional[str] = None
+    device_code: Optional[str] = None
 
     class Config:
         from_attributes = True

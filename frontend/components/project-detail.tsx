@@ -1,43 +1,45 @@
 'use client'
 
-import { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
-import { ChevronRightIcon, GitHubLogoIcon, RocketIcon, CodeIcon, ActivityLogIcon, FileTextIcon, TrashIcon } from '@radix-ui/react-icons'
+import { GitHubLogoIcon, RocketIcon, CodeIcon, ActivityLogIcon, FileTextIcon, LockClosedIcon } from '@radix-ui/react-icons'
 import { motion } from 'framer-motion'
 import { api } from '@/lib/api'
 import { parseGitUrl, getGitHubUrl } from '@/lib/git-url-parser'
 import { TaskList } from './task-list'
 import { GitHubIssuesList } from './github-issues-list'
-import { Button } from './ui/button'
 import { Skeleton } from './ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
-import { ConfirmationModal } from './ui/confirmation-modal'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip'
 
 interface ProjectDetailProps {
   projectId: string
 }
 
 export function ProjectDetail({ projectId }: ProjectDetailProps) {
-  const router = useRouter()
-  const queryClient = useQueryClient()
-  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [isAdmin, setIsAdmin] = useState(false)
+
+  useEffect(() => {
+    const checkAdminStatus = async () => {
+      try {
+        const profile = await api.getMyProfile()
+        setIsAdmin(profile.is_admin || false)
+      } catch (error) {
+        console.error('Failed to check admin status:', error)
+        setIsAdmin(false)
+      }
+    }
+
+    const storedUser = localStorage.getItem('github_user')
+    if (storedUser) {
+      checkAdminStatus()
+    }
+  }, [])
 
   const { data: project, isLoading } = useQuery({
     queryKey: ['project', projectId],
     queryFn: () => api.getProject(projectId),
-  })
-
-  const deleteMutation = useMutation({
-    mutationFn: () => api.deleteProject(projectId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['projects'] })
-      router.push('/')
-    },
-    onError: (error) => {
-      console.error('Failed to delete project:', error)
-    },
   })
 
   if (isLoading) {
@@ -196,14 +198,6 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
               <GitHubLogoIcon className="h-4 w-4 text-muted-foreground group-hover:text-cyan-500" />
               <span className="text-sm font-mono group-hover:text-cyan-500">View on GitHub</span>
             </a>
-            <Button
-              variant="outline"
-              onClick={() => setShowDeleteModal(true)}
-              className="inline-flex items-center space-x-2 border-red-500/50 hover:border-red-500 hover:bg-red-500/10 text-red-400 hover:text-red-300"
-            >
-              <TrashIcon className="h-4 w-4" />
-              <span className="text-sm font-mono">Delete Project</span>
-            </Button>
           </motion.div>
         </div>
       </div>
@@ -218,13 +212,26 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
             <CodeIcon className="h-4 w-4 mr-2" />
             Tasks
           </TabsTrigger>
-          <TabsTrigger
-            value="issues"
-            className="font-mono data-[state=active]:bg-cyan-500/20 data-[state=active]:text-cyan-400"
-          >
-            <FileTextIcon className="h-4 w-4 mr-2" />
-            Issues
-          </TabsTrigger>
+          {isAdmin ? (
+            <TabsTrigger
+              value="issues"
+              className="font-mono data-[state=active]:bg-cyan-500/20 data-[state=active]:text-cyan-400"
+            >
+              <FileTextIcon className="h-4 w-4 mr-2" />
+              Issues
+            </TabsTrigger>
+          ) : (
+            <div
+              className="relative group inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium transition-all cursor-not-allowed opacity-60 hover:opacity-80"
+              title="Coming Soon"
+            >
+              <LockClosedIcon className="h-3 w-3 mr-2 text-muted-foreground" />
+              <span className="font-mono text-muted-foreground">Issues</span>
+              <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 px-2 py-1 bg-card border border-purple-500/50 rounded text-xs font-mono text-purple-400 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
+                Coming Soon
+              </span>
+            </div>
+          )}
         </TabsList>
 
         <TabsContent value="tasks" className="space-y-6">
@@ -239,50 +246,24 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
           <TaskList projectId={projectId} />
         </TabsContent>
 
-        <TabsContent value="issues" className="space-y-6">
-          {project.repo_url?.includes('github.com') ? (
-            <GitHubIssuesList projectId={projectId} />
-          ) : (
-            <div className="terminal-bg rounded-lg border border-border p-8 text-center">
-              <GitHubLogoIcon className="h-12 w-12 text-muted-foreground mx-auto mb-4 opacity-50" />
-              <p className="text-muted-foreground font-mono text-sm">
-                This project is not linked to a GitHub repository.
-              </p>
-              <p className="text-muted-foreground font-mono text-xs mt-2">
-                Initialize a project from a GitHub repository to see issues.
-              </p>
-            </div>
-          )}
-        </TabsContent>
+        {isAdmin && (
+          <TabsContent value="issues" className="space-y-6">
+            {project.repo_url?.includes('github.com') ? (
+              <GitHubIssuesList projectId={projectId} />
+            ) : (
+              <div className="terminal-bg rounded-lg border border-border p-8 text-center">
+                <GitHubLogoIcon className="h-12 w-12 text-muted-foreground mx-auto mb-4 opacity-50" />
+                <p className="text-muted-foreground font-mono text-sm">
+                  This project is not linked to a GitHub repository.
+                </p>
+                <p className="text-muted-foreground font-mono text-xs mt-2">
+                  Initialize a project from a GitHub repository to see issues.
+                </p>
+              </div>
+            )}
+          </TabsContent>
+        )}
       </Tabs>
-
-      {/* Delete Confirmation Modal */}
-      <ConfirmationModal
-        isOpen={showDeleteModal}
-        onClose={() => setShowDeleteModal(false)}
-        onConfirm={async () => {
-          await deleteMutation.mutateAsync()
-          setShowDeleteModal(false)
-        }}
-        title="Delete Project"
-        description={`Are you sure you want to delete "${project.name}"? This will permanently delete the project and all associated tasks. This action cannot be undone.`}
-        confirmText="Delete Project"
-        cancelText="Cancel"
-        variant="danger"
-        loading={deleteMutation.isPending}
-      >
-        <div className="p-3 bg-red-500/10 rounded-lg border border-red-500/30 mt-2">
-          <div className="text-xs font-mono text-red-300">
-            <div className="font-semibold mb-1">⚠️ Warning:</div>
-            <ul className="list-disc list-inside space-y-1 text-red-300/80">
-              <li>All tasks will be deleted</li>
-              <li>All chat sessions will be lost</li>
-              <li>All test cases will be removed</li>
-              <li>This action is irreversible</li>
-            </ul>
-          </div>
-        </div>
-      </ConfirmationModal>
     </motion.div>
   )
 }

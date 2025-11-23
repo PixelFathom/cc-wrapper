@@ -1,15 +1,11 @@
 from .project import ProjectCreate, ProjectRead, ProjectUpdate
-from .task import TaskCreate, TaskRead, TaskUpdate
-from .sub_project import SubProjectCreate, SubProjectRead
+from .task import TaskCreate, TaskRead, TaskUpdate, VSCodeLinkResponse
 from .chat import ChatCreate, ChatRead, QueryRequest, QueryResponse
 from .approval import ApprovalRead, ApprovalUpdate, ApprovalResult
-from .file import FileUpload
 
 __all__ = [
     "ProjectCreate", "ProjectRead", "ProjectUpdate",
-    "TaskCreate", "TaskRead", "TaskUpdate",
-    "SubProjectCreate", "SubProjectRead",
+    "TaskCreate", "TaskRead", "TaskUpdate", "VSCodeLinkResponse",
     "ChatCreate", "ChatRead", "QueryRequest", "QueryResponse",
-    "ApprovalRead", "ApprovalUpdate", "ApprovalResult",
-    "FileUpload"
+    "ApprovalRead", "ApprovalUpdate", "ApprovalResult"
 ]

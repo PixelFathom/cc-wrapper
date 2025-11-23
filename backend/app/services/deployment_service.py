@@ -6,8 +6,11 @@ from sqlalchemy.orm import selectinload
 from uuid import UUID
 from app.models import Task, DeploymentHook, Project
 from app.core.settings import get_settings
+from app.core.redis import get_redis
+from app.core.rate_limiter import assert_within_rate_limit, RateLimitExceeded
 from datetime import datetime
 import logging
+import random
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +21,22 @@ class DeploymentService:
         self.org_name = settings.org_name  # Constant org name
         self.init_project_url = settings.init_project_url  # Remote service URL
         self.webhook_base_url = settings.webhook_base_url
+    
+    async def _generate_unique_port(self, db: AsyncSession, task_id: UUID) -> int:
+        """Generate a unique port number (9001-65535) for a task"""
+        max_attempts = 100
+        for _ in range(max_attempts):
+            port = random.randint(9001, 65535)
+            # Check if port is already assigned to another task
+            stmt = select(Task).where(
+                Task.deployment_port == port,
+                Task.id != task_id
+            )
+            result = await db.execute(stmt)
+            existing_task = result.scalar_one_or_none()
+            if not existing_task:
+                return port
+        raise ValueError("Failed to generate unique port number after multiple attempts")
         
     async def initialize_project(self, db: AsyncSession, task_id: UUID, github_token: Optional[str] = None) -> Optional[str]:
         """Initialize a project deployment for a task"""
@@ -28,6 +47,20 @@ class DeploymentService:
 
         await db.refresh(task, ["project"])
         await db.refresh(task.project, ["user"])
+
+        if not task.project or not task.project.user_id:
+            raise ValueError("Task project or project user not found")
+
+        # Generate and assign unique port number if not already assigned
+        if not task.deployment_port:
+            task.deployment_port = await self._generate_unique_port(db, task_id)
+            logger.info(f"Assigned port {task.deployment_port} to task {task_id}")
+
+        redis_client = await get_redis()
+        await assert_within_rate_limit(
+            redis_client,
+            user_id=task.project.user_id,
+        )
 
         # Get GitHub token if not provided
         if not github_token and task.project.user_id:
@@ -41,19 +74,22 @@ class DeploymentService:
             # Convert https://github.com/owner/repo.git to https://TOKEN@github.com/owner/repo.git
             if github_repo_url.startswith("https://github.com/"):
                 github_repo_url = github_repo_url.replace("https://github.com/", f"https://{github_token}@github.com/")
+            if github_repo_url.startswith("git@github.com:"):
+                github_repo_url = github_repo_url.replace("git@github.com:", f"https://{github_token}@github.com/")
 
         # Build CWD path as project_name/task.id
         cwd = f"{task.project.name}/{task.id}"
-
-        # Webhook URL for this task
-        webhook_url = f"{self.webhook_base_url}/api/webhooks/deployment/{task.id}"
+        # Webhook URL for initialization phase
+        webhook_url = f"{self.webhook_base_url}/api/webhooks/deployment/{task.id}/initialization"
 
         # Prepare init project request
         payload = {
             "organization_name": self.org_name,
             "project_name": cwd,
             "github_repo_url": github_repo_url,
-            "webhook_url": webhook_url
+            "webhook_url": webhook_url,
+            "generate_claude_md": False,
+            "branch": f"task/{task.name}",
         }
         
         # Add MCP servers if configured
@@ -93,6 +129,7 @@ class DeploymentService:
                         task_id=task.id,
                         session_id=request_id,
                         hook_type="init_project",
+                        phase="initialization",
                         status="initiated",
                         data=payload,
                         message="Project initialization started"
@@ -103,13 +140,15 @@ class DeploymentService:
             await db.commit()
             return request_id
             
+        except RateLimitExceeded:
+            raise
         except httpx.HTTPError as e:
             logger.error(f"Failed to initialize project: {e}")
             task.deployment_status = "failed"
             await db.commit()
             raise
             
-    async def process_webhook(self, db: AsyncSession, task_id: UUID, webhook_data: Dict[str, Any]) -> None:
+    async def process_webhook(self, db: AsyncSession, task_id: UUID, webhook_data: Dict[str, Any], phase: str = "deployment") -> None:
         """Process incoming webhook for deployment status"""
         task = await db.get(Task, task_id)
         if not task:
@@ -161,20 +200,24 @@ class DeploymentService:
             "total_cost_usd": webhook_data.get("total_cost_usd")
         }
         
-        # Create hook record
+        status_value = webhook_data.get("status") or "received"
+        status_upper = status_value.upper()
+
+        # Create hook record with phase
         hook = DeploymentHook(
             task_id=task.id,
             session_id=webhook_data.get("session_id") or webhook_data.get("task_id") or webhook_data.get("request_id") or str(task.id),
             hook_type=hook_type,
-            status=webhook_data.get("status", "received"),
+            phase=phase,  # Set phase: initialization or deployment
+            status=status_value,
             data=structured_data,
             message=message,
-            is_complete=webhook_data.get("complete", False) or webhook_data.get("status") == "COMPLETED"
+            is_complete=webhook_data.get("complete", False) or status_upper == "COMPLETED"
         )
         db.add(hook)
-        
+
         # Update task status based on webhook
-        status = webhook_data.get("status", "").upper()
+        status = status_upper
         task_type = webhook_data.get("task", "")  # e.g., "INIT_PROJECT"
 
         if status == "COMPLETED":
@@ -182,8 +225,8 @@ class DeploymentService:
             task.deployment_completed_at = datetime.utcnow()
             task.deployment_status = "completed"
 
-            # For issue resolution tasks, trigger query after init completes
-            if task_type == "INIT_PROJECT" and task.task_type == "issue_resolution":
+            # For issue resolution tasks, handle based on phase
+            if task.task_type == "issue_resolution":
                 # Import here to avoid circular dependency
                 from app.models.issue_resolution import IssueResolution
                 from app.models.project import Project
@@ -192,22 +235,35 @@ class DeploymentService:
                 stmt = select(IssueResolution).where(IssueResolution.task_id == task.id)
                 result = await db.execute(stmt)
                 resolution = result.scalar_one_or_none()
-                
+
                 if resolution:
-                    # Get project
-                    project = await db.get(Project, task.project_id)
+                    # If initialization completed, trigger planning stage
+                    if task_type == "INIT_PROJECT" and phase == "initialization":
+                        # Get project
+                        project = await db.get(Project, task.project_id)
 
-                    if project:
-                        # Import and trigger query
-                        from app.api.issue_resolution import trigger_issue_resolution_query
+                        if project:
+                            # Import and trigger query
+                            from app.api.issue_resolution import trigger_issue_resolution_query
 
-                        # Trigger in background (fire and forget)
-                        # Pass IDs instead of objects to avoid session conflicts
-                        import asyncio
-                        asyncio.create_task(trigger_issue_resolution_query(task.id, resolution.id, project.id))
+                            # Trigger in background (fire and forget)
+                            # Pass IDs instead of objects to avoid session conflicts
+                            import asyncio
+                            asyncio.create_task(trigger_issue_resolution_query(task.id, resolution.id, project.id))
 
-        elif status == "ERROR":
+                    # If deployment phase completed and current stage is "deploy", mark deploy stage complete
+                    elif phase == "deployment" and resolution.current_stage == "deploy":
+                        from app.services.issue_resolution_orchestrator import IssueResolutionOrchestrator
+
+                        # Mark deploy stage complete
+                        orchestrator = IssueResolutionOrchestrator(db)
+                        await orchestrator.mark_deploy_complete(resolution.id)
+
+        elif status == "failed":
             task.deployment_status = "failed"
+            # Reset deployment_completed flags to allow retry
+            task.deployment_completed = False
+            task.deployment_completed_at = None
         elif status == "DEPLOYING":
             task.deployment_status = "deploying"
         elif status == "PROCESSING":

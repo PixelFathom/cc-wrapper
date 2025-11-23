@@ -135,8 +135,7 @@ class TestGenerationService:
             return {
                 'task_id': task.id,
                 'task_name': task.name,
-                'sub_project_id': sub_project.id,
-                'deployment_guide': task.deployment_guide
+                'sub_project_id': sub_project.id
             }
             
         except Exception as e:
@@ -185,9 +184,6 @@ Return your response as a JSON array of test cases, where each test case has:
 
 Conversation Summary:
 {conversation_summary}
-
-Deployment Guide (if available):
-{task_info.get('deployment_guide', 'Not provided')}
 
 Focus Areas: {focus_areas if focus_areas else 'General testing coverage'}
 

@@ -4,7 +4,9 @@ from typing import List, Dict, Any, Optional
 from uuid import UUID
 import logging
 
-from ..deps import get_session
+from ..deps import get_session, require_feature
+from ..models.user import User
+from ..models.subscription import Feature
 from ..models.contest_harvesting import (
     ContestHarvestingStartRequest,
     ContestHarvestingStartResponse,
@@ -25,9 +27,10 @@ router = APIRouter()
 async def start_contest_harvesting(
     task_id: UUID,
     request: Optional[ContestHarvestingStartRequest] = None,
+    current_user: User = Depends(require_feature(Feature.CONTEXT_HARVESTING)),
     session: AsyncSession = Depends(get_session)
 ):
-    """Start a new contest harvesting session for a task"""
+    """Start a new contest harvesting session for a task (requires CONTEXT_HARVESTING feature)"""
     try:
         context_prompt = request.context_prompt if request else None
         
@@ -51,9 +54,10 @@ async def start_contest_harvesting(
 @router.get("/tasks/{task_id}/contest-harvesting/sessions", response_model=HarvestingSessionListResponse)
 async def get_contest_harvesting_sessions(
     task_id: UUID,
+    current_user: User = Depends(require_feature(Feature.CONTEXT_HARVESTING)),
     session: AsyncSession = Depends(get_session)
 ):
-    """Get all contest harvesting sessions for a task"""
+    """Get all contest harvesting sessions for a task (requires CONTEXT_HARVESTING feature)"""
     try:
         sessions = await contest_harvesting_service.get_task_sessions(
             db=session,
