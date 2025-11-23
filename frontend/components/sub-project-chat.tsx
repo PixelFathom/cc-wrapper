@@ -325,10 +325,32 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
   })
 
   // Poll for messages in the current session
-  // Check if we're waiting for a response
-  const isWaitingForResponse = messages.some(msg => 
-    msg.role === 'assistant' && (msg.isProcessing || !msg.content?.text || msg.content?.text === '')
-  ) || sendMutation.isPending
+  // Check if we're waiting for a response - more robust detection
+  const isWaitingForResponse = useMemo(() => {
+    // If mutation is pending, we're definitely waiting
+    if (sendMutation.isPending) return true
+
+    // Check if any assistant message is still processing or lacks actual content
+    return messages.some(msg => {
+      if (msg.role !== 'assistant') return false
+
+      // Check explicit processing state
+      if (msg.isProcessing) return true
+      if (msg.content?.metadata?.status === 'processing') return true
+
+      // Check if message lacks actual content (still waiting for response)
+      const textContent = msg.content?.text || ''
+      const hasActualContent = textContent &&
+                               textContent !== '' &&
+                               textContent !== 'Processing your request...' &&
+                               textContent !== 'Waiting for response...'
+
+      // If no actual content, we're still waiting
+      if (!hasActualContent) return true
+
+      return false
+    })
+  }, [messages, sendMutation.isPending])
   
   // Query for messages when sessionId is available
   const { data: sessionMessages, error: sessionError } = useQuery({

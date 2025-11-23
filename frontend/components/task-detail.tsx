@@ -27,7 +27,8 @@ import { MarkdownRenderer } from './markdown-renderer'
 import { IssueResolutionView } from './issue-resolution-view'
 import { MessagesTab } from './messages-tab'
 import { VSCodeLinkModal } from './vscode-link-modal'
-import { DeploymentTaskTab } from './deployment-task-tab'
+import { CustomDomainTab } from './custom-domain-tab'
+import { DeployTab } from './deploy-tab'
 import { CommitAndPushModal } from './commit-and-push-modal'
 
 interface TaskDetailProps {
@@ -40,11 +41,11 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
   const tabParam = searchParams.get('tab')
 
   // Will be set to 'issue-resolution' for issue tasks after loading
-  const [activeTab, setActiveTab] = useState<'deployment' | 'deployment-task' | 'chat' | 'knowledge-base' | 'test-cases' | 'issue-resolution' | 'messages'>('deployment')
+  const [activeTab, setActiveTab] = useState<'deployment' | 'custom-domain' | 'deploy' | 'chat' | 'knowledge-base' | 'test-cases' | 'issue-resolution' | 'messages'>('deployment')
 
   // Set tab from URL parameter if provided
   useEffect(() => {
-    if (tabParam && ['deployment', 'deployment-task', 'chat', 'knowledge-base', 'test-cases', 'issue-resolution', 'messages'].includes(tabParam)) {
+    if (tabParam && ['deployment', 'custom-domain', 'deploy', 'chat', 'knowledge-base', 'test-cases', 'issue-resolution', 'messages'].includes(tabParam)) {
       setActiveTab(tabParam as any)
     }
   }, [tabParam])
@@ -187,7 +188,7 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
 
   // For issue resolution tasks, render the dedicated issue resolution UI
   // UNLESS a specific tab is requested (to allow access to normal task features)
-  const allowedNormalTabs = ['chat', 'deployment-task', 'knowledge-base', 'test-cases', 'deployment']
+  const allowedNormalTabs = ['chat', 'custom-domain', 'deploy', 'knowledge-base', 'test-cases', 'deployment']
   const requestsNormalTab = tabParam && allowedNormalTabs.includes(tabParam)
 
   if (task.task_type === 'issue_resolution' && !requestsNormalTab) {
@@ -407,12 +408,14 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
             ...(task.task_type !== 'issue_resolution' || requestsNormalTab ? [
               { id: 'deployment', label: 'Summary', icon: <ActivityLogIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
             ] : []),
-            // Show Deployment Task tab for all tasks
-            { id: 'deployment-task', label: 'Deployment Task', icon: <RocketIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
             // Show Chat tab for non-issue tasks OR when explicitly viewing normal tabs
             ...(task.task_type !== 'issue_resolution' || requestsNormalTab ? [
               { id: 'chat', label: 'Chat', icon: <ChatBubbleIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
             ] : []),
+            // Custom Domain tab for all tasks
+            { id: 'custom-domain', label: 'Custom Domain', icon: <CubeIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
+            // Deploy tab for all tasks
+            { id: 'deploy', label: 'Deploy', icon: <RocketIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
             { id: 'knowledge-base', label: 'Knowledge Base', icon: <ReaderIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
             { id: 'test-cases', label: 'Test Cases', icon: <PlayIcon className="h-3.5 sm:h-4 w-3.5 sm:w-4" /> },
           ].map((tab) => (
@@ -704,8 +707,12 @@ export function TaskDetail({ projectId, taskId }: TaskDetailProps) {
           </motion.div>
         )}
 
-        {activeTab === 'deployment-task' && task && (
-          <DeploymentTaskTab taskId={taskId} task={task} />
+        {activeTab === 'custom-domain' && task && (
+          <CustomDomainTab taskId={taskId} task={task} />
+        )}
+
+        {activeTab === 'deploy' && task && (
+          <DeployTab taskId={taskId} task={task} />
         )}
 
         {activeTab === 'issue-resolution' && (
