@@ -1,5 +1,6 @@
 import httpx
 import logging
+import asyncio
 from typing import Dict, Any, Optional, List
 from uuid import UUID
 from datetime import datetime, timezone
@@ -98,10 +99,30 @@ class ChatService:
                     f"      → Restart it to pick up any code changes: docker restart <container_name>\n"
                     f"      → Wait for it to be ready, then proceed to testing\n"
                     f"   IF service is NOT running on port {task.deployment_port}:\n"
-                    f"      → Create docker-compose.yaml with port mapping: '{task.deployment_port}:80' or '{task.deployment_port}:<app_port>'\n"
-                    f"      → Use dev mode with volume mounts for hot reload\n"
-                    f"      → Run: docker compose up -d --build\n"
-                    f"      → Wait for service to be healthy before testing\n\n"
+                    f"      → For NEW PROJECT INITIALIZATION:\n"
+                    f"        • You MUST use the `boilerplate-mcp` server to initialize the project\n"
+                    f"        • DO NOT create projects manually\n"
+                    f"        • When calling boilerplate generation, CRITICALLY ensure you pass:\n"
+                    f"          - If BOTH frontend AND backend are needed:\n"
+                    f"            → frontend_port={task.deployment_port} (frontend hosts on deployment port)\n"
+                    f"            → backend_port=<internal_port> (backend uses internal port, NOT exposed externally)\n"
+                    f"            → Backend should communicate via Docker Compose internal networking only\n"
+                    f"          - If ONLY frontend is needed:\n"
+                    f"            → frontend_port={task.deployment_port}\n"
+                    f"          - If ONLY backend is needed:\n"
+                    f"            → backend_port={task.deployment_port}\n"
+                    f"        • IMPORTANT: When both frontend and backend exist, frontend MUST be on port {task.deployment_port}\n"
+                    f"        • Backend should be handled mindfully - prefer internal Docker Compose communication only\n"
+                    f"      → For EXISTING PROJECTS:\n"
+                    f"        • If both frontend and backend exist:\n"
+                    f"          → Frontend: map '{task.deployment_port}:<frontend_port>' (expose frontend on deployment port)\n"
+                    f"          → Backend: use internal Docker network only, DO NOT expose backend port externally\n"
+                    f"          → Frontend should proxy/communicate with backend via Docker service names\n"
+                    f"        • If single service:\n"
+                    f"          → Create docker-compose.yaml with port mapping: '{task.deployment_port}:80' or '{task.deployment_port}:<app_port>'\n"
+                    f"        • Use dev mode with volume mounts for hot reload\n"
+                    f"        • Run: docker compose up -d --build\n"
+                    f"        • Wait for service to be healthy before testing\n\n"
                     f"STEP 3 - VERIFY BEFORE TESTING:\n"
                     f"   Always confirm service responds on {hosting_fqdn} before using Playwright MCP\n"
                     f"   Use: curl -I {hosting_fqdn}\n\n"
@@ -112,6 +133,10 @@ class ChatService:
                     f"- DO NOT use `npm run dev`, `python manage.py runserver`, or similar on random ports\n"
                     f"- DO NOT create new deployments on different ports\n"
                     f"- DO NOT skip the port verification step before Playwright testing\n"
+                    f"- DO NOT manually create new projects - ALWAYS use boilerplate-mcp server\n"
+                    f"- DO NOT forget to pass deployment_port={task.deployment_port} to boilerplate generation\n"
+                    f"- DO NOT expose backend port externally when both frontend and backend exist\n"
+                    f"- DO NOT put backend on deployment port when frontend is present - frontend must use deployment port\n"
                     f"---\n"
                 )
                 enhanced_prompt = prompt + deployment_context
@@ -148,23 +173,89 @@ class ChatService:
 
             print(f"payload: {payload}")
             
-            # Make request to remote service
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    self.query_url,
-                    json=payload,
-                    headers={"Content-Type": "application/json"}
-                )
-                
-                if response.status_code != 200:
-                    raise Exception(f"Query request failed: {response.status_code}")
-                
-                result = response.json()
-                
-                # Store the initial query info
-                await self._store_initial_hook(db, chat_id, payload, result)
-                
-                return result
+            # Make request to remote service with retry logic for 503 errors
+            max_retries = 5
+            base_delay = 1.0  # Start with 1 second
+            
+            for attempt in range(max_retries):
+                try:
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        response = await client.post(
+                            self.query_url,
+                            json=payload,
+                            headers={"Content-Type": "application/json"}
+                        )
+                        
+                        # If 503, retry with exponential backoff
+                        if response.status_code == 503:
+                            if attempt < max_retries - 1:
+                                # Calculate exponential delay: 1s, 2s, 4s, 8s, 16s
+                                delay = base_delay * (2 ** attempt)
+                                logger.warning(
+                                    f"⚠️ External API returned 503 (Service Unavailable) | "
+                                    f"attempt={attempt + 1}/{max_retries} | "
+                                    f"retrying in {delay}s | "
+                                    f"chat_id={str(chat_id)[:8]}..."
+                                )
+                                await asyncio.sleep(delay)
+                                continue
+                            else:
+                                # Last attempt failed with 503
+                                logger.error(
+                                    f"❌ External API returned 503 after {max_retries} attempts | "
+                                    f"chat_id={str(chat_id)[:8]}..."
+                                )
+                                raise Exception(f"Query request failed after {max_retries} retries: 503 Service Unavailable")
+                        
+                        # For non-503 errors, fail immediately
+                        if response.status_code != 200:
+                            raise Exception(f"Query request failed: {response.status_code}")
+                        
+                        # Success - parse and return result
+                        result = response.json()
+                        
+                        # Log successful retry if it was a retry
+                        if attempt > 0:
+                            logger.info(
+                                f"✅ External API request succeeded after {attempt + 1} attempts | "
+                                f"chat_id={str(chat_id)[:8]}..."
+                            )
+                        
+                        # Store the initial query info
+                        await self._store_initial_hook(db, chat_id, payload, result)
+                        
+                        return result
+                        
+                except httpx.HTTPStatusError as e:
+                    # Handle httpx HTTPStatusError (includes 503)
+                    if e.response.status_code == 503:
+                        if attempt < max_retries - 1:
+                            delay = base_delay * (2 ** attempt)
+                            logger.warning(
+                                f"⚠️ External API returned 503 (Service Unavailable) | "
+                                f"attempt={attempt + 1}/{max_retries} | "
+                                f"retrying in {delay}s | "
+                                f"chat_id={str(chat_id)[:8]}..."
+                            )
+                            await asyncio.sleep(delay)
+                            continue
+                        else:
+                            logger.error(
+                                f"❌ External API returned 503 after {max_retries} attempts | "
+                                f"chat_id={str(chat_id)[:8]}..."
+                            )
+                            raise Exception(f"Query request failed after {max_retries} retries: 503 Service Unavailable")
+                    else:
+                        # Non-503 HTTP error, fail immediately
+                        raise Exception(f"Query request failed: {e.response.status_code}")
+                except httpx.RequestError as e:
+                    # Network/connection errors - don't retry these, fail immediately
+                    logger.error(
+                        f"❌ Network error during external API request | "
+                        f"chat_id={str(chat_id)[:8]}... | "
+                        f"error={str(e)[:100]}..."
+                    )
+                    raise Exception(f"Network error during query request: {str(e)}")
                 
         except Exception as e:
             raise

@@ -57,8 +57,6 @@ async def handle_query(
             }
         )
 
-    # Don't generate session_id here - wait for remote service response
-    temp_session_id = request.session_id or str(uuid4())  # Temporary ID for tracking
     # First try to parse existing cwd
     sub_project_id = await parse_cwd(request.cwd, session)
 
@@ -159,7 +157,7 @@ async def handle_query(
     # Create chat record - will update session_id later
     chat = Chat(
         sub_project_id=sub_project_id,
-        session_id=temp_session_id,  # Use temp ID for now
+        session_id=request.session_id or str(uuid4()),
         role="user",
         content={"text": request.prompt}
     )
@@ -186,7 +184,6 @@ async def handle_query(
                 metadata = last_assistant.content["metadata"]
                 # Priority: next_session_id (from completed conversation) > webhook_session_id
                 webhook_session_id_to_use = metadata.get("next_session_id")
-        print(f"webhook_session_id_to_use: {webhook_session_id_to_use}")
         # Use webhook session ID for remote service, UI session ID for database
         result = await chat_service.send_query(
             session,
@@ -204,7 +201,7 @@ async def handle_query(
         
         if not response_session_id:
             # If remote service didn't return session_id, use the UI session or generate new
-            response_session_id = ui_session_id or temp_session_id
+            response_session_id = ui_session_id or str(uuid4())
     
         final_ui_session_id = ui_session_id or response_session_id
         
