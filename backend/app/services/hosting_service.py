@@ -60,6 +60,10 @@ class HostingService:
         if not task:
             raise ValueError(f"Task not found: {task_id}")
 
+        # Use task's deployment_request_id as session_id to match other hooks
+        # This ensures hooks are grouped together with the same session_id
+        session_id = task.deployment_request_id or str(task_id)
+
         # Determine subdomain
         if not subdomain:
             # Generate unique subdomain with task name prefix
@@ -92,7 +96,7 @@ class HostingService:
                 from app.models import DeploymentHook
                 dns_hook = DeploymentHook(
                     task_id=task_id,
-                    session_id=str(task_id),
+                    session_id=session_id,
                     hook_type="dns_setup",
                     phase="deployment",
                     status="processing",
@@ -143,7 +147,7 @@ class HostingService:
                 from app.models import DeploymentHook
                 nginx_hook = DeploymentHook(
                     task_id=task_id,
-                    session_id=str(task_id),
+                    session_id=session_id,
                     hook_type="nginx_setup",
                     phase="deployment",
                     status="processing",
@@ -192,7 +196,7 @@ class HostingService:
                 from app.models import DeploymentHook
                 ssl_hook = DeploymentHook(
                     task_id=task_id,
-                    session_id=str(task_id),
+                    session_id=session_id,
                     hook_type="ssl_setup",
                     phase="deployment",
                     status="processing",
