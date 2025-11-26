@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     better_stack_enabled: bool = True
     log_level: str = "INFO"
 
+    # Environment Configuration
+    environment: str = "development"  # development or production
+
 
     @property
     def database_url(self) -> str:

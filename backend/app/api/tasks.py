@@ -83,6 +83,38 @@ async def create_task(
             detail=f"A task with the name '{task.name}' already exists in this project"
         )
 
+    # Deduct 1 credit on task creation
+    TASK_CREATION_COST = 1
+    try:
+        transaction = await coin_service.deduct_coins(
+            session,
+            current_user.id,
+            TASK_CREATION_COST,
+            f"Task creation: {task.name}",
+            reference_id=str(project.id),
+            reference_type="task_creation",
+            meta_data={
+                "task_name": task.name,
+                "project_id": str(project.id),
+            }
+        )
+    except InsufficientCoinsError as e:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "error": "insufficient_coins",
+                "message": str(e).replace("coins", "credits").replace("Coins", "Credits"),
+                "required": TASK_CREATION_COST,
+                "available": current_user.coins_balance,
+                "subscription_tier": current_user.subscription_tier
+            }
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
     db_task = Task(**task.dict())
     session.add(db_task)
     await session.commit()
