@@ -990,6 +990,7 @@ async def deploy_task(
         )
     
     # Construct deployment instruction
+    hosting_fqdn = task.hosting_fqdn or f"http://localhost:{task.deployment_port}"
     deployment_instruction = (
         f"Deploy the application following Docker best practices in DEVELOPMENT mode with hot reload:\n\n"
         f"1. SCOPE: Deploy ONLY the application within the current project directory. Do not modify or deploy unrelated services. Use the path in cwd only.\n\n"
@@ -1013,10 +1014,10 @@ async def deploy_task(
         f"   - Run migrations if necessary or seed data if necessary\n\n"
         f"5. SERVICE VALIDATION:\n"
         f"   - Wait for services to be healthy (use health checks if defined)\n"
-        f"   - Verify the application is accessible at localhost:{task.deployment_port}\n"
+        f"   - Verify the application is accessible at {hosting_fqdn}\n"
         f"   - Check logs for any startup errors: 'docker compose logs' or 'docker logs <container>'\n\n"
         f"6. TESTING:\n"
-        f"   - Test the deployed service via playwright MCP at port {task.deployment_port}\n"
+        f"   - Test the deployed service via playwright MCP at {hosting_fqdn}\n"
         f"   - Verify all critical endpoints are responding correctly\n"
         f"   - Confirm the application is fully functional\n\n"
         f"7. CLEANUP:\n"
