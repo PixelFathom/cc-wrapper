@@ -33,7 +33,8 @@ class HostingService:
         db: AsyncSession,
         task_id: UUID,
         subdomain: Optional[str] = None,
-        upstream_port: Optional[int] = None
+        upstream_port: Optional[int] = None,
+        create_deployment_hooks: bool = False
     ) -> Dict[str, Any]:
         """
         Provision complete hosting for a task.
@@ -49,6 +50,7 @@ class HostingService:
             task_id: Task UUID to provision hosting for
             subdomain: Optional custom subdomain (auto-generated if not provided)
             upstream_port: Port for nginx upstream (uses task.deployment_port if not provided)
+            create_deployment_hooks: If True, create deployment hooks for each step
 
         Returns:
             Dictionary with provisioning results
@@ -80,15 +82,39 @@ class HostingService:
             "steps": {}
         }
 
+        dns_hook = None
         try:
             # Step 1: Add DNS A record
             logger.info(f"Step 1: Adding DNS A record for {fqdn}")
+            
+            # Create deployment hook if requested
+            if create_deployment_hooks:
+                from app.models import DeploymentHook
+                dns_hook = DeploymentHook(
+                    task_id=task_id,
+                    session_id=str(task_id),
+                    hook_type="dns_setup",
+                    phase="deployment",
+                    status="processing",
+                    data={"step": "dns", "subdomain": subdomain, "fqdn": fqdn},
+                    message="Setting up DNS A record..."
+                )
+                db.add(dns_hook)
+                await db.commit()
+            
             dns_result = await self.dns_service.add_a_record(subdomain)
             results["steps"]["dns"] = {
                 "status": "success",
                 "message": f"A record added: {fqdn} -> {self.server_ip}"
             }
             logger.info(f"DNS A record created: {dns_result}")
+            
+            # Update deployment hook if created
+            if create_deployment_hooks and dns_hook:
+                dns_hook.status = "completed"
+                dns_hook.message = f"DNS A record added: {fqdn} -> {self.server_ip}"
+                dns_hook.is_complete = True
+                await db.commit()
 
         except Exception as e:
             logger.error(f"Failed to add DNS record: {e}")
@@ -98,17 +124,48 @@ class HostingService:
             }
             results["status"] = "failed"
             results["error"] = f"DNS setup failed: {e}"
+            
+            # Update deployment hook if created
+            if create_deployment_hooks and dns_hook:
+                dns_hook.status = "failed"
+                dns_hook.message = f"DNS setup failed: {str(e)}"
+                await db.commit()
+            
             return results
 
+        nginx_hook = None
         try:
             # Step 2: Configure Nginx
             logger.info(f"Step 2: Configuring Nginx for {fqdn}")
+            
+            # Create deployment hook if requested
+            if create_deployment_hooks:
+                from app.models import DeploymentHook
+                nginx_hook = DeploymentHook(
+                    task_id=task_id,
+                    session_id=str(task_id),
+                    hook_type="nginx_setup",
+                    phase="deployment",
+                    status="processing",
+                    data={"step": "nginx", "fqdn": fqdn, "upstream_port": port},
+                    message="Configuring Nginx reverse proxy..."
+                )
+                db.add(nginx_hook)
+                await db.commit()
+            
             nginx_result = await self._configure_nginx(fqdn, port)
             results["steps"]["nginx"] = {
                 "status": "success",
                 "message": f"Nginx configured for {fqdn} -> localhost:{port}"
             }
             logger.info(f"Nginx configured: {nginx_result}")
+            
+            # Update deployment hook if created
+            if create_deployment_hooks and nginx_hook:
+                nginx_hook.status = "completed"
+                nginx_hook.message = f"Nginx configured for {fqdn} -> localhost:{port}"
+                nginx_hook.is_complete = True
+                await db.commit()
 
         except Exception as e:
             logger.error(f"Failed to configure Nginx: {e}")
@@ -118,16 +175,46 @@ class HostingService:
             }
             # Continue to SSL setup even if nginx has issues - it might already be configured
             logger.warning("Continuing despite Nginx error...")
+            
+            # Update deployment hook if created
+            if create_deployment_hooks and nginx_hook:
+                nginx_hook.status = "failed"
+                nginx_hook.message = f"Nginx setup failed: {str(e)}"
+                await db.commit()
 
+        ssl_hook = None
         try:
             # Step 3: Setup SSL certificate
             logger.info(f"Step 3: Setting up SSL for {fqdn}")
+            
+            # Create deployment hook if requested
+            if create_deployment_hooks:
+                from app.models import DeploymentHook
+                ssl_hook = DeploymentHook(
+                    task_id=task_id,
+                    session_id=str(task_id),
+                    hook_type="ssl_setup",
+                    phase="deployment",
+                    status="processing",
+                    data={"step": "ssl", "fqdn": fqdn},
+                    message="Setting up SSL certificate..."
+                )
+                db.add(ssl_hook)
+                await db.commit()
+            
             ssl_result = await self._setup_ssl(fqdn)
             results["steps"]["ssl"] = {
                 "status": "success",
                 "message": f"SSL certificate obtained for {fqdn}"
             }
             logger.info(f"SSL configured: {ssl_result}")
+            
+            # Update deployment hook if created
+            if create_deployment_hooks and ssl_hook:
+                ssl_hook.status = "completed"
+                ssl_hook.message = f"SSL certificate obtained for {fqdn}"
+                ssl_hook.is_complete = True
+                await db.commit()
 
         except Exception as e:
             logger.error(f"Failed to setup SSL: {e}")
@@ -137,6 +224,12 @@ class HostingService:
             }
             # SSL failure is not critical - site will work on HTTP
             logger.warning("SSL setup failed, site will be available on HTTP only")
+            
+            # Update deployment hook if created
+            if create_deployment_hooks and ssl_hook:
+                ssl_hook.status = "failed"
+                ssl_hook.message = f"SSL setup failed: {str(e)}"
+                await db.commit()
 
         # Update task with hosting info
         task.hosting_subdomain = subdomain

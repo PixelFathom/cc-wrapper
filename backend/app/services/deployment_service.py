@@ -287,137 +287,8 @@ class DeploymentService:
         env_mode = os.getenv("ENVIRONMENT", settings.environment)
         return env_mode.lower() == "production"
     
-    async def _setup_dns_step(self, db: AsyncSession, task_id: UUID, subdomain: str) -> None:
-        """Setup DNS A record and create deployment hook"""
-        try:
-            from app.services.hostinger_service import hostinger_dns_service
-            from app.core.settings import get_settings
-            
-            settings = get_settings()
-            fqdn = f"{subdomain}.{settings.hostinger_domain}"
-            
-            # Create hook for DNS step initiation
-            hook = DeploymentHook(
-                task_id=task_id,
-                session_id=str(task_id),
-                hook_type="dns_setup",
-                phase="deployment",
-                status="processing",
-                data={"step": "dns", "subdomain": subdomain, "fqdn": fqdn},
-                message="Setting up DNS A record..."
-            )
-            db.add(hook)
-            await db.commit()
-            
-            # Add DNS A record
-            await hostinger_dns_service.add_a_record(subdomain, ip=settings.server_ip)
-            
-            # Update hook with success
-            hook.status = "completed"
-            hook.message = f"DNS A record added: {fqdn} -> {settings.server_ip}"
-            hook.is_complete = True
-            await db.commit()
-            
-            logger.info(f"DNS setup completed for task {task_id}: {fqdn}")
-        except Exception as e:
-            logger.error(f"Failed to setup DNS for task {task_id}: {e}")
-            # Update hook with failure
-            hook.status = "failed"
-            hook.message = f"DNS setup failed: {str(e)}"
-            await db.commit()
-    
-    async def _setup_nginx_step(self, db: AsyncSession, task_id: UUID, fqdn: str, upstream_port: int) -> None:
-        """Setup Nginx reverse proxy and create deployment hook"""
-        try:
-            from app.core.settings import get_settings
-            import httpx
-            
-            settings = get_settings()
-            host_clean = fqdn.replace("https://", "").replace("http://", "").strip()
-            
-            # Create hook for Nginx step initiation
-            hook = DeploymentHook(
-                task_id=task_id,
-                session_id=str(task_id),
-                hook_type="nginx_setup",
-                phase="deployment",
-                status="processing",
-                data={"step": "nginx", "fqdn": fqdn, "upstream_port": upstream_port},
-                message="Configuring Nginx reverse proxy..."
-            )
-            db.add(hook)
-            await db.commit()
-            
-            # Configure Nginx
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{settings.nginx_api_url}/create-config",
-                    json={"port": upstream_port, "host_name": host_clean},
-                    timeout=60.0
-                )
-                response.raise_for_status()
-            
-            # Update hook with success
-            hook.status = "completed"
-            hook.message = f"Nginx configured for {fqdn} -> localhost:{upstream_port}"
-            hook.is_complete = True
-            await db.commit()
-            
-            logger.info(f"Nginx setup completed for task {task_id}: {fqdn}")
-        except Exception as e:
-            logger.error(f"Failed to setup Nginx for task {task_id}: {e}")
-            # Update hook with failure
-            hook.status = "failed"
-            hook.message = f"Nginx setup failed: {str(e)}"
-            await db.commit()
-    
-    async def _setup_ssl_step(self, db: AsyncSession, task_id: UUID, fqdn: str) -> None:
-        """Setup SSL certificate and create deployment hook"""
-        try:
-            from app.core.settings import get_settings
-            import httpx
-            
-            settings = get_settings()
-            host_clean = fqdn.replace("https://", "").replace("http://", "").strip()
-            
-            # Create hook for SSL step initiation
-            hook = DeploymentHook(
-                task_id=task_id,
-                session_id=str(task_id),
-                hook_type="ssl_setup",
-                phase="deployment",
-                status="processing",
-                data={"step": "ssl", "fqdn": fqdn},
-                message="Setting up SSL certificate..."
-            )
-            db.add(hook)
-            await db.commit()
-            
-            # Setup SSL
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{settings.nginx_api_url}/add-ssl",
-                    json={"host_name": host_clean, "email": "admin@example.com"},
-                    timeout=120.0
-                )
-                response.raise_for_status()
-            
-            # Update hook with success
-            hook.status = "completed"
-            hook.message = f"SSL certificate obtained for {fqdn}"
-            hook.is_complete = True
-            await db.commit()
-            
-            logger.info(f"SSL setup completed for task {task_id}: {fqdn}")
-        except Exception as e:
-            logger.error(f"Failed to setup SSL for task {task_id}: {e}")
-            # Update hook with failure
-            hook.status = "failed"
-            hook.message = f"SSL setup failed: {str(e)}"
-            await db.commit()
-    
     async def _trigger_hosting_steps(self, db: AsyncSession, task_id: UUID) -> None:
-        """Trigger DNS, Nginx, and SSL setup steps asynchronously after init_project succeeds"""
+        """Trigger DNS, Nginx, and SSL setup steps using hosting_service after init_project succeeds"""
         # Check if we're in production environment
         is_production = await self._is_production_environment()
         if not is_production:
@@ -427,12 +298,10 @@ class DeploymentService:
         try:
             # Create a new database session for async operations
             from app.deps import async_session_maker
-            from app.core.settings import get_settings
-            
-            settings = get_settings()
+            from app.services.hosting_service import hosting_service
             
             async with async_session_maker() as async_db:
-                # Get task to retrieve deployment port and generate subdomain
+                # Get task to verify it exists and has deployment port
                 task = await async_db.get(Task, task_id)
                 if not task:
                     logger.error(f"Task {task_id} not found for hosting setup")
@@ -442,54 +311,28 @@ class DeploymentService:
                     logger.error(f"Task {task_id} does not have a deployment port assigned")
                     return
                 
-                from app.services.hostinger_service import hostinger_dns_service
+                # Use hosting_service.provision_hosting with create_deployment_hooks=True
+                # This will handle DNS, Nginx, and SSL setup sequentially and create deployment hooks
+                result = await hosting_service.provision_hosting(
+                    db=async_db,
+                    task_id=task_id,
+                    subdomain=None,  # Auto-generate subdomain
+                    upstream_port=None,  # Use task.deployment_port
+                    create_deployment_hooks=True  # Create deployment hooks for each step
+                )
                 
-                # Generate unique subdomain
-                prefix = task.name[:10].lower().replace(" ", "-").replace("_", "-") if task.name else "site"
-                prefix = ''.join(c for c in prefix if c.isalnum() or c == '-')
-                subdomain = await hostinger_dns_service.get_unique_subdomain(prefix=prefix)
-                fqdn = f"{subdomain}.{settings.hostinger_domain}"
-                
-                # Update task with hosting info
-                task.hosting_subdomain = subdomain
-                task.hosting_fqdn = fqdn
-                await async_db.commit()
-                
-                # Trigger steps sequentially (in order) - each will create its own session
-                # Step 1: Setup DNS
-                await self._setup_dns_step_async(task_id, subdomain)
-                # Wait a bit for DNS to propagate before nginx/ssl
-                await asyncio.sleep(2)
-                
-                # Step 2: Setup Nginx (after DNS completes)
-                await self._setup_nginx_step_async(task_id, fqdn, task.deployment_port)
-                
-                # Step 3: Setup SSL (after Nginx completes)
-                await self._setup_ssl_step_async(task_id, fqdn)
-                
-                logger.info(f"Completed hosting steps for task {task_id}: DNS, Nginx, SSL")
+                logger.info(f"Completed hosting steps for task {task_id}: {result.get('status', 'unknown')}")
+                if result.get("status") == "success":
+                    logger.info(f"Hosting provisioned successfully: {result.get('fqdn')}")
+                elif result.get("status") == "partial":
+                    logger.warning(f"Hosting partially provisioned: {result.get('warning', '')}")
+                else:
+                    logger.error(f"Hosting provisioning failed: {result.get('error', '')}")
+                    
         except Exception as e:
             logger.error(f"Failed to trigger hosting steps for task {task_id}: {e}")
             import traceback
             traceback.print_exc()
-    
-    async def _setup_dns_step_async(self, task_id: UUID, subdomain: str) -> None:
-        """Setup DNS A record with its own database session"""
-        from app.deps import async_session_maker
-        async with async_session_maker() as db:
-            await self._setup_dns_step(db, task_id, subdomain)
-    
-    async def _setup_nginx_step_async(self, task_id: UUID, fqdn: str, upstream_port: int) -> None:
-        """Setup Nginx with its own database session"""
-        from app.deps import async_session_maker
-        async with async_session_maker() as db:
-            await self._setup_nginx_step(db, task_id, fqdn, upstream_port)
-    
-    async def _setup_ssl_step_async(self, task_id: UUID, fqdn: str) -> None:
-        """Setup SSL with its own database session"""
-        from app.deps import async_session_maker
-        async with async_session_maker() as db:
-            await self._setup_ssl_step(db, task_id, fqdn)
         
     async def get_deployment_hooks(self, db: AsyncSession, task_id: UUID, limit: int = 20) -> list[DeploymentHook]:
         """Get deployment hooks for a task"""
