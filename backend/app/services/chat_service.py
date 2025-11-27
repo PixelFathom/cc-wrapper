@@ -659,8 +659,7 @@ class ChatService:
                                         sub_task_chat.id,
                                         next_task_info["prompt"],
                                         session_id=None,  # New sub-task, no previous session
-                                        bypass_mode=None,
-                                        permission_mode=None,
+                                        bypass_mode=True,
                                         agent_name=None
                                     )
                                 except Exception as send_error:
