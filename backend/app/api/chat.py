@@ -1187,8 +1187,7 @@ async def start_first_subtask(
             sub_task_chat.id,
             next_task_info["prompt"],
             session_id=None,  # New sub-task, no previous session
-            bypass_mode=None,
-            permission_mode=None,
+            bypass_mode=True,
             agent_name=None
         )
 
@@ -1262,8 +1261,7 @@ async def retry_subtask(
             sub_task_chat.id,
             retry_task_info["prompt"],
             session_id=None,  # New attempt, no previous session
-            bypass_mode=None,
-            permission_mode=None,
+            bypass_mode=True,
             agent_name=None
         )
 
@@ -1311,8 +1309,7 @@ async def retry_chat(
             chat.id,
             prompt,
             session_id=chat.session_id,  # Use existing session for continuity
-            bypass_mode=None,
-            permission_mode=None,
+            bypass_mode=True,
             agent_name=None
         )
 
