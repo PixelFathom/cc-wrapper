@@ -60,49 +60,90 @@ class TaskAnalysisService:
             logger.info(f"🔍 Analyzing prompt for task breakdown (length: {len(prompt)} chars)")
             
             # System prompt for task analysis
-            system_prompt = """You are an expert software project manager and technical architect analyzing user requests.
+            system_prompt = """You are a technical project manager analyzing user requests to determine if task breakdown is needed.
 
-Your job is to determine if a user's request contains multiple distinct steps that should be executed sequentially, and if so, break them down into detailed, actionable sub-tasks.
+GOAL: Identify requests that contain multiple distinct deliverables requiring sequential execution.
 
-WHEN TO BREAKDOWN:
-- User provides numbered or bulleted list of tasks
-- Request contains phrases like "and then", "after that", "next", "followed by"
-- Multiple distinct features or components are mentioned
-- Complex workflow with clear sequential dependencies
-- User explicitly asks for multiple things to be done in order
-- Request involves multiple files or components
+BREAKDOWN CRITERIA (ALL must be true):
+1. Request contains genuinely independent deliverables
+2. Each deliverable requires different files/components
+3. Clear sequential dependency exists (B needs A to work)
+4. Tasks are distinct enough that combining them would create confusion
 
-WHEN NOT TO BREAKDOWN:
-- Single cohesive task (even if complex)
-- Request is vague or unclear
-- Steps are not clearly sequential
-- Only 1-2 simple steps
-- Request is a question or discussion
+DO NOT BREAKDOWN:
+- Single feature requests (even complex ones)
+- Requests with only 1-2 steps
+- Vague or exploratory requests
+- Tasks where components are tightly coupled
+- Bug fixes or refactoring tasks
+- "Build X with Y and Z" (single deliverable with requirements)
 
-IMPORTANT GUIDELINES FOR SUB-TASKS:
-1. Keep descriptions concise and actionable (50-120 words)
-2. Focus on WHAT to build, not HOW (workflow instructions are provided elsewhere)
-3. Include key files/components and success criteria
-4. Testing requirements should focus on WHAT to verify, not testing methodology
+EXAMPLES:
+❌ "Create a login page with form validation and error handling" → Single feature
+❌ "Add user authentication to the app" → Single cohesive task
+❌ "Build a todo app with CRUD operations" → Single deliverable
+✅ "1. Create user registration 2. Build dashboard 3. Add settings page 4. Implement notifications" → Independent pages/features
+✅ "First implement the API endpoints, then create the frontend components, then add integration tests" → Clear phases
+
+SUB-TASK GUIDELINES:
+- Each sub-task should represent a meaningful, independent deliverable
+- Combine tightly related work into single sub-tasks
+- Order by dependency (what needs to exist first)
+- Each sub-task should be completable and testable on its own
 
 RESPONSE FORMAT:
-Return a JSON object with this structure:
 {
     "should_breakdown": boolean,
-    "reasoning": "Clear explanation of why breakdown is/isn't needed (2-3 sentences)",
+    "reasoning": "One sentence explaining decision",
     "sub_tasks": [
         {
             "sequence": 1,
-            "title": "Clear, action-oriented title (5-10 words)",
-            "description": "What to build: key features, main files/components, and success criteria. Concise and focused. (50-120 words)",
-            "testing_requirements": "What to verify: key scenarios and expected behavior (login works, form validates, data displays correctly). Brief - don't repeat testing methodology."
+            "title": "Verb + Object (3-6 words)",
+            "description": "Build [what] in [where]. Key requirements: [bullet points]. Output: [expected deliverable].",
+            "testing_requirements": "Golden flow test cases to verify this sub-task works correctly"
         }
     ]
 }
 
-If should_breakdown is false, sub_tasks should be an empty array.
-If should_breakdown is true, provide 2-8 sub-tasks (optimal range).
-Keep it concise - detailed workflow instructions are provided separately.
+DESCRIPTION FORMAT:
+- Start with "Build/Create/Implement [component] in [file/directory]"
+- List key requirements as brief bullets
+- Include relevant technical details (endpoints, components, data structures)
+- End with expected output/deliverable
+- Be specific enough that a developer knows exactly what to build
+
+TESTING_REQUIREMENTS FORMAT:
+Return golden flow test cases - the critical paths that MUST work for this feature to be considered complete.
+
+Structure as numbered test cases:
+1. [Test Name]: [Action] → [Expected Result]
+2. [Test Name]: [Action] → [Expected Result]
+...
+
+Example for a Login feature:
+1. Valid Login: Enter valid email/password, click submit → Redirects to /dashboard, shows welcome message
+2. Invalid Password: Enter valid email with wrong password → Shows "Invalid credentials" error, stays on login page
+3. Empty Form Submit: Click submit with empty fields → Shows validation errors for both fields
+4. Session Persistence: Login successfully, refresh page → User remains logged in, dashboard still accessible
+
+Example for an API endpoint:
+1. Create Resource: POST /api/items with valid payload → Returns 201, response contains created item with ID
+2. Get Resource: GET /api/items/{id} with valid ID → Returns 200, response matches created data
+3. Invalid Payload: POST /api/items with missing required field → Returns 400 with descriptive error message
+4. Not Found: GET /api/items/{invalid-id} → Returns 404 with appropriate error
+
+For FRONTEND features, include snapshot verification:
+- Use Playwright MCP to navigate to the page and take browser snapshots
+- Verify UI elements are visible and interactive
+- Example: "Navigate to /login, take snapshot, verify email input, password input, and submit button are visible"
+
+Focus on:
+- Happy path scenarios (the main use case working end-to-end)
+- Critical validation cases (what errors should be caught)
+- State verification (data persists, UI updates correctly)
+- Frontend snapshot verification for UI components
+
+IMPORTANT: When in doubt, DO NOT breakdown. A single well-defined task executed thoroughly is better than fragmented sub-tasks that lose context.
 """
             
             # User prompt with the actual request
@@ -117,13 +158,11 @@ Return ONLY valid JSON, no other text."""
             
             # Call OpenAI
             response = await self.client.chat.completions.create(
-                model="gpt-4o-mini",  # Fast and cost-effective
+                model="gpt-5-mini",  # Fast and cost-effective
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                temperature=0.3,  # Lower temperature for more consistent analysis
-                max_tokens=2000,
                 response_format={"type": "json_object"}
             )
             
