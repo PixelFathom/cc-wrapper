@@ -40,3 +40,5 @@ class QueryResponse(BaseModel):
     assistant_response: str
     chat_id: Optional[str] = None
     task_id: Optional[str] = None
+    is_breakdown: Optional[bool] = None
+    breakdown_info: Optional[Dict[str, Any]] = None

@@ -964,7 +964,12 @@ async def add_nginx_ssl(host: str, email: str = "admin@example.com") -> Dict[str
                     status_code=response.status,
                     detail=f"Failed to add SSL certificate: {error_text}"
                 )
-
+def _is_production_environment() -> bool:
+    """Check if running in production environment (docker-compose production)"""
+    settings = get_settings()
+    # Check environment variable or settings
+    env_mode = os.getenv("ENVIRONMENT", settings.environment)
+    return env_mode.lower() == "production"
 
 @router.post("/tasks/{task_id}/deployment/deploy")
 async def deploy_task(
@@ -1022,7 +1027,11 @@ async def deploy_task(
         )
     
     # Construct deployment instruction
-    hosting_fqdn = task.hosting_fqdn or f"http://localhost:{task.deployment_port}"
+    production_env = _is_production_environment()
+    if production_env:
+        hosting_fqdn = task.hosting_fqdn or f"http://localhost:{task.deployment_port}"
+    else:
+        hosting_fqdn = f"http://localhost:{task.deployment_port}"
     deployment_instruction = (
         f"Deploy the application following Docker best practices in DEVELOPMENT mode with hot reload:\n\n"
         f"1. SCOPE: Deploy ONLY the application within the current project directory. Do not modify or deploy unrelated services. Use the path in cwd only.\n\n"

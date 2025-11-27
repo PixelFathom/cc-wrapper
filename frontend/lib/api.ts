@@ -437,7 +437,22 @@ class ApiClient {
     bypass_mode?: boolean
     permission_mode?: 'interactive' | 'bypassPermissions' | 'plan'
     agent_name?: string | null
-  }): Promise<{ session_id: string; assistant_response: string; chat_id?: string }> => {
+  }): Promise<{ 
+    session_id: string
+    assistant_response: string
+    chat_id?: string
+    is_breakdown?: boolean
+    breakdown_info?: {
+      is_breakdown: boolean
+      total_sub_tasks: number
+      reasoning: string
+      sub_tasks: Array<{
+        sequence: number
+        title: string
+        description: string
+      }>
+    }
+  }> => {
     return this.authenticatedRequest('/query', {
       method: 'POST',
       body: JSON.stringify(data),

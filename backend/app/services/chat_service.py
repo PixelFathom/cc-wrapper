@@ -1,3 +1,4 @@
+import os
 import httpx
 import logging
 import asyncio
@@ -15,6 +16,8 @@ from app.core.rate_limiter import assert_within_rate_limit
 from app.core.auto_continuation_config import get_auto_continuation_config
 from app.models import Chat, Task, Project, ChatHook
 from app.models.chat import CONTINUATION_STATUS_NONE, CONTINUATION_STATUS_NEEDED, CONTINUATION_STATUS_IN_PROGRESS, CONTINUATION_STATUS_COMPLETED
+from app.services.task_analysis_service import task_analysis_service
+from app.services.task_orchestration_service import task_orchestration_service
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +33,42 @@ class ChatService:
     def set_redis_client(self, redis_client):
         """Set Redis client for real-time updates"""
         self.redis_client = redis_client
+    
+    async def _should_analyze_for_breakdown(self, chat: Chat) -> bool:
+        """
+        Determine if a user message should be analyzed for task breakdown.
         
+        Skip breakdown analysis if:
+        - Message is too short (<50 chars)
+        - Already a sub-task (has parent_session_id)
+        - Is an auto-continuation message
+        """
+        # Skip if already a sub-task
+        if chat.parent_session_id and chat.parent_session_id != chat.session_id:
+            logger.info(f"⏭️ Skipping breakdown: already a sub-task")
+            return False
+        
+        # Skip if auto-continuation
+        if chat.role == "auto":
+            logger.info(f"⏭️ Skipping breakdown: auto-continuation")
+            return False
+        
+        # Skip if message too short
+        text = chat.content.get("text", "")
+        if len(text) < 50:
+            logger.info(f"⏭️ Skipping breakdown: too short ({len(text)} chars)")
+            return False
+
+        logger.info(f"✅ Analyzing for breakdown ({len(text)} chars)")
+        return True
+        
+    async def _is_production_environment(self) -> bool:
+        """Check if running in production environment (docker-compose production)"""
+        settings = get_settings()
+        # Check environment variable or settings
+        env_mode = os.getenv("ENVIRONMENT", settings.environment)
+        return env_mode.lower() == "production"
+    
     async def send_query(
         self,
         db: AsyncSession,
@@ -80,7 +118,11 @@ class ChatService:
             # Add deployment context to prompt if task has a port assigned
             enhanced_prompt = prompt
             if task.deployment_port:
-                hosting_fqdn = task.hosting_fqdn or f"http://localhost:{task.deployment_port}"
+                production_env = await self._is_production_environment()
+                if production_env:
+                    hosting_fqdn = task.hosting_fqdn or f"http://localhost:{task.deployment_port}"
+                else:
+                    hosting_fqdn = f"http://localhost:{task.deployment_port}"
                 deployment_context = (
                     f"\n\n---\n"
                     f"🚨 MANDATORY DEPLOYMENT CONTEXT - READ CAREFULLY 🚨\n\n"
@@ -337,10 +379,7 @@ class ChatService:
             
             # Extract message from various possible locations
             message = webhook_data.get("message", "")
-            if not message and result:
-                # Use result as message for display
-                message = str(result)[:500]  # Truncate long results
-            print(f"Message: {message}")
+
             # Create hook entry with webhook session_id for tracking
             hook = ChatHook(
                 chat_id=chat_id,
@@ -454,7 +493,7 @@ class ChatService:
                 existing_assistant = result.scalar_one_or_none()
 
                 if existing_assistant:
-                    # Update existing message                    
+                    # Update existing message
                     # Preserve the original metadata and update with new values
                     current_content = existing_assistant.content.copy()
                     current_metadata = current_content.get("metadata", {})
@@ -464,11 +503,16 @@ class ChatService:
                         "webhook_session_id": webhook_session_id,
                         "status": "completed"  # Always set to completed when updating with final content
                     })
-                    
+
                     # CRITICAL FIX: NEVER update the session_id to maintain UI continuity
                     # Store the webhook session ID in metadata instead
                     if next_session_id:
                         current_metadata["next_session_id"] = next_session_id
+
+                    # CRITICAL: Inherit parent_session_id from user chat for sub-task tracking
+                    if chat.parent_session_id and not existing_assistant.parent_session_id:
+                        existing_assistant.parent_session_id = chat.parent_session_id
+
                     # Create new content dict and force SQLAlchemy to detect the change
                     from sqlalchemy.orm.attributes import flag_modified
                     new_content = {
@@ -477,7 +521,7 @@ class ChatService:
                     }
                     existing_assistant.content = new_content
                     flag_modified(existing_assistant, "content")
-                    
+
                     db.add(existing_assistant)
                     
                 else:
@@ -502,12 +546,16 @@ class ChatService:
                             "webhook_session_id": webhook_session_id,
                             "status": "completed"  # Always set to completed when updating with final content
                         })
-                        
+
                         # CRITICAL FIX: NEVER update the session_id to maintain UI continuity
                         # Store the webhook session ID in metadata instead
                         if next_session_id:
                             current_metadata["next_session_id"] = next_session_id
-                        
+
+                        # CRITICAL: Inherit parent_session_id from user chat for sub-task tracking
+                        if chat.parent_session_id and not existing_assistant.parent_session_id:
+                            existing_assistant.parent_session_id = chat.parent_session_id
+
                         existing_assistant.content = {
                             "text": response_text,
                             "metadata": current_metadata
@@ -516,10 +564,11 @@ class ChatService:
                     else:
                         # Use original session_id for continuation responses to maintain UI continuity
                         session_id_for_assistant = original_session_id
-                        
+
                         assistant_chat = Chat(
                             sub_project_id=chat.sub_project_id,
                             session_id=session_id_for_assistant,
+                            parent_session_id=chat.parent_session_id,  # CRITICAL: Inherit parent_session_id for sub-task tracking
                             role="assistant",
                             content={
                                 "text": response_text,
@@ -548,6 +597,74 @@ class ChatService:
                         f"resolution_id={str(resolution.id)[:8]}... | "
                         f"error={auto_error}"
                     )
+            
+            # TASK BREAKDOWN: Handle sub-task completion or failure
+            if is_completion and status == "failed":
+                # Handle sub-task failure
+                error_text = webhook_data.get("error", "") or webhook_data.get("result", "") or "Task failed"
+                await task_orchestration_service.handle_sub_task_failure(
+                    db, chat, error_text
+                )
+                logger.info(f"❌ Sub-task marked as failed: {error_text[:100]}...")
+
+            if is_completion and status == "completed":
+                # Find the assistant chat to check if it's a sub-task
+                stmt = select(Chat).where(
+                    Chat.sub_project_id == chat.sub_project_id,
+                    Chat.session_id == original_session_id,
+                    Chat.role == "assistant"
+                ).order_by(Chat.created_at.desc()).limit(1)
+                
+                result = await db.execute(stmt)
+                assistant_chat = result.scalar_one_or_none()
+                
+                if assistant_chat:
+                    # Check if next sub-task should be triggered
+                    should_trigger_next = await task_orchestration_service.handle_sub_task_completion(
+                        db, assistant_chat
+                    )
+                    
+                    if should_trigger_next:
+                        logger.info(f"🔄 Triggering next sub-task in breakdown")
+                        # Start next sub-task
+                        next_task_info = await task_orchestration_service.start_next_sub_task(
+                            db,
+                            assistant_chat.parent_session_id,
+                            chat.sub_project_id
+                        )
+                        
+                        if next_task_info:
+                            # Use the pre-created chat from create_breakdown_sessions
+                            sub_task_chat_id = next_task_info.get("chat_id")
+                            if sub_task_chat_id:
+                                sub_task_chat = await db.get(Chat, UUID(sub_task_chat_id))
+                            else:
+                                # Fallback: find by session_id if chat_id not available (backward compatibility)
+                                stmt = select(Chat).where(
+                                    Chat.session_id == next_task_info["session_id"],
+                                    Chat.role == "user"
+                                ).limit(1)
+                                result = await db.execute(stmt)
+                                sub_task_chat = result.scalar_one_or_none()
+
+                            if not sub_task_chat:
+                                logger.error(f"❌ Pre-created sub-task chat not found for {next_task_info['session_id']}")
+                            else:
+                                # Send the sub-task query to the remote service
+                                logger.info(f"📤 Sending sub-task {next_task_info['sequence']}: {next_task_info['title']}")
+                                try:
+                                    # Don't send session_id - let external service generate its own
+                                    await self.send_query(
+                                        db,
+                                        sub_task_chat.id,
+                                        next_task_info["prompt"],
+                                        session_id=None,  # New sub-task, no previous session
+                                        bypass_mode=None,
+                                        permission_mode=None,
+                                        agent_name=None
+                                    )
+                                except Exception as send_error:
+                                    logger.error(f"❌ Failed to send sub-task query: {send_error}")
             
             # Special handling for completed status webhook to ensure webhook_session_id is stored
             # Publish to Redis for real-time updates
@@ -920,6 +1037,67 @@ class ChatService:
         except Exception as e:
             logger.error(f"Error creating auto-continuation: {str(e)}")
             raise
+    
+    async def analyze_and_create_breakdown(
+        self,
+        db: AsyncSession,
+        chat: Chat,
+        context: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Analyze a user message for task breakdown and create breakdown structure if needed.
+        
+        Returns breakdown info if analysis recommends breakdown, None otherwise.
+        """
+        try:
+            # Check if should analyze
+            if not await self._should_analyze_for_breakdown(chat):
+                logger.info(f"⏭️ Skipping breakdown analysis for chat {str(chat.id)[:8]}...")
+                return None
+            
+            # Analyze with OpenAI
+            prompt = chat.content.get("text", "")
+            logger.info(f"🔍 Analyzing prompt for breakdown (chat_id={str(chat.id)[:8]}...)")
+            
+            analysis = await task_analysis_service.analyze_for_breakdown(prompt)
+            
+            if not analysis.should_breakdown:
+                logger.info(f"📝 No breakdown needed: {analysis.reasoning}")
+                # Set parent_session_id to self (single task)
+                chat.parent_session_id = chat.session_id
+                db.add(chat)
+                await db.commit()
+                return None
+            
+            # Breakdown recommended
+            logger.info(f"✂️ Breakdown recommended: {len(analysis.sub_tasks)} sub-tasks")
+            
+            # Create breakdown structure
+            breakdown_metadata = await task_orchestration_service.create_breakdown_sessions(
+                db, chat, analysis, context
+            )
+            
+            return {
+                "is_breakdown": True,
+                "total_sub_tasks": len(analysis.sub_tasks),
+                "reasoning": analysis.reasoning,
+                "sub_tasks": [
+                    {
+                        "sequence": task.sequence,
+                        "title": task.title,
+                        "description": task.description
+                    }
+                    for task in analysis.sub_tasks
+                ]
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Breakdown analysis failed: {e}")
+            # Fallback: treat as single task
+            chat.parent_session_id = chat.session_id
+            db.add(chat)
+            await db.commit()
+            return None
 
 
 # Create service instance

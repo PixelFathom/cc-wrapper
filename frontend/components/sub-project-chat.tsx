@@ -27,6 +27,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu"
+import { BreakdownDetectionMessage } from './breakdown-detection-message'
+import { TaskBreakdownTimeline } from './task-breakdown-timeline'
+import { BreakdownAnalysis, getBreakdownStatus, startFirstSubTask, retrySubTask, retryChat, type SubTaskInfo } from '@/lib/api/task-breakdown'
 
 interface SubProjectChatProps {
   projectName: string
@@ -119,6 +122,12 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
   // Test case generation modal state
   const [showTestCaseModal, setShowTestCaseModal] = useState(false)
   
+  // Task breakdown state
+  const [breakdownInfo, setBreakdownInfo] = useState<BreakdownAnalysis | null>(null)
+  const [showBreakdownTimeline, setShowBreakdownTimeline] = useState(false)
+  const [expandedSubTaskId, setExpandedSubTaskId] = useState<string | null>(null)
+  const [expandedSubTaskHookIds, setExpandedSubTaskHookIds] = useState<Set<string>>(new Set())
+
   // Message queue state removed - input is now blocked when waiting for response
   
   // Auto-scroll state management
@@ -267,8 +276,20 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
         chat_id: data.chat_id,
         was_first_message: wasFirstMessage,
         current_session_id: sessionId,
-        response_session_id: data.session_id
+        response_session_id: data.session_id,
+        is_breakdown: data.is_breakdown,
+        breakdown_info: data.breakdown_info
       })
+      
+      // Check if this is a breakdown response
+      if (data.is_breakdown && data.breakdown_info) {
+        console.log('🎯 Breakdown detected:', data.breakdown_info)
+        setBreakdownInfo(data.breakdown_info)
+        // NOTE: Don't set showBreakdownTimeline to true here!
+        // Let BreakdownDetectionMessage show first, then transition to timeline
+        // after user clicks "Start Now" or auto-start timer fires
+        setShowBreakdownTimeline(false)
+      }
       
       // CRITICAL: Only update sessionId for the very first message of a conversation
       // Never change session ID for continuing conversations to maintain UI continuity
@@ -325,6 +346,52 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
       // Remove the processing message if there was an error
       setMessages(prev => prev.filter(msg => !msg.isProcessing))
     },
+  })
+
+  // Retry sub-task mutation
+  const retrySubTaskMutation = useMutation({
+    mutationFn: async ({ parentSessionId, subTaskSessionId }: { parentSessionId: string; subTaskSessionId: string }) => {
+      console.log('🔄 Retrying sub-task:', subTaskSessionId)
+      return retrySubTask(parentSessionId, subTaskSessionId)
+    },
+    onSuccess: (data) => {
+      console.log('✅ Sub-task retry initiated:', data)
+      toast.success('Sub-task retry started', {
+        description: `Task ${data.session_id} has been queued for retry.`
+      })
+      // Refresh breakdown status to see the updated state
+      refetchBreakdownStatus()
+    },
+    onError: (error) => {
+      console.error('❌ Sub-task retry failed:', error)
+      const errorMessage = error instanceof Error ? error.message : 'Failed to retry sub-task'
+      toast.error('Retry failed', {
+        description: errorMessage
+      })
+    }
+  })
+
+  // Retry chat mutation
+  const retryChatMutation = useMutation({
+    mutationFn: async (chatId: string) => {
+      console.log('🔄 Retrying chat:', chatId)
+      return retryChat(chatId)
+    },
+    onSuccess: (data) => {
+      console.log('✅ Chat retry initiated:', data)
+      toast.success('Retry started', {
+        description: 'The failed message has been queued for retry.'
+      })
+      // Refresh session messages
+      queryClient.invalidateQueries({ queryKey: ['chats', 'session', sessionId] })
+    },
+    onError: (error) => {
+      console.error('❌ Chat retry failed:', error)
+      const errorMessage = error instanceof Error ? error.message : 'Failed to retry message'
+      toast.error('Retry failed', {
+        description: errorMessage
+      })
+    }
   })
 
   // Poll for messages in the current session
@@ -408,6 +475,75 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
     staleTime: 0,
     gcTime: 5 * 60 * 1000,
   })
+  
+  // Check if any message is a breakdown parent
+  const hasBreakdownParent = useMemo(() => {
+    return messages.some(msg => msg.content?.metadata?.is_breakdown_parent)
+  }, [messages])
+
+  // Query for breakdown status if we have a breakdown parent message
+  const { data: breakdownStatus, refetch: refetchBreakdownStatus } = useQuery({
+    queryKey: ['breakdown-status', sessionId],
+    queryFn: () => getBreakdownStatus(sessionId!),
+    enabled: !!sessionId && (hasBreakdownParent || !!breakdownInfo),
+    refetchInterval: 5000, // Poll every 5 seconds for updates
+    staleTime: 0,
+  })
+
+  // Query for hooks of expanded sub-task session
+  const { data: expandedSubTaskHooks, refetch: refetchSubTaskHooks, isRefetching: isRefetchingHooks } = useQuery({
+    queryKey: ['subtask-hooks', expandedSubTaskId],
+    queryFn: async () => {
+      if (!expandedSubTaskId) return { messages: [], hooks: [] }
+      // Fetch messages for the sub-task session to get hooks
+      const response = await api.request<{ messages: any[] }>(`/chats/session/${expandedSubTaskId}`)
+      const messages = response.messages || []
+
+      // Fetch hooks for each message in this session
+      const hooksPromises = messages.map(async (msg: any) => {
+        try {
+          const response = await api.request<{ hooks: ChatHook[] }>(`/chats/${msg.id}/hooks`)
+          return { messageId: msg.id, hooks: response.hooks || [] }
+        } catch {
+          return { messageId: msg.id, hooks: [] }
+        }
+      })
+
+      const results = await Promise.all(hooksPromises)
+      return {
+        messages,
+        hooks: results.flatMap(r => r.hooks)
+      }
+    },
+    enabled: !!expandedSubTaskId,
+    staleTime: 0,
+  })
+
+  // Update session_id when breakdown tasks complete
+  // The session_id used to continue a chat should be the latest sub-task's session_id
+  useEffect(() => {
+    if (!breakdownStatus) return
+
+    const { sub_task_sessions, completed_sub_tasks, total_sub_tasks } = breakdownStatus
+
+    // Find the latest completed or processing sub-task with a session_id
+    const lastActiveTask = [...sub_task_sessions]
+      .reverse()
+      .find(task => task.session_id && (task.status === 'completed' || task.status === 'processing'))
+
+    if (lastActiveTask?.session_id) {
+      console.log('🔄 Breakdown progress: Using session_id from sub-task', lastActiveTask.sequence, lastActiveTask.session_id)
+      // Store the latest sub-task session_id for continuing chats
+      // We don't update sessionId here as that would break the UI, but we can use it for future messages
+    }
+
+    // When all tasks complete, we can show completion state
+    if (completed_sub_tasks >= total_sub_tasks && total_sub_tasks > 0) {
+      console.log('🎉 All breakdown tasks completed!')
+      // Optionally hide the timeline after completion
+      // setShowBreakdownTimeline(false)
+    }
+  }, [breakdownStatus])
 
   // Update messages when session data changes - intelligent merge
   useEffect(() => {
@@ -424,10 +560,11 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
             content: msg.content,
             timestamp: msg.created_at,
             sessionId: msg.session_id,
-            isProcessing: msg.role === 'assistant' && 
+            isProcessing: msg.role === 'assistant' &&
                           msg.content?.metadata?.status === 'processing',
             continuationStatus: msg.continuation_status,
             parentMessageId: msg.parent_message_id,
+            chatId: msg.id, // Chat ID for retry functionality
           }))
           
           // Filter out temporary messages first
@@ -634,6 +771,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
         content: msg.content,
         timestamp: msg.created_at,
         sessionId: loadSessionId,
+        chatId: msg.id, // Chat ID for retry functionality
       }))
       setMessages(historyMessages)
       setSessionId(loadSessionId)
@@ -692,21 +830,73 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
       hour12: false 
     })
   }
+  
+  // Handle starting breakdown execution
+  const handleStartBreakdown = async () => {
+    if (!sessionId) return
+
+    // Allow starting if we have breakdownInfo OR a breakdown parent message
+    if (!breakdownInfo && !hasBreakdownParent) return
+
+    try {
+      console.log('▶️ Starting breakdown execution for session:', sessionId)
+      toast.info('Starting task breakdown execution...')
+
+      const result = await startFirstSubTask(sessionId)
+
+      console.log('✅ First sub-task started:', result)
+      toast.success(`Started sub-task: ${result.title}`)
+
+      // Refetch messages and breakdown status to show progress
+      queryClient.invalidateQueries({ queryKey: ['chats', 'session', sessionId] })
+      refetchBreakdownStatus()
+    } catch (error) {
+      console.error('❌ Failed to start breakdown:', error)
+      toast.error('Failed to start breakdown execution')
+      // Revert to detection message on error
+      setShowBreakdownTimeline(false)
+    }
+  }
 
   const sessionTabs = useMemo(() => {
     const baseSessions = Array.isArray(sessions) ? [...sessions] : []
-    if (sessionId && !baseSessions.some((session) => session.session_id === sessionId)) {
-      const firstUserMessage = messages.find((msg) => msg.role === 'user')
-      const messagePreview = firstUserMessage ? contentToText(firstUserMessage.content) : ''
-      baseSessions.unshift({
-        session_id: sessionId,
-        first_message: messagePreview || 'Active session',
-        message_count: messages.length,
-        created_at: firstUserMessage?.timestamp,
-        isVirtual: true,
-      })
+
+    // Filter out sub-task sessions (where parent_session_id != session_id)
+    // Sub-tasks are shown inline within their parent message, not as separate tabs
+    const filteredSessions = baseSessions.filter(session => {
+      // Keep sessions that are NOT sub-tasks
+      // A session is a sub-task if it has parent_session_id that differs from session_id
+      if (session.parent_session_id && session.parent_session_id !== session.session_id) {
+        return false // This is a sub-task, filter it out
+      }
+      // Also filter out if explicitly marked as breakdown subtask
+      if (session.is_breakdown_subtask) {
+        return false
+      }
+      return true
+    })
+
+    if (sessionId && !filteredSessions.some((session) => session.session_id === sessionId)) {
+      // Check if the current session is a sub-task - if so, don't add it as a tab
+      const currentIsSubtask = baseSessions.some(s =>
+        s.session_id === sessionId &&
+        s.parent_session_id &&
+        s.parent_session_id !== sessionId
+      )
+
+      if (!currentIsSubtask) {
+        const firstUserMessage = messages.find((msg) => msg.role === 'user')
+        const messagePreview = firstUserMessage ? contentToText(firstUserMessage.content) : ''
+        filteredSessions.unshift({
+          session_id: sessionId,
+          first_message: messagePreview || 'Active session',
+          message_count: messages.length,
+          created_at: firstUserMessage?.timestamp,
+          isVirtual: true,
+        })
+      }
     }
-    return baseSessions
+    return filteredSessions
   }, [sessions, sessionId, messages])
 
   const getSessionTabLabel = (session: any, index: number) => {
@@ -1156,6 +1346,8 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
             </div>
           )}
           
+          {/* Breakdown timeline is now shown inline within the parent message */}
+          
           <AnimatePresence>
             {messages.filter(msg => msg.role !== 'hook').map((message) => {
               const hooks = messageHooks?.get(message.id) || []
@@ -1174,72 +1366,627 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                   {/* Message Content - Modern X-style */}
                   <div className="space-y-2 sm:space-y-3">
                     {(message.role === 'user' || message.role === 'auto') ? (
-                      <div className="flex gap-3">
-                        {/* User Avatar */}
-                        <div className={cn(
-                          "flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center",
-                          message.role === 'auto' 
-                            ? "bg-gradient-to-br from-amber-500 to-orange-600"
-                            : "bg-gradient-to-br from-cyan-500 to-blue-600"
-                        )}>
-                          {message.role === 'auto' ? (
-                            <UpdateIcon className="h-5 w-5 text-white" />
-                          ) : (
-                            <PersonIcon className="h-5 w-5 text-white" />
-                          )}
-                        </div>
-                        {/* User Message */}
-                        <div className="flex-1 pt-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="font-semibold text-sm">{message.role === 'auto' ? 'Auto-continuation' : 'You'}</span>
-                            <span className="text-xs text-muted-foreground">
-                              · {new Date(message.timestamp).toLocaleTimeString('en-US', { 
-                                hour: 'numeric', 
-                                minute: '2-digit',
-                                hour12: true 
-                              })}
-                            </span>
-                            {message.role === 'auto' && (
-                              <motion.span 
-                                initial={{ opacity: 0, scale: 0.8 }}
-                                animate={{ opacity: 1, scale: 1 }}
-                                className="text-xs bg-amber-500/20 text-amber-500 px-1.5 py-0.5 rounded-full flex items-center gap-1"
-                              >
-                                <UpdateIcon className="h-3 w-3 animate-pulse" />
-                                AI Generated
-                              </motion.span>
-                            )}
-                          </div>
-                          <div className="text-[15px] leading-relaxed text-foreground">
-                            {message.content.text || message.content}
-                          </div>
-                          {/* Copy button */}
-                          <div className="mt-2">
-                            <button
-                              onClick={() => copyMessageContent(message)}
-                              className={cn(
-                                "inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs",
-                                "transition-all duration-200",
-                                "border border-transparent",
-                                copiedMessageId === message.id
-                                  ? "bg-green-500/20 text-green-500 border-green-500/30"
-                                  : "hover:bg-muted/50 text-muted-foreground hover:text-foreground hover:border-border/50"
+                      <div className="group">
+                        {/* Skip rendering sub-task messages - they're shown in the parent's timeline */}
+                        {message.content?.metadata?.is_breakdown_subtask ? null : (
+                          <>
+                            {/* Main User Message Card */}
+                            <div className={cn(
+                              "rounded-xl border p-4 transition-all",
+                              message.content?.metadata?.is_breakdown_parent
+                                ? "bg-gradient-to-br from-slate-900/50 via-purple-900/20 to-slate-900/50 border-purple-500/30"
+                                : "bg-gradient-to-br from-slate-900/30 to-slate-800/30 border-border/50 hover:border-cyan-500/30"
+                            )}>
+                              {/* Header */}
+                              <div className="flex items-start gap-3 mb-3">
+                                {/* Avatar */}
+                                <div className={cn(
+                                  "flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center",
+                                  "shadow-lg border border-white/10",
+                                  message.role === 'auto'
+                                    ? "bg-gradient-to-br from-amber-500 to-orange-600"
+                                    : "bg-gradient-to-br from-cyan-500 to-blue-600"
+                                )}>
+                                  {message.role === 'auto' ? (
+                                    <UpdateIcon className="h-4 w-4 text-white" />
+                                  ) : (
+                                    <PersonIcon className="h-4 w-4 text-white" />
+                                  )}
+                                </div>
+                                {/* Name and time */}
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="font-semibold text-sm text-foreground">
+                                      {message.role === 'auto' ? 'Auto-continuation' : 'You'}
+                                    </span>
+                                    <span className="text-xs text-muted-foreground/60">
+                                      {new Date(message.timestamp).toLocaleTimeString('en-US', {
+                                        hour: 'numeric',
+                                        minute: '2-digit',
+                                        hour12: true
+                                      })}
+                                    </span>
+                                    {message.role === 'auto' && (
+                                      <span className="text-xs bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full font-medium">
+                                        AI Generated
+                                      </span>
+                                    )}
+                                    {message.content?.metadata?.is_breakdown_parent && (
+                                      <span className="text-xs bg-purple-500/20 text-purple-400 px-2 py-0.5 rounded-full font-medium flex items-center gap-1">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />
+                                        Task Breakdown
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                                {/* Copy button */}
+                                <button
+                                  onClick={() => copyMessageContent(message)}
+                                  className={cn(
+                                    "opacity-0 group-hover:opacity-100 transition-opacity",
+                                    "p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                                  )}
+                                >
+                                  {copiedMessageId === message.id ? (
+                                    <CheckCircledIcon className="h-4 w-4 text-green-400" />
+                                  ) : (
+                                    <CopyIcon className="h-4 w-4" />
+                                  )}
+                                </button>
+                              </div>
+
+                              {/* Message Content */}
+                              <div className="text-sm leading-relaxed text-foreground/90 whitespace-pre-wrap">
+                                {message.content?.text || (typeof message.content === 'string' ? message.content : '')}
+                              </div>
+
+                              {/* Breakdown Timeline - Inline under parent message */}
+                              {message.content?.metadata?.is_breakdown_parent && breakdownStatus && (
+                                <div className="mt-4 pt-4 border-t border-purple-500/20">
+                                  {/* Timeline Header */}
+                                  <div className="flex items-center justify-between mb-4">
+                                    <div className="flex items-center gap-2">
+                                      <div className="w-2 h-2 rounded-full bg-purple-500 animate-pulse" />
+                                      <span className="text-sm font-semibold text-purple-400">
+                                        Sub-Tasks Pipeline
+                                      </span>
+                                    </div>
+                                    <span className="text-xs text-muted-foreground">
+                                      {breakdownStatus.completed_sub_tasks} / {breakdownStatus.total_sub_tasks} completed
+                                    </span>
+                                  </div>
+
+                                  {/* Progress Bar */}
+                                  <div className="w-full h-1.5 bg-muted/30 rounded-full overflow-hidden mb-4">
+                                    <motion.div
+                                      className="h-full bg-gradient-to-r from-purple-500 to-pink-500"
+                                      initial={{ width: 0 }}
+                                      animate={{ width: `${(breakdownStatus.completed_sub_tasks / breakdownStatus.total_sub_tasks) * 100}%` }}
+                                      transition={{ duration: 0.5 }}
+                                    />
+                                  </div>
+
+                                  {/* Sub-tasks List */}
+                                  <div className="space-y-2">
+                                    {breakdownStatus.sub_task_sessions.map((subTask, idx) => {
+                                      const isExpanded = expandedSubTaskId === subTask.session_id
+                                      const canExpand = subTask.session_id && subTask.status !== 'pending'
+
+                                      return (
+                                        <motion.div
+                                          key={subTask.session_id || idx}
+                                          initial={{ opacity: 0, x: -10 }}
+                                          animate={{ opacity: 1, x: 0 }}
+                                          transition={{ delay: idx * 0.05 }}
+                                          className="space-y-0"
+                                        >
+                                          {/* Clickable Sub-task Header */}
+                                          <button
+                                            onClick={() => {
+                                              if (canExpand) {
+                                                setExpandedSubTaskId(isExpanded ? null : subTask.session_id)
+                                              }
+                                            }}
+                                            disabled={!canExpand}
+                                            className={cn(
+                                              "w-full flex items-start gap-3 p-3 rounded-lg border transition-all text-left",
+                                              subTask.status === 'completed' && "bg-green-500/5 border-green-500/30",
+                                              subTask.status === 'processing' && "bg-cyan-500/5 border-cyan-500/30",
+                                              subTask.status === 'pending' && "bg-muted/20 border-border/30",
+                                              subTask.status === 'failed' && "bg-red-500/5 border-red-500/30",
+                                              canExpand && "cursor-pointer hover:bg-opacity-80",
+                                              isExpanded && "rounded-b-none border-b-0"
+                                            )}
+                                          >
+                                            {/* Status indicator */}
+                                            <div className={cn(
+                                              "flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold",
+                                              subTask.status === 'completed' && "bg-green-500/20 text-green-400",
+                                              subTask.status === 'processing' && "bg-cyan-500/20 text-cyan-400",
+                                              subTask.status === 'pending' && "bg-muted/30 text-muted-foreground",
+                                              subTask.status === 'failed' && "bg-red-500/20 text-red-400"
+                                            )}>
+                                              {subTask.status === 'completed' ? (
+                                                <CheckCircledIcon className="h-4 w-4" />
+                                              ) : subTask.status === 'processing' ? (
+                                                <UpdateIcon className="h-4 w-4 animate-spin" />
+                                              ) : subTask.status === 'failed' ? (
+                                                <CrossCircledIcon className="h-4 w-4" />
+                                              ) : (
+                                                subTask.sequence
+                                              )}
+                                            </div>
+
+                                            {/* Task info */}
+                                            <div className="flex-1 min-w-0">
+                                              <div className="flex items-center gap-2 mb-0.5">
+                                                <span className="font-medium text-sm text-foreground truncate">
+                                                  {subTask.title}
+                                                </span>
+                                                <span className={cn(
+                                                  "text-xs px-1.5 py-0.5 rounded-full flex-shrink-0",
+                                                  subTask.status === 'completed' && "bg-green-500/20 text-green-400",
+                                                  subTask.status === 'processing' && "bg-cyan-500/20 text-cyan-400",
+                                                  subTask.status === 'pending' && "bg-muted/30 text-muted-foreground",
+                                                  subTask.status === 'failed' && "bg-red-500/20 text-red-400"
+                                                )}>
+                                                  {subTask.status}
+                                                </span>
+                                                {canExpand && (
+                                                  <ChevronDownIcon className={cn(
+                                                    "h-4 w-4 text-muted-foreground transition-transform ml-auto",
+                                                    isExpanded && "rotate-180"
+                                                  )} />
+                                                )}
+                                              </div>
+                                              <p className="text-xs text-muted-foreground line-clamp-2">
+                                                {subTask.description}
+                                              </p>
+                                              {subTask.started_at && (
+                                                <div className="mt-1 text-xs text-muted-foreground/60">
+                                                  Started: {new Date(subTask.started_at).toLocaleTimeString()}
+                                                  {subTask.completed_at && (
+                                                    <span className="ml-2">
+                                                      • Completed: {new Date(subTask.completed_at).toLocaleTimeString()}
+                                                    </span>
+                                                  )}
+                                                </div>
+                                              )}
+                                            </div>
+                                          </button>
+
+                                          {/* Expanded Hooks View */}
+                                          <AnimatePresence>
+                                            {isExpanded && (
+                                              <motion.div
+                                                initial={{ opacity: 0, height: 0 }}
+                                                animate={{ opacity: 1, height: 'auto' }}
+                                                exit={{ opacity: 0, height: 0 }}
+                                                transition={{ duration: 0.2 }}
+                                                className={cn(
+                                                  "border border-t-0 rounded-b-lg overflow-hidden",
+                                                  subTask.status === 'completed' && "border-green-500/30 bg-green-500/5",
+                                                  subTask.status === 'processing' && "border-cyan-500/30 bg-cyan-500/5",
+                                                  subTask.status === 'failed' && "border-red-500/30 bg-red-500/5"
+                                                )}
+                                              >
+                                                <div className="p-3 space-y-3">
+                                                  {/* Progress Header with Refresh Button */}
+                                                  <div className="flex items-center justify-between text-xs text-muted-foreground border-b border-border/30 pb-2">
+                                                    <div className="flex items-center gap-2">
+                                                      <CodeIcon className="h-3.5 w-3.5" />
+                                                      <span>Execution Progress</span>
+                                                    </div>
+                                                    <button
+                                                      onClick={(e) => {
+                                                        e.stopPropagation()
+                                                        refetchSubTaskHooks()
+                                                      }}
+                                                      disabled={isRefetchingHooks}
+                                                      className={cn(
+                                                        "flex items-center gap-1.5 px-2 py-1 rounded-md text-xs transition-all",
+                                                        "hover:bg-muted/50 text-muted-foreground hover:text-foreground",
+                                                        isRefetchingHooks && "opacity-50 cursor-not-allowed"
+                                                      )}
+                                                      title="Refresh progress"
+                                                    >
+                                                      <UpdateIcon className={cn("h-3 w-3", isRefetchingHooks && "animate-spin")} />
+                                                      <span>{isRefetchingHooks ? 'Refreshing...' : 'Refresh'}</span>
+                                                    </button>
+                                                  </div>
+
+                                                  {/* Success Summary for completed tasks */}
+                                                  {subTask.status === 'completed' && subTask.result_summary && (
+                                                    <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/20">
+                                                      <div className="flex items-start gap-2">
+                                                        <CheckCircledIcon className="h-4 w-4 text-green-400 mt-0.5 flex-shrink-0" />
+                                                        <div className="flex-1 min-w-0">
+                                                          <div className="flex items-center gap-2 mb-1">
+                                                            <span className="font-medium text-sm text-green-400">Task Completed</span>
+                                                            {subTask.completed_at && (
+                                                              <span className="text-xs text-muted-foreground">
+                                                                {new Date(subTask.completed_at).toLocaleTimeString()}
+                                                              </span>
+                                                            )}
+                                                          </div>
+                                                          <p className="text-sm text-muted-foreground leading-relaxed">
+                                                            {subTask.result_summary}
+                                                          </p>
+                                                        </div>
+                                                      </div>
+                                                    </div>
+                                                  )}
+
+                                                  {/* Success banner without summary */}
+                                                  {subTask.status === 'completed' && !subTask.result_summary && (
+                                                    <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/20">
+                                                      <div className="flex items-center gap-2">
+                                                        <CheckCircledIcon className="h-4 w-4 text-green-400" />
+                                                        <span className="font-medium text-sm text-green-400">Task Completed Successfully</span>
+                                                        {subTask.completed_at && (
+                                                          <span className="text-xs text-muted-foreground ml-auto">
+                                                            {new Date(subTask.completed_at).toLocaleTimeString()}
+                                                          </span>
+                                                        )}
+                                                      </div>
+                                                    </div>
+                                                  )}
+
+                                                  {/* Failed banner */}
+                                                  {subTask.status === 'failed' && (
+                                                    <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+                                                      <div className="flex items-start gap-2">
+                                                        <CrossCircledIcon className="h-4 w-4 text-red-400 mt-0.5 flex-shrink-0" />
+                                                        <div className="flex-1 min-w-0">
+                                                          <div className="flex items-center justify-between gap-2 mb-1">
+                                                            <span className="font-medium text-sm text-red-400">Task Failed</span>
+                                                            <button
+                                                              onClick={(e) => {
+                                                                e.stopPropagation()
+                                                                if (sessionId && subTask.session_id) {
+                                                                  retrySubTaskMutation.mutate({
+                                                                    parentSessionId: sessionId,
+                                                                    subTaskSessionId: subTask.session_id
+                                                                  })
+                                                                }
+                                                              }}
+                                                              disabled={retrySubTaskMutation.isPending}
+                                                              className={cn(
+                                                                "px-2.5 py-1 text-xs font-medium rounded-md transition-all",
+                                                                "bg-red-500/20 hover:bg-red-500/30 text-red-300 hover:text-red-200",
+                                                                "border border-red-500/30 hover:border-red-500/40",
+                                                                "disabled:opacity-50 disabled:cursor-not-allowed"
+                                                              )}
+                                                            >
+                                                              {retrySubTaskMutation.isPending ? (
+                                                                <span className="flex items-center gap-1.5">
+                                                                  <UpdateIcon className="h-3 w-3 animate-spin" />
+                                                                  Retrying...
+                                                                </span>
+                                                              ) : (
+                                                                <span className="flex items-center gap-1.5">
+                                                                  <UpdateIcon className="h-3 w-3" />
+                                                                  Retry
+                                                                </span>
+                                                              )}
+                                                            </button>
+                                                          </div>
+                                                          {subTask.result_summary && (
+                                                            <p className="text-sm text-muted-foreground leading-relaxed">
+                                                              {subTask.result_summary}
+                                                            </p>
+                                                          )}
+                                                        </div>
+                                                      </div>
+                                                    </div>
+                                                  )}
+
+                                                  {/* Hooks List */}
+                                                  {expandedSubTaskHooks?.hooks && expandedSubTaskHooks.hooks.length > 0 ? (
+                                                    <div className="space-y-2">
+                                                      {expandedSubTaskHooks.hooks.map((hook: ChatHook, hookIdx: number) => {
+                                                        const hookId = hook.id || `hook-${hookIdx}`
+                                                        const isHookExpanded = expandedSubTaskHookIds.has(hookId)
+
+                                                        return (
+                                                          <div
+                                                            key={hookId}
+                                                            className={cn(
+                                                              "rounded-md border text-xs overflow-hidden transition-all",
+                                                              hook.status === 'completed' && "border-green-500/20",
+                                                              hook.status === 'processing' && "border-cyan-500/20",
+                                                              hook.status === 'pending' && "border-border/30",
+                                                              hook.status === 'failed' && "border-red-500/20"
+                                                            )}
+                                                          >
+                                                            {/* Hook Header - Clickable */}
+                                                            <button
+                                                              onClick={(e) => {
+                                                                e.stopPropagation()
+                                                                setExpandedSubTaskHookIds(prev => {
+                                                                  const next = new Set(prev)
+                                                                  if (next.has(hookId)) {
+                                                                    next.delete(hookId)
+                                                                  } else {
+                                                                    next.add(hookId)
+                                                                  }
+                                                                  return next
+                                                                })
+                                                              }}
+                                                              className={cn(
+                                                                "w-full p-2 flex items-center gap-2 transition-colors",
+                                                                hook.status === 'completed' && "bg-green-500/10 hover:bg-green-500/15",
+                                                                hook.status === 'processing' && "bg-cyan-500/10 hover:bg-cyan-500/15",
+                                                                hook.status === 'pending' && "bg-muted/30 hover:bg-muted/40",
+                                                                hook.status === 'failed' && "bg-red-500/10 hover:bg-red-500/15"
+                                                              )}
+                                                            >
+                                                              {/* Expand Icon */}
+                                                              <motion.div
+                                                                animate={{ rotate: isHookExpanded ? 90 : 0 }}
+                                                                transition={{ duration: 0.15 }}
+                                                                className="flex-shrink-0"
+                                                              >
+                                                                <ChevronRightIcon className="h-3 w-3 text-muted-foreground" />
+                                                              </motion.div>
+
+                                                              {/* Status Icon */}
+                                                              {hook.status === 'completed' ? (
+                                                                <CheckCircledIcon className="h-3 w-3 text-green-400 flex-shrink-0" />
+                                                              ) : hook.status === 'processing' ? (
+                                                                <UpdateIcon className="h-3 w-3 text-cyan-400 animate-spin flex-shrink-0" />
+                                                              ) : hook.status === 'failed' ? (
+                                                                <CrossCircledIcon className="h-3 w-3 text-red-400 flex-shrink-0" />
+                                                              ) : (
+                                                                <ClockIcon className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                                                              )}
+
+                                                              {/* Hook Type */}
+                                                              <span className="font-medium text-foreground truncate">
+                                                                {hook.hook_type || 'Hook'}
+                                                              </span>
+
+                                                              {/* Tool Name Badge if available */}
+                                                              {(hook.tool_name || hook.data?.tool_name) && (
+                                                                <span className="px-1.5 py-0.5 rounded bg-muted/50 text-muted-foreground text-[10px] truncate max-w-[100px]">
+                                                                  {hook.tool_name || hook.data?.tool_name}
+                                                                </span>
+                                                              )}
+
+                                                              {/* Preview when collapsed - prioritize data.result */}
+                                                              {!isHookExpanded && (
+                                                                <span className="text-muted-foreground text-[10px] truncate flex-1 text-left max-w-[200px]">
+                                                                  {(() => {
+                                                                    // Priority: data.result > data.error > message
+                                                                    const preview = hook.data?.result || hook.data?.error || hook.message || ''
+                                                                    if (!preview) return null
+                                                                    const truncated = typeof preview === 'string' ? preview.substring(0, 60) : ''
+                                                                    return truncated.length < (preview?.length || 0) ? `${truncated}...` : truncated
+                                                                  })()}
+                                                                </span>
+                                                              )}
+
+                                                              {/* Status Badge */}
+                                                              <span className={cn(
+                                                                "ml-auto px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0",
+                                                                hook.status === 'completed' && "bg-green-500/20 text-green-400",
+                                                                hook.status === 'processing' && "bg-cyan-500/20 text-cyan-400",
+                                                                hook.status === 'pending' && "bg-muted/50 text-muted-foreground",
+                                                                hook.status === 'failed' && "bg-red-500/20 text-red-400",
+                                                                hook.status === 'user_message' && "bg-purple-500/20 text-purple-400"
+                                                              )}>
+                                                                {hook.status}
+                                                              </span>
+                                                            </button>
+
+                                                            {/* Expanded Content */}
+                                                            <AnimatePresence>
+                                                              {isHookExpanded && (
+                                                                <motion.div
+                                                                  initial={{ opacity: 0, height: 0 }}
+                                                                  animate={{ opacity: 1, height: 'auto' }}
+                                                                  exit={{ opacity: 0, height: 0 }}
+                                                                  transition={{ duration: 0.15 }}
+                                                                  className="overflow-hidden"
+                                                                >
+                                                                  <div className={cn(
+                                                                    "p-3 border-t space-y-2",
+                                                                    hook.status === 'completed' && "bg-green-500/5 border-green-500/20",
+                                                                    hook.status === 'processing' && "bg-cyan-500/5 border-cyan-500/20",
+                                                                    hook.status === 'pending' && "bg-muted/20 border-border/30",
+                                                                    hook.status === 'failed' && "bg-red-500/5 border-red-500/20"
+                                                                  )}>
+                                                                    {/* Result/Message Content - Prioritize hook.data.result */}
+                                                                    {(() => {
+                                                                      // Priority: data.result > data.error > message
+                                                                      const displayContent = hook.data?.result || hook.data?.error || hook.message
+                                                                      if (!displayContent) return null
+                                                                      return (
+                                                                        <div>
+                                                                          <div className="text-[10px] font-medium text-muted-foreground mb-1">
+                                                                            {hook.data?.error ? 'Error:' : 'Result:'}
+                                                                          </div>
+                                                                          <div className={cn(
+                                                                            "text-xs whitespace-pre-wrap break-words p-2 rounded",
+                                                                            hook.data?.error
+                                                                              ? "text-red-400 bg-red-500/10"
+                                                                              : "text-foreground bg-muted/20"
+                                                                          )}>
+                                                                            {displayContent}
+                                                                          </div>
+                                                                        </div>
+                                                                      )
+                                                                    })()}
+
+                                                                    {/* Tool Input if available */}
+                                                                    {(hook.tool_input || hook.data?.tool_input) && (
+                                                                      <div>
+                                                                        <div className="text-[10px] font-medium text-muted-foreground mb-1">Tool Input:</div>
+                                                                        <pre className="text-[10px] text-foreground bg-muted/30 p-2 rounded overflow-x-auto">
+                                                                          {(() => {
+                                                                            const toolInput = hook.tool_input || hook.data?.tool_input
+                                                                            return typeof toolInput === 'string'
+                                                                              ? toolInput
+                                                                              : JSON.stringify(toolInput, null, 2)
+                                                                          })()}
+                                                                        </pre>
+                                                                      </div>
+                                                                    )}
+
+                                                                    {/* Step Info if available */}
+                                                                    {(hook.step_name || hook.step_index !== undefined) && (
+                                                                      <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                                                                        <span className="font-medium">Step:</span>
+                                                                        {hook.step_name && <span>{hook.step_name}</span>}
+                                                                        {hook.step_index !== undefined && hook.total_steps && (
+                                                                          <span className="ml-auto">({hook.step_index + 1}/{hook.total_steps})</span>
+                                                                        )}
+                                                                      </div>
+                                                                    )}
+
+                                                                    {/* Task ID if available */}
+                                                                    {hook.data?.task_id && (
+                                                                      <div className="text-[10px] text-muted-foreground">
+                                                                        <span className="font-medium">Task ID:</span> <code className="text-cyan-400">{hook.data.task_id.slice(0, 8)}...</code>
+                                                                      </div>
+                                                                    )}
+
+                                                                    {/* Timestamp */}
+                                                                    {hook.received_at && (
+                                                                      <div className="text-[10px] text-muted-foreground">
+                                                                        Received: {new Date(hook.received_at).toLocaleString()}
+                                                                      </div>
+                                                                    )}
+                                                                  </div>
+                                                                </motion.div>
+                                                              )}
+                                                            </AnimatePresence>
+                                                          </div>
+                                                        )
+                                                      })}
+                                                    </div>
+                                                  ) : expandedSubTaskHooks?.messages && expandedSubTaskHooks.messages.length > 0 ? (
+                                                    <div className="space-y-2">
+                                                      {expandedSubTaskHooks.messages.map((msg: any, msgIdx: number) => {
+                                                        const msgId = msg.id || `msg-${msgIdx}`
+                                                        const isMsgExpanded = expandedSubTaskHookIds.has(msgId)
+
+                                                        return (
+                                                          <div
+                                                            key={msgId}
+                                                            className="rounded-md border border-border/30 text-xs overflow-hidden"
+                                                          >
+                                                            {/* Message Header - Clickable */}
+                                                            <button
+                                                              onClick={(e) => {
+                                                                e.stopPropagation()
+                                                                setExpandedSubTaskHookIds(prev => {
+                                                                  const next = new Set(prev)
+                                                                  if (next.has(msgId)) {
+                                                                    next.delete(msgId)
+                                                                  } else {
+                                                                    next.add(msgId)
+                                                                  }
+                                                                  return next
+                                                                })
+                                                              }}
+                                                              className="w-full p-2 flex items-center gap-2 bg-muted/20 hover:bg-muted/30 transition-colors"
+                                                            >
+                                                              {/* Expand Icon */}
+                                                              <motion.div
+                                                                animate={{ rotate: isMsgExpanded ? 90 : 0 }}
+                                                                transition={{ duration: 0.15 }}
+                                                                className="flex-shrink-0"
+                                                              >
+                                                                <ChevronRightIcon className="h-3 w-3 text-muted-foreground" />
+                                                              </motion.div>
+
+                                                              {/* Role Icon */}
+                                                              {msg.role === 'user' ? (
+                                                                <PersonIcon className="h-3 w-3 text-cyan-400 flex-shrink-0" />
+                                                              ) : (
+                                                                <RocketIcon className="h-3 w-3 text-purple-400 flex-shrink-0" />
+                                                              )}
+
+                                                              {/* Role Label */}
+                                                              <span className={cn(
+                                                                "font-medium",
+                                                                msg.role === 'user' ? "text-cyan-400" : "text-purple-400"
+                                                              )}>
+                                                                {msg.role === 'user' ? 'Request' : 'Response'}
+                                                              </span>
+
+                                                              {/* Preview */}
+                                                              {!isMsgExpanded && (
+                                                                <span className="text-muted-foreground truncate flex-1 text-left">
+                                                                  {(msg.content?.text || (typeof msg.content === 'string' ? msg.content : 'Processing...')).substring(0, 50)}...
+                                                                </span>
+                                                              )}
+
+                                                              {/* Timestamp */}
+                                                              <span className="text-muted-foreground/60 ml-auto flex-shrink-0">
+                                                                {new Date(msg.created_at).toLocaleTimeString()}
+                                                              </span>
+                                                            </button>
+
+                                                            {/* Expanded Content */}
+                                                            <AnimatePresence>
+                                                              {isMsgExpanded && (
+                                                                <motion.div
+                                                                  initial={{ opacity: 0, height: 0 }}
+                                                                  animate={{ opacity: 1, height: 'auto' }}
+                                                                  exit={{ opacity: 0, height: 0 }}
+                                                                  transition={{ duration: 0.15 }}
+                                                                  className="overflow-hidden"
+                                                                >
+                                                                  <div className="p-3 border-t border-border/30 bg-muted/10">
+                                                                    <p className="text-xs text-foreground whitespace-pre-wrap break-words">
+                                                                      {msg.content?.text || (typeof msg.content === 'string' ? msg.content : 'Processing...')}
+                                                                    </p>
+                                                                  </div>
+                                                                </motion.div>
+                                                              )}
+                                                            </AnimatePresence>
+                                                          </div>
+                                                        )
+                                                      })}
+                                                    </div>
+                                                  ) : (
+                                                    <div className="text-center py-4 text-xs text-muted-foreground">
+                                                      {subTask.status === 'processing' ? (
+                                                        <div className="flex items-center justify-center gap-2">
+                                                          <UpdateIcon className="h-4 w-4 animate-spin" />
+                                                          <span>Processing...</span>
+                                                        </div>
+                                                      ) : (
+                                                        'No execution details available'
+                                                      )}
+                                                    </div>
+                                                  )}
+                                                </div>
+                                              </motion.div>
+                                            )}
+                                          </AnimatePresence>
+                                        </motion.div>
+                                      )
+                                    })}
+                                  </div>
+
+                                  {/* Start button if not started */}
+                                  {breakdownStatus.completed_sub_tasks === 0 &&
+                                   !breakdownStatus.sub_task_sessions.some(t => t.status === 'processing') && (
+                                    <button
+                                      onClick={handleStartBreakdown}
+                                      className="mt-4 w-full py-2.5 px-4 rounded-lg bg-gradient-to-r from-purple-500 to-pink-500 text-white font-medium text-sm hover:from-purple-600 hover:to-pink-600 transition-all"
+                                    >
+                                      Start Processing Tasks
+                                    </button>
+                                  )}
+                                </div>
                               )}
-                            >
-                              {copiedMessageId === message.id ? (
-                                <>
-                                  <CheckCircledIcon className="h-3 w-3" />
-                                  <span>Copied!</span>
-                                </>
-                              ) : (
-                                <>
-                                  <CopyIcon className="h-3 w-3" />
-                                  <span>Copy</span>
-                                </>
-                              )}
-                            </button>
-                          </div>
-                        </div>
+                            </div>
+                          </>
+                        )}
                       </div>
                     ) : (
                       <div className="flex gap-3">
@@ -1279,7 +2026,7 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                             )}
                           </div>
                           <div className="text-[15px] leading-relaxed">
-                            <AssistantMessage 
+                            <AssistantMessage
                               message={message}
                               hooks={messageHooks?.get(message.id) || []}
                               onToggleHook={toggleHookExpansion}
@@ -1287,6 +2034,8 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                               getHookIcon={getHookIcon}
                               formatHookMessage={formatHookMessage}
                               isWaitingForResponse={isWaitingForResponse}
+                              onRetry={(chatId) => retryChatMutation.mutate(chatId)}
+                              isRetrying={retryChatMutation.isPending}
                             />
                           </div>
                         </div>
@@ -1408,78 +2157,108 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
 
         {/* Message Queue Display removed - input is now blocked when waiting for response */}
 
-        {/* Modern X-style Input Area */}
+        {/* Beautiful Modern Input Area */}
         <div className={cn(
-          "border-t border-border/50 bg-black/40 backdrop-blur-sm transition-all duration-200",
-          isWaitingForResponse && "opacity-60 bg-black/70"
+          "border-t transition-all duration-300",
+          isWaitingForResponse 
+            ? "border-border/30 bg-gradient-to-b from-black/60 to-black/80" 
+            : "border-border/50 bg-gradient-to-b from-black/40 to-black/60 hover:from-black/50 hover:to-black/70",
+          "backdrop-blur-md shadow-lg"
         )}>
-          {/* Pending Response Overlay */}
-          <form onSubmit={handleSubmit} className="p-3 sm:p-4">
+          <form onSubmit={handleSubmit} className="p-4 sm:p-5">
             <div className="relative">
-              <Textarea
-                ref={textareaRef}
-                value={input}
-                onChange={(e) => {
-                  // Block input changes when waiting for response
-                  if (isWaitingForResponse) return
-                  setInput(e.target.value)
-                  // Auto-resize textarea
-                  if (textareaRef.current) {
-                    textareaRef.current.style.height = 'auto'
-                    textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px'
-                  }
-                }}
-                onKeyDown={(e) => {
-                  // Block all submissions when waiting for response
-                  if (isWaitingForResponse) {
-                    if (e.key === 'Enter') {
-                      e.preventDefault()
+              {/* Main Input Container with Enhanced Styling */}
+              <div className={cn(
+                "relative rounded-2xl transition-all duration-300",
+                input.trim() || isWaitingForResponse
+                  ? "bg-card/40 ring-2 ring-cyan-500/30"
+                  : "bg-card/20 ring-1 ring-border/50 hover:ring-border/80 hover:bg-card/30"
+              )}>
+                <Textarea
+                  ref={textareaRef}
+                  value={input}
+                  onChange={(e) => {
+                    if (isWaitingForResponse) return
+                    setInput(e.target.value)
+                    // Auto-resize textarea
+                    if (textareaRef.current) {
+                      textareaRef.current.style.height = 'auto'
+                      textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px'
                     }
-                    return
+                  }}
+                  onKeyDown={(e) => {
+                    if (isWaitingForResponse) {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                      }
+                      return
+                    }
+                    // Submit on Enter (without modifiers)
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      handleSubmit(e as any)
+                    }
+                  }}
+                  placeholder={
+                    isWaitingForResponse
+                      ? "⏳ Processing your request..."
+                      : "Describe what you'd like to build or fix..."
                   }
-                  // Submit on Enter (without modifiers)
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault()
-                    handleSubmit(e as any)
-                  }
-                }}
-                placeholder={
-                  isWaitingForResponse
-                    ? "⏳ Please wait for the current response to complete..."
-                    : "What's happening with your code?"
-                }
-                disabled={isWaitingForResponse}
-                className={cn(
-                  "w-full bg-transparent border-0 focus:ring-0 resize-none",
-                  "placeholder:text-muted-foreground/50 text-base leading-relaxed",
-                  "font-sans min-h-[24px] max-h-[200px] p-0 pr-12",
-                  isWaitingForResponse && "cursor-not-allowed opacity-50"
-                )}
-                rows={1}
-                style={{
-                  outline: 'none',
-                  boxShadow: 'none',
-                  scrollbarWidth: 'thin'
-                }}
-              />
+                  disabled={isWaitingForResponse}
+                  className={cn(
+                    "w-full bg-transparent border-0 focus:ring-0 resize-none",
+                    "placeholder:text-muted-foreground/60 text-base leading-relaxed",
+                    "font-sans min-h-[56px] max-h-[240px] px-4 pt-4 pb-3",
+                    "transition-all duration-200",
+                    isWaitingForResponse && "cursor-not-allowed opacity-60"
+                  )}
+                  rows={1}
+                  style={{
+                    outline: 'none',
+                    boxShadow: 'none',
+                    scrollbarWidth: 'thin',
+                    scrollbarColor: 'rgb(6 182 212 / 0.3) transparent'
+                  }}
+                />
+              </div>
               
-              {/* Character count and send button area */}
-              <div className="flex items-center justify-between mt-3">
-                <div className="flex items-center gap-3">
-                  {/* Add icons like X has for media, GIF, poll, etc - but for code context */}
+              {/* Enhanced Controls Bar */}
+              <div className="flex items-center justify-between mt-4 gap-3">
+                <div className="flex items-center gap-2">
+                  {/* Quick Action Buttons */}
                   <button
                     type="button"
-                    className="text-muted-foreground hover:text-cyan-500 transition-colors p-1.5 rounded-full hover:bg-cyan-500/10"
+                    disabled={isWaitingForResponse}
+                    className={cn(
+                      "group relative text-muted-foreground transition-all duration-200",
+                      "p-2 rounded-xl hover:bg-cyan-500/10 hover:text-cyan-400",
+                      "disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                    )}
                     title="Add code snippet"
                   >
                     <CodeIcon className="h-4 w-4" />
+                    <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 
+                      text-xs bg-black/90 text-white rounded-lg opacity-0 group-hover:opacity-100 
+                      transition-opacity whitespace-nowrap pointer-events-none">
+                      Code snippet
+                    </span>
                   </button>
                   <button
                     type="button"
-                    className="text-muted-foreground hover:text-cyan-500 transition-colors p-1.5 rounded-full hover:bg-cyan-500/10"
+                    disabled={isWaitingForResponse}
+                    className={cn(
+                      "group relative text-muted-foreground transition-all duration-200",
+                      "p-2 rounded-xl hover:bg-cyan-500/10 hover:text-cyan-400",
+                      "disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                    )}
                     title="Add file reference"
                   >
                     <FileTextIcon className="h-4 w-4" />
+                    <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 
+                      text-xs bg-black/90 text-white rounded-lg opacity-0 group-hover:opacity-100 
+                      transition-opacity whitespace-nowrap pointer-events-none">
+                      File reference
+                    </span>
                   </button>
                 </div>
                 
@@ -1702,36 +2481,54 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                     )}
                   </div>
                   
-                  {/* Send Button - disabled when waiting for response */}
-                  <div className="flex items-center gap-1">
+                  {/* Enhanced Send Button */}
+                  <div className="flex items-center gap-1 relative group">
                     <Button
                       type="submit"
                       disabled={!input.trim() || isWaitingForResponse}
                       className={cn(
-                        "rounded-full h-9 w-9 sm:h-9 sm:w-auto sm:px-4 transition-all duration-200 touch-manipulation",
-                        "font-medium text-sm gap-2",
+                        "rounded-full h-10 w-10 sm:h-10 sm:w-auto sm:px-5 transition-all duration-300",
+                        "font-semibold text-sm gap-2 shadow-lg touch-manipulation",
+                        "relative overflow-hidden",
                         isWaitingForResponse
-                          ? "bg-gray-500/30 text-gray-500 cursor-not-allowed"
+                          ? "bg-gray-500/20 text-gray-400 cursor-not-allowed border border-gray-500/30"
                           : input.trim()
-                            ? "bg-cyan-500 hover:bg-cyan-600 text-black"
-                            : "bg-cyan-500/20 text-cyan-500/50 cursor-not-allowed"
+                            ? "bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-600 hover:to-cyan-700 text-black shadow-cyan-500/30 hover:shadow-cyan-500/50 hover:scale-105 active:scale-95"
+                            : "bg-cyan-500/10 text-cyan-500/40 cursor-not-allowed border border-cyan-500/20"
                       )}
                       size="sm"
                       title={
                         isWaitingForResponse
-                          ? "Please wait for the current response to complete"
-                          : "Send message (1 credit) - Press Enter"
+                          ? "Processing your request..."
+                          : input.trim()
+                            ? "Send message (1 credit) • Press Enter"
+                            : "Type a message to send"
                       }
                     >
+                      {/* Button glow effect */}
+                      {input.trim() && !isWaitingForResponse && (
+                        <div className="absolute inset-0 bg-gradient-to-r from-cyan-400 to-cyan-500 opacity-0 group-hover:opacity-20 blur transition-opacity" />
+                      )}
+                      
                       {isWaitingForResponse ? (
                         <>
-                          <ClockIcon className="h-4 w-4 sm:hidden" />
-                          <span className="hidden sm:inline">Wait...</span>
+                          <UpdateIcon className="h-4 w-4 sm:hidden animate-spin" />
+                          <span className="hidden sm:inline-flex items-center gap-2">
+                            <UpdateIcon className="h-4 w-4 animate-spin" />
+                            Processing
+                          </span>
                         </>
                       ) : (
                         <>
-                          <PaperPlaneIcon className="h-4 w-4 sm:hidden" />
-                          <span className="hidden sm:inline-flex items-center gap-1.5">
+                          <PaperPlaneIcon className={cn(
+                            "h-4 w-4 sm:hidden transition-transform",
+                            input.trim() && "group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
+                          )} />
+                          <span className="hidden sm:inline-flex items-center gap-2 relative z-10">
+                            <PaperPlaneIcon className={cn(
+                              "h-4 w-4 transition-transform",
+                              input.trim() && "group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
+                            )} />
                             Send
                             <CreditCost cost={1} variant="badge-subtle" />
                           </span>
@@ -1742,8 +2539,8 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                 </div>
               </div>
 
-              {/* Combined status indicator with mobile optimization and credit cost */}
-              <div className="mt-2">
+              {/* Enhanced Status Indicator */}
+              <div className="mt-4">
                 {isMobile ? (
                   <MobileInputStatus
                     isWaiting={isWaitingForResponse}
@@ -1753,15 +2550,25 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                     showHints={false}
                   />
                 ) : (
-                  <div className="text-xs text-muted-foreground/50">
+                  <div className="text-xs transition-all duration-200">
                     {isWaitingForResponse ? (
-                      <div className="flex items-center gap-2 text-amber-500">
-                        <UpdateIcon className="h-3 w-3 animate-spin" />
-                        <span>Processing... Please wait for the response to complete before sending another message.</span>
+                      <div className="flex items-center gap-2 text-amber-400/90 bg-amber-500/5 px-3 py-2 rounded-xl border border-amber-500/20">
+                        <UpdateIcon className="h-3.5 w-3.5 animate-spin" />
+                        <span className="font-medium">Processing your request... Please wait for completion before sending another message.</span>
                       </div>
                     ) : (
-                      <div className="flex items-center justify-between">
-                        <span>Press Enter to send • Shift+Enter for new line</span>
+                      <div className="flex items-center justify-between px-1">
+                        <div className="flex items-center gap-3 text-muted-foreground/60">
+                          <span className="flex items-center gap-1.5">
+                            <kbd className="px-1.5 py-0.5 bg-muted/50 rounded text-[10px] font-mono border border-border/50">Enter</kbd>
+                            to send
+                          </span>
+                          <span className="text-muted-foreground/40">•</span>
+                          <span className="flex items-center gap-1.5">
+                            <kbd className="px-1.5 py-0.5 bg-muted/50 rounded text-[10px] font-mono border border-border/50">Shift+Enter</kbd>
+                            new line
+                          </span>
+                        </div>
                         <CreditCost cost={1} variant="context" showWarning={false} />
                       </div>
                     )}

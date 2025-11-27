@@ -165,6 +165,56 @@ async def handle_query(
     await session.commit()
     await session.refresh(chat)
     
+    # TASK BREAKDOWN: Analyze if this message should be broken down
+    breakdown_info = None
+    if not request.session_id:  # Only analyze new conversations, not continuing ones
+        context = {
+            "project_name": project_name,
+            "task_name": task_name,
+            "project_id": project_id
+        }
+        breakdown_info = await chat_service.analyze_and_create_breakdown(
+            session, chat, context
+        )
+    
+    # If breakdown detected, return breakdown info immediately
+    if breakdown_info:
+        logger.info(f"🎯 Breakdown detected, returning analysis to UI")
+        
+        # Update session_id to stable one
+        ui_session_id = chat.session_id
+        
+        response_data = {
+            "session_id": ui_session_id,
+            "assistant_response": "Analyzing your request...",
+            "chat_id": str(chat.id),
+            "is_breakdown": True,
+            "breakdown_info": breakdown_info
+        }
+        
+        # Deduct coins for analysis
+        try:
+            await coin_service.deduct_coins(
+                session,
+                current_user.id,
+                COINS_PER_CHAT_MESSAGE,
+                f"Chat message with breakdown analysis",
+                reference_id=str(chat.id),
+                reference_type="chat",
+                meta_data={
+                    "session_id": ui_session_id,
+                    "prompt_length": len(request.prompt),
+                    "project_name": project_name,
+                    "task_name": task_name,
+                    "is_breakdown": True,
+                    "total_sub_tasks": breakdown_info["total_sub_tasks"]
+                }
+            )
+        except Exception as coin_error:
+            logger.error(f"Failed to deduct coins: {coin_error}")
+        
+        return QueryResponse(**response_data)
+    
     # Use the new chat service with remote integration
     try:
         # CONVERSATION CONTINUITY FIX: Maintain stable UI session ID throughout entire conversation
@@ -578,6 +628,7 @@ async def get_session_chats(
                     "created_at": chat.created_at.isoformat(),
                     "sub_project_id": str(chat.sub_project_id),
                     "session_id": chat.session_id,
+                    "parent_session_id": chat.parent_session_id,  # Include for sub-task identification
                     "continuation_status": getattr(chat, 'continuation_status', None),
                     "parent_message_id": str(chat.parent_message_id) if chat.parent_message_id else None
                 }
@@ -606,34 +657,33 @@ async def get_sub_project_sessions(
     sub_project_id: UUID,
     session: AsyncSession = Depends(get_session)
 ):
-    """Get all conversation sessions for a sub-project - FIXED for conversation continuity"""
+    """Get all conversation sessions for a sub-project - with breakdown grouping support"""
     import logging
     logger = logging.getLogger(__name__)
-    
+
     try:
-        # CRITICAL FIX: Group by actual session_id instead of time-based heuristics
-        # This prevents different conversations from being grouped together
-        
         logger.info(f"🔍 Getting sessions for sub_project: {str(sub_project_id)[:8]}...")
-        
-        # Get all unique session_ids for this sub_project
+
+        # Get all unique session_ids with their parent_session_id for this sub_project
         result = await session.execute(
-            select(Chat.session_id, Chat.created_at)
+            select(Chat.session_id, Chat.parent_session_id, Chat.created_at)
             .where(Chat.sub_project_id == sub_project_id)
             .distinct(Chat.session_id)
             .order_by(Chat.session_id, Chat.created_at)
         )
         unique_sessions = result.all()
-        
+
         if not unique_sessions:
             logger.info("📭 No sessions found")
-            return {"sessions": []}
-        
+            return {"sessions": [], "grouped_sessions": []}
+
         logger.info(f"📊 Found {len(unique_sessions)} unique sessions")
-        
-        # Get session details
+
+        # Build session details with parent_session_id
         sessions = []
-        for session_id, _ in unique_sessions:
+        parent_sessions = {}  # Map parent_session_id -> list of child sessions
+
+        for session_id, parent_session_id, _ in unique_sessions:
             # Get all messages for this session
             result = await session.execute(
                 select(Chat)
@@ -642,7 +692,7 @@ async def get_sub_project_sessions(
                 .order_by(Chat.created_at)
             )
             session_chats = list(result.scalars().all())
-            
+
             if session_chats:
                 # Find the first user message for the session summary
                 first_user_message = None
@@ -650,28 +700,79 @@ async def get_sub_project_sessions(
                     if chat.role in ["user", "auto"] and chat.content.get("text"):
                         first_user_message = chat
                         break
-                
+
                 first_message_text = ""
+                metadata = {}
                 if first_user_message:
                     text = first_user_message.content.get("text", "")
                     first_message_text = text[:100] + "..." if len(text) > 100 else text
-                
-                sessions.append({
+                    metadata = first_user_message.content.get("metadata", {})
+
+                # Determine if this is a breakdown parent or child
+                is_breakdown_parent = metadata.get("is_breakdown_parent", False)
+                is_breakdown_subtask = metadata.get("is_breakdown_subtask", False)
+
+                session_info = {
                     "session_id": session_id,
+                    "parent_session_id": parent_session_id,
                     "message_count": len(session_chats),
                     "first_message": first_message_text,
                     "last_message_at": session_chats[-1].created_at.isoformat(),
-                    "created_at": session_chats[0].created_at.isoformat()
-                })
-        
+                    "created_at": session_chats[0].created_at.isoformat(),
+                    "is_breakdown_parent": is_breakdown_parent,
+                    "is_breakdown_subtask": is_breakdown_subtask,
+                    "breakdown_metadata": metadata if is_breakdown_parent else None,
+                    "subtask_metadata": {
+                        "sequence": metadata.get("sequence"),
+                        "title": metadata.get("title"),
+                        "description": metadata.get("description")
+                    } if is_breakdown_subtask else None
+                }
+
+                sessions.append(session_info)
+
+                # Group by parent_session_id for breakdown grouping
+                if parent_session_id:
+                    if parent_session_id not in parent_sessions:
+                        parent_sessions[parent_session_id] = []
+                    if session_id != parent_session_id:  # Don't add parent to its own children
+                        parent_sessions[parent_session_id].append(session_info)
+
         # Sort sessions by created_at in descending order (newest first)
         sessions.sort(key=lambda x: x["created_at"], reverse=True)
-        
-        logger.info(f"✅ Returning {len(sessions)} properly separated sessions")
-        
+
+        # Build grouped sessions (parent + children)
+        grouped_sessions = []
+        processed_parents = set()
+
+        for sess in sessions:
+            if sess["is_breakdown_parent"] and sess["session_id"] not in processed_parents:
+                parent_id = sess["session_id"]
+                children = parent_sessions.get(parent_id, [])
+                children.sort(key=lambda x: x.get("subtask_metadata", {}).get("sequence", 0) if x.get("subtask_metadata") else 0)
+
+                grouped_sessions.append({
+                    "parent_session": sess,
+                    "child_sessions": children,
+                    "total_children": len(children),
+                    "completed_children": sum(1 for c in children if c.get("subtask_metadata", {}).get("status") == "completed")
+                })
+                processed_parents.add(parent_id)
+            elif not sess["is_breakdown_subtask"] and sess["session_id"] not in processed_parents:
+                # Regular sessions (not part of breakdown)
+                grouped_sessions.append({
+                    "parent_session": sess,
+                    "child_sessions": [],
+                    "total_children": 0,
+                    "completed_children": 0
+                })
+
+        logger.info(f"✅ Returning {len(sessions)} sessions in {len(grouped_sessions)} groups")
+
         return {
             "sub_project_id": str(sub_project_id),
-            "sessions": sessions
+            "sessions": sessions,
+            "grouped_sessions": grouped_sessions
         }
     except Exception as e:
         logger.error(f"❌ Failed to get sessions: {str(e)}")
@@ -938,5 +1039,296 @@ async def toggle_bypass_mode(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to toggle bypass mode: {str(e)}"
+        )
+
+
+@router.get("/sessions/{session_id}/breakdown-group")
+async def get_breakdown_group(
+    session_id: str,
+    session: AsyncSession = Depends(get_session)
+):
+    """Get all sessions in a breakdown group (parent + children)"""
+    try:
+        # Get the sub_project_id from any chat in this session
+        stmt = select(Chat.sub_project_id).where(Chat.session_id == session_id).limit(1)
+        result = await session.execute(stmt)
+        sub_project_id_row = result.first()
+        
+        if not sub_project_id_row:
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        sub_project_id = sub_project_id_row[0]
+        
+        from app.services.task_orchestration_service import task_orchestration_service
+        breakdown_group = await task_orchestration_service.get_breakdown_group(
+            session, session_id, sub_project_id
+        )
+        
+        if not breakdown_group:
+            raise HTTPException(status_code=404, detail="Breakdown group not found")
+        
+        # Convert to response format
+        return {
+            "parent_session_id": breakdown_group["parent_session_id"],
+            "parent_messages": [
+                {
+                    "id": str(msg.id),
+                    "role": msg.role,
+                    "content": msg.content,
+                    "created_at": msg.created_at.isoformat(),
+                    "session_id": msg.session_id,
+                    "parent_session_id": msg.parent_session_id
+                }
+                for msg in breakdown_group["parent_messages"]
+            ],
+            "child_sessions": [
+                {
+                    "session_id": child["session_id"],
+                    "messages": [
+                        {
+                            "id": str(msg.id),
+                            "role": msg.role,
+                            "content": msg.content,
+                            "created_at": msg.created_at.isoformat(),
+                            "session_id": msg.session_id,
+                            "parent_session_id": msg.parent_session_id
+                        }
+                        for msg in child["messages"]
+                    ]
+                }
+                for child in breakdown_group["child_sessions"]
+            ]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get breakdown group: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get breakdown group: {str(e)}"
+        )
+
+
+@router.get("/sessions/{session_id}/breakdown-status")
+async def get_breakdown_status(
+    session_id: str,
+    session: AsyncSession = Depends(get_session)
+):
+    """Get breakdown progress and status"""
+    try:
+        from app.services.task_orchestration_service import task_orchestration_service
+        status = await task_orchestration_service.get_breakdown_status(session, session_id)
+        
+        if not status:
+            raise HTTPException(status_code=404, detail="Breakdown not found")
+        
+        return status
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get breakdown status: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get breakdown status: {str(e)}"
+        )
+
+
+@router.post("/sessions/{parent_session_id}/start-first-subtask")
+async def start_first_subtask(
+    parent_session_id: str,
+    session: AsyncSession = Depends(get_session)
+):
+    """Manually trigger the first sub-task of a breakdown"""
+    try:
+        # Get sub_project_id from parent session
+        stmt = select(Chat.sub_project_id).where(
+            Chat.session_id == parent_session_id
+        ).limit(1)
+        result = await session.execute(stmt)
+        sub_project_id_row = result.first()
+
+        if not sub_project_id_row:
+            raise HTTPException(status_code=404, detail="Parent session not found")
+
+        sub_project_id = sub_project_id_row[0]
+
+        from app.services.task_orchestration_service import task_orchestration_service
+
+        # Start next pending sub-task (updates status and returns task info)
+        next_task_info = await task_orchestration_service.start_next_sub_task(
+            session, parent_session_id, sub_project_id
+        )
+
+        if not next_task_info:
+            raise HTTPException(status_code=404, detail="No pending sub-tasks found")
+
+        # Get the pre-created chat (created in create_breakdown_sessions)
+        sub_task_chat_id = next_task_info.get("chat_id")
+        if sub_task_chat_id:
+            sub_task_chat = await session.get(Chat, UUID(sub_task_chat_id))
+        else:
+            # Fallback: find by session_id if chat_id not available (backward compatibility)
+            stmt = select(Chat).where(
+                Chat.session_id == next_task_info["session_id"],
+                Chat.role == "user"
+            ).limit(1)
+            result = await session.execute(stmt)
+            sub_task_chat = result.scalar_one_or_none()
+
+        if not sub_task_chat:
+            raise HTTPException(status_code=404, detail="Sub-task chat not found")
+
+        # Send the sub-task query to remote service
+        # Don't send session_id - let external service generate its own
+        await chat_service.send_query(
+            session,
+            sub_task_chat.id,
+            next_task_info["prompt"],
+            session_id=None,  # New sub-task, no previous session
+            bypass_mode=None,
+            permission_mode=None,
+            agent_name=None
+        )
+
+        return {
+            "message": "Sub-task started",
+            "sub_task_session_id": next_task_info["session_id"],
+            "chat_id": str(sub_task_chat.id),
+            "sequence": next_task_info["sequence"],
+            "title": next_task_info["title"]
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to start sub-task: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to start first sub-task: {str(e)}"
+        )
+
+
+@router.post("/sessions/{parent_session_id}/retry-subtask/{session_id}")
+async def retry_subtask(
+    parent_session_id: str,
+    session_id: str,
+    session: AsyncSession = Depends(get_session)
+):
+    """Retry a failed sub-task"""
+    try:
+        # Get sub_project_id from parent session
+        stmt = select(Chat.sub_project_id).where(
+            Chat.session_id == parent_session_id
+        ).limit(1)
+        result = await session.execute(stmt)
+        sub_project_id_row = result.first()
+
+        if not sub_project_id_row:
+            raise HTTPException(status_code=404, detail="Parent session not found")
+
+        sub_project_id = sub_project_id_row[0]
+
+        from app.services.task_orchestration_service import task_orchestration_service
+
+        # Get task info for retry
+        retry_task_info = await task_orchestration_service.retry_sub_task(
+            session, parent_session_id, sub_project_id, session_id
+        )
+
+        if not retry_task_info:
+            raise HTTPException(status_code=404, detail="Sub-task not found or not in failed state")
+
+        # Get the chat for this sub-task
+        sub_task_chat_id = retry_task_info.get("chat_id")
+        if sub_task_chat_id:
+            sub_task_chat = await session.get(Chat, UUID(sub_task_chat_id))
+        else:
+            # Fallback: find by session_id
+            stmt = select(Chat).where(
+                Chat.session_id == session_id,
+                Chat.role == "user"
+            ).limit(1)
+            result = await session.execute(stmt)
+            sub_task_chat = result.scalar_one_or_none()
+
+        if not sub_task_chat:
+            raise HTTPException(status_code=404, detail="Sub-task chat not found")
+
+        # Send the sub-task query to remote service
+        await chat_service.send_query(
+            session,
+            sub_task_chat.id,
+            retry_task_info["prompt"],
+            session_id=None,  # New attempt, no previous session
+            bypass_mode=None,
+            permission_mode=None,
+            agent_name=None
+        )
+
+        return {
+            "message": "Sub-task retry started",
+            "sub_task_session_id": retry_task_info["session_id"],
+            "chat_id": str(sub_task_chat.id),
+            "sequence": retry_task_info["sequence"],
+            "title": retry_task_info["title"]
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to retry sub-task: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retry sub-task: {str(e)}"
+        )
+
+
+@router.post("/chats/{chat_id}/retry")
+async def retry_chat(
+    chat_id: UUID,
+    session: AsyncSession = Depends(get_session)
+):
+    """Retry a failed chat message"""
+    try:
+        # Get the original chat
+        chat = await session.get(Chat, chat_id)
+        if not chat:
+            raise HTTPException(status_code=404, detail="Chat not found")
+
+        if chat.role != "user":
+            raise HTTPException(status_code=400, detail="Can only retry user messages")
+
+        # Get the prompt from the chat content
+        prompt = chat.content.get("text", "")
+        if not prompt:
+            raise HTTPException(status_code=400, detail="No prompt found in chat")
+
+        # Send the query again
+        result = await chat_service.send_query(
+            session,
+            chat.id,
+            prompt,
+            session_id=chat.session_id,  # Use existing session for continuity
+            bypass_mode=None,
+            permission_mode=None,
+            agent_name=None
+        )
+
+        return {
+            "message": "Chat retry started",
+            "chat_id": str(chat_id),
+            "session_id": chat.session_id,
+            "task_id": result.get("task_id")
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to retry chat: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retry chat: {str(e)}"
         )
 

@@ -4,12 +4,19 @@ import { useState, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { DeploymentHook } from '@/lib/api'
 import { cn } from '@/lib/utils'
-import { 
-  CheckCircledIcon, CrossCircledIcon, UpdateIcon, RocketIcon, 
-  ChevronDownIcon, ChevronRightIcon, CodeIcon, CubeIcon, 
+import {
+  CheckCircledIcon, CrossCircledIcon, UpdateIcon, RocketIcon,
+  ChevronDownIcon, ChevronRightIcon, CodeIcon, CubeIcon,
   GitHubLogoIcon, GearIcon, FileTextIcon, PersonIcon,
-  ChatBubbleIcon, ClockIcon, LightningBoltIcon, DotFilledIcon
+  ChatBubbleIcon, ClockIcon, LightningBoltIcon, DotFilledIcon,
+  CopyIcon, ExternalLinkIcon
 } from '@radix-ui/react-icons'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from './ui/dialog'
 
 interface DeploymentLogsProps {
   hooks: DeploymentHook[]
@@ -48,6 +55,18 @@ export function DeploymentLogs({
   const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set())
   const [expandedHooks, setExpandedHooks] = useState<Set<string>>(new Set())
   const [selectedPhase, setSelectedPhase] = useState<'all' | 'initialization' | 'deployment'>('all')
+  const [selectedLog, setSelectedLog] = useState<DeploymentHook | null>(null)
+  const [copiedField, setCopiedField] = useState<string | null>(null)
+
+  const copyToClipboard = async (text: string, field: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedField(field)
+      setTimeout(() => setCopiedField(null), 2000)
+    } catch (error) {
+      console.error('Failed to copy:', error)
+    }
+  }
 
   const formatDetailLabel = (label: string) =>
     label
@@ -714,22 +733,23 @@ export function DeploymentLogs({
                               const isCompleted = hook.is_complete || hook.status === 'COMPLETED'
                               
                               return (
-                                <div 
-                                  key={hook.id} 
+                                <div
+                                  key={hook.id}
+                                  onClick={() => setSelectedLog(hook)}
                                   className={cn(
-                                    "relative rounded-lg border transition-all",
-                                    isError 
-                                      ? "bg-red-500/5 border-red-500/20 hover:bg-red-500/10" 
+                                    "relative rounded-lg border transition-all cursor-pointer group/hook",
+                                    isError
+                                      ? "bg-red-500/5 border-red-500/20 hover:bg-red-500/10 hover:border-red-500/40"
                                       : isCompleted
-                                      ? "bg-green-500/5 border-green-500/20 hover:bg-green-500/10"
-                                      : "bg-muted/30 border-border/50 hover:bg-muted/50"
+                                      ? "bg-green-500/5 border-green-500/20 hover:bg-green-500/10 hover:border-green-500/40"
+                                      : "bg-muted/30 border-border/50 hover:bg-muted/50 hover:border-border"
                                   )}
                                 >
                                   {/* Timeline connector */}
                                   {hookIndex < group.hooks.length - 1 && (
                                     <div className="absolute left-6 top-10 w-0.5 h-full bg-border/30" />
                                   )}
-                                  
+
                                   <div className="p-3">
                                     <div className="flex items-start gap-3">
                                       {/* Status Icon with better styling */}
@@ -815,37 +835,12 @@ export function DeploymentLogs({
                                             )}
                                           </div>
                                           
-                                          {hasDetails && (
-                                            <button
-                                              onClick={(e) => {
-                                                e.stopPropagation()
-                                                toggleHook(hook.id)
-                                              }}
-                                              className={cn(
-                                                "text-xs px-3 py-1.5 rounded-md border transition-colors flex-shrink-0",
-                                                isHookExpanded
-                                                  ? "bg-blue-500/20 border-blue-500/30 text-blue-400"
-                                                  : "bg-muted/50 border-border/50 text-muted-foreground hover:bg-muted hover:text-foreground"
-                                              )}
-                                            >
-                                              {isHookExpanded ? 'Hide' : 'View'} Details
-                                            </button>
-                                          )}
+                                          {/* Click indicator - shows on hover */}
+                                          <div className="flex items-center gap-2 opacity-0 group-hover/hook:opacity-100 transition-opacity flex-shrink-0">
+                                            <span className="text-xs text-muted-foreground">Click to view full log</span>
+                                            <ExternalLinkIcon className="h-3 w-3 text-muted-foreground" />
+                                          </div>
                                         </div>
-                                        
-                                        {/* Expandable webhook data */}
-                                        <AnimatePresence>
-                                          {isHookExpanded && hasDetails && (
-                                            <motion.div
-                                              initial={{ opacity: 0, height: 0 }}
-                                              animate={{ opacity: 1, height: 'auto' }}
-                                              exit={{ opacity: 0, height: 0 }}
-                                              className="overflow-hidden mt-3 pt-3 border-t border-border/50"
-                                            >
-                                              {formatWebhookData(hook)}
-                                            </motion.div>
-                                          )}
-                                        </AnimatePresence>
                                       </div>
                                     </div>
                                   </div>
@@ -863,6 +858,258 @@ export function DeploymentLogs({
           </div>
         )}
       </div>
+
+      {/* Full Log Modal */}
+      <Dialog open={!!selectedLog} onOpenChange={(open) => !open && setSelectedLog(null)}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+          <DialogHeader className="flex-shrink-0">
+            <DialogTitle className="flex items-center gap-3">
+              {selectedLog?.data?.tool_name ? (
+                <>
+                  <div className="p-2 rounded-lg bg-cyan-500/20">
+                    {getToolIcon(selectedLog.data.tool_name)}
+                  </div>
+                  <span>{selectedLog.data.tool_name}</span>
+                </>
+              ) : (
+                <>
+                  <div className="p-2 rounded-lg bg-blue-500/20">
+                    <FileTextIcon className="h-4 w-4 text-blue-400" />
+                  </div>
+                  <span>{selectedLog?.message || selectedLog?.data?.step_name || 'Log Details'}</span>
+                </>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto space-y-4 pr-2">
+            {/* Metadata Row */}
+            {selectedLog && (
+              <div className="flex flex-wrap items-center gap-3 p-3 bg-muted/30 rounded-lg border border-border/50">
+                <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <ClockIcon className="h-3 w-3" />
+                  {formatTimestamp(selectedLog.received_at)}
+                </span>
+                {selectedLog.data?.duration_ms && (
+                  <span className="flex items-center gap-1.5 text-xs text-yellow-400">
+                    <LightningBoltIcon className="h-3 w-3" />
+                    {selectedLog.data.duration_ms}ms
+                  </span>
+                )}
+                {selectedLog.data?.total_cost_usd && selectedLog.data.total_cost_usd > 0 && (
+                  <span className="flex items-center gap-1.5 text-xs text-green-400">
+                    ${selectedLog.data.total_cost_usd.toFixed(6)}
+                  </span>
+                )}
+                {selectedLog.phase && (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400">
+                    {selectedLog.phase}
+                  </span>
+                )}
+                {selectedLog.hook_type && (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-400">
+                    {selectedLog.hook_type}
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Tool Input Section */}
+            {selectedLog?.data?.tool_input && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    <CodeIcon className="h-3 w-3" />
+                    Tool Input
+                  </div>
+                  <button
+                    onClick={() => copyToClipboard(
+                      typeof selectedLog.data?.tool_input === 'string'
+                        ? selectedLog.data.tool_input
+                        : JSON.stringify(selectedLog.data?.tool_input, null, 2),
+                      'input'
+                    )}
+                    className="flex items-center gap-1.5 px-2 py-1 text-xs rounded-md bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {copiedField === 'input' ? (
+                      <>
+                        <CheckCircledIcon className="h-3 w-3 text-green-400" />
+                        Copied!
+                      </>
+                    ) : (
+                      <>
+                        <CopyIcon className="h-3 w-3" />
+                        Copy
+                      </>
+                    )}
+                  </button>
+                </div>
+                <div className="bg-black/50 rounded-lg border border-border/50 overflow-hidden">
+                  <pre className="text-sm p-4 overflow-x-auto max-h-60 overflow-y-auto">
+                    <code className="text-cyan-300 font-mono whitespace-pre-wrap break-words">
+                      {typeof selectedLog.data.tool_input === 'string'
+                        ? selectedLog.data.tool_input
+                        : JSON.stringify(selectedLog.data.tool_input, null, 2)}
+                    </code>
+                  </pre>
+                </div>
+              </div>
+            )}
+
+            {/* Output/Result Section */}
+            {selectedLog?.data?.result && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    <CheckCircledIcon className="h-3 w-3 text-green-500" />
+                    Output
+                  </div>
+                  <button
+                    onClick={() => copyToClipboard(
+                      typeof selectedLog.data?.result === 'string'
+                        ? selectedLog.data.result
+                        : JSON.stringify(selectedLog.data?.result, null, 2),
+                      'output'
+                    )}
+                    className="flex items-center gap-1.5 px-2 py-1 text-xs rounded-md bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {copiedField === 'output' ? (
+                      <>
+                        <CheckCircledIcon className="h-3 w-3 text-green-400" />
+                        Copied!
+                      </>
+                    ) : (
+                      <>
+                        <CopyIcon className="h-3 w-3" />
+                        Copy
+                      </>
+                    )}
+                  </button>
+                </div>
+                <div className="bg-black/30 rounded-lg border border-green-500/20 overflow-hidden">
+                  <pre className="text-sm p-4 overflow-x-auto max-h-96 overflow-y-auto">
+                    <code className="text-gray-200 font-mono whitespace-pre-wrap break-words">
+                      {typeof selectedLog.data.result === 'string'
+                        ? selectedLog.data.result
+                        : JSON.stringify(selectedLog.data.result, null, 2)}
+                    </code>
+                  </pre>
+                </div>
+              </div>
+            )}
+
+            {/* Error Section */}
+            {selectedLog?.data?.error && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-red-400 uppercase tracking-wide">
+                    <CrossCircledIcon className="h-3 w-3" />
+                    Error
+                  </div>
+                  <button
+                    onClick={() => copyToClipboard(selectedLog.data?.error || '', 'error')}
+                    className="flex items-center gap-1.5 px-2 py-1 text-xs rounded-md bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {copiedField === 'error' ? (
+                      <>
+                        <CheckCircledIcon className="h-3 w-3 text-green-400" />
+                        Copied!
+                      </>
+                    ) : (
+                      <>
+                        <CopyIcon className="h-3 w-3" />
+                        Copy
+                      </>
+                    )}
+                  </button>
+                </div>
+                <div className="bg-red-900/20 rounded-lg border border-red-500/30 overflow-hidden">
+                  <pre className="text-sm p-4 overflow-x-auto max-h-60 overflow-y-auto">
+                    <code className="text-red-300 font-mono whitespace-pre-wrap break-words">
+                      {selectedLog.data.error}
+                    </code>
+                  </pre>
+                </div>
+              </div>
+            )}
+
+            {/* Message Section (if no tool_input/result) */}
+            {selectedLog?.message && !selectedLog.data?.tool_input && !selectedLog.data?.result && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  <ChatBubbleIcon className="h-3 w-3" />
+                  Message
+                </div>
+                <div className="bg-muted/30 rounded-lg border border-border/50 p-4">
+                  <p className="text-sm text-foreground whitespace-pre-wrap">{selectedLog.message}</p>
+                </div>
+              </div>
+            )}
+
+            {/* Usage Stats */}
+            {selectedLog?.data?.usage && (selectedLog.data.usage.input_tokens || selectedLog.data.usage.output_tokens) && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  <LightningBoltIcon className="h-3 w-3" />
+                  Usage Statistics
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {selectedLog.data.usage.input_tokens && (
+                    <div className="p-3 bg-muted/30 rounded-lg border border-border/50 text-center">
+                      <div className="text-lg font-mono font-semibold text-cyan-400">
+                        {selectedLog.data.usage.input_tokens.toLocaleString()}
+                      </div>
+                      <div className="text-xs text-muted-foreground">Input Tokens</div>
+                    </div>
+                  )}
+                  {selectedLog.data.usage.output_tokens && (
+                    <div className="p-3 bg-muted/30 rounded-lg border border-border/50 text-center">
+                      <div className="text-lg font-mono font-semibold text-cyan-400">
+                        {selectedLog.data.usage.output_tokens.toLocaleString()}
+                      </div>
+                      <div className="text-xs text-muted-foreground">Output Tokens</div>
+                    </div>
+                  )}
+                  {selectedLog.data.total_cost_usd && selectedLog.data.total_cost_usd > 0 && (
+                    <div className="p-3 bg-muted/30 rounded-lg border border-border/50 text-center">
+                      <div className="text-lg font-mono font-semibold text-green-400">
+                        ${selectedLog.data.total_cost_usd.toFixed(6)}
+                      </div>
+                      <div className="text-xs text-muted-foreground">Cost</div>
+                    </div>
+                  )}
+                  {selectedLog.data.duration_ms && (
+                    <div className="p-3 bg-muted/30 rounded-lg border border-border/50 text-center">
+                      <div className="text-lg font-mono font-semibold text-yellow-400">
+                        {selectedLog.data.duration_ms}
+                      </div>
+                      <div className="text-xs text-muted-foreground">Duration (ms)</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Raw Data Section (for debugging) */}
+            {selectedLog?.data && Object.keys(selectedLog.data).length > 0 && (
+              <details className="group">
+                <summary className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide cursor-pointer hover:text-foreground transition-colors">
+                  <GearIcon className="h-3 w-3" />
+                  Raw Data
+                  <ChevronRightIcon className="h-3 w-3 transition-transform group-open:rotate-90" />
+                </summary>
+                <div className="mt-2 bg-black/30 rounded-lg border border-border/50 overflow-hidden">
+                  <pre className="text-xs p-4 overflow-x-auto max-h-60 overflow-y-auto">
+                    <code className="text-gray-400 font-mono">
+                      {JSON.stringify(selectedLog.data, null, 2)}
+                    </code>
+                  </pre>
+                </div>
+              </details>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

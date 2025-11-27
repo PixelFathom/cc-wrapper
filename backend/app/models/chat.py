@@ -30,6 +30,9 @@ class Chat(BaseModel, table=True):
     role: ChatRole
     content: Dict[str, Any] = Field(sa_column=Column(JSON))
     
+    # Task breakdown fields
+    parent_session_id: Optional[str] = Field(default=None, index=True)  # For grouping breakdown sessions
+    
     # Auto-continuation fields
     continuation_status: str = Field(default=CONTINUATION_STATUS_NONE)
     continuation_count: int = Field(default=0)

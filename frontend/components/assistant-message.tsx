@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api, ChatHook } from '@/lib/api'
 import { MessageHooks } from './message-hooks'
-import { UpdateIcon, CircleIcon, ChevronDownIcon, DotFilledIcon, CopyIcon, CheckCircledIcon } from '@radix-ui/react-icons'
+import { UpdateIcon, CircleIcon, ChevronDownIcon, DotFilledIcon, CopyIcon, CheckCircledIcon, CrossCircledIcon, ReloadIcon } from '@radix-ui/react-icons'
 import { cn } from '@/lib/utils'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useMobile } from '@/lib/hooks/useMobile'
@@ -17,6 +17,7 @@ interface Message {
   timestamp: string
   sessionId?: string
   isProcessing?: boolean
+  chatId?: string
 }
 
 interface AssistantMessageProps {
@@ -27,31 +28,39 @@ interface AssistantMessageProps {
   getHookIcon?: (hook: ChatHook) => JSX.Element
   formatHookMessage?: (hook: ChatHook) => string
   isWaitingForResponse?: boolean
+  onRetry?: (chatId: string) => void
+  isRetrying?: boolean
 }
 
-export function AssistantMessage({ 
-  message, 
-  hooks = [], 
-  onToggleHook, 
-  expandedHooks = new Set(), 
-  getHookIcon, 
+export function AssistantMessage({
+  message,
+  hooks = [],
+  onToggleHook,
+  expandedHooks = new Set(),
+  getHookIcon,
   formatHookMessage,
-  isWaitingForResponse = false 
+  isWaitingForResponse = false,
+  onRetry,
+  isRetrying = false
 }: AssistantMessageProps) {
   // Extract content from message
   const content = message.content?.text || ''
   const metadata = message.content?.metadata || {}
-  
+
   // More robust processing detection - check if we have actual content
   const hasActualContent = content && content !== '' && content !== 'Processing your request...'
   const isProcessing = (message.isProcessing || metadata.status === 'processing') && !hasActualContent
-  
+
+  // Check if the message failed
+  const isFailed = metadata.status === 'failed'
+  const failureReason = metadata.error || metadata.failure_reason || 'Task execution failed'
+
   // Always show the full final content when available
   const hasContent = content && content !== ''
   const hasHooks = hooks.length > 0
-  
+
   // Check if this is a final complete message (not processing)
-  const isCompleteMessage = hasActualContent && !isProcessing
+  const isCompleteMessage = hasActualContent && !isProcessing && !isFailed
   
   // Show hooks by default when processing, hide when complete
   const [showHooks, setShowHooks] = useState(isProcessing && hasHooks)
@@ -79,8 +88,56 @@ export function AssistantMessage({
     <div className="space-y-3">
       {/* Main content */}
       <div className="space-y-2">
-        {isCompleteMessage ? (
-          <MarkdownRenderer 
+        {isFailed ? (
+          <div className="space-y-3">
+            {/* Failed banner */}
+            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+              <div className="flex items-start gap-2">
+                <CrossCircledIcon className="h-4 w-4 text-red-400 mt-0.5 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <span className="font-medium text-sm text-red-400">Task Failed</span>
+                    {message.chatId && onRetry && (
+                      <button
+                        onClick={() => onRetry(message.chatId!)}
+                        disabled={isRetrying}
+                        className={cn(
+                          "px-2.5 py-1 text-xs font-medium rounded-md transition-all",
+                          "bg-red-500/20 hover:bg-red-500/30 text-red-300 hover:text-red-200",
+                          "border border-red-500/30 hover:border-red-500/40",
+                          "disabled:opacity-50 disabled:cursor-not-allowed"
+                        )}
+                      >
+                        {isRetrying ? (
+                          <span className="flex items-center gap-1.5">
+                            <UpdateIcon className="h-3 w-3 animate-spin" />
+                            Retrying...
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1.5">
+                            <ReloadIcon className="h-3 w-3" />
+                            Retry
+                          </span>
+                        )}
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground leading-relaxed">
+                    {failureReason}
+                  </p>
+                </div>
+              </div>
+            </div>
+            {/* Show any partial content if available */}
+            {hasContent && (
+              <MarkdownRenderer
+                content={content}
+                className="text-foreground leading-relaxed break-words opacity-70"
+              />
+            )}
+          </div>
+        ) : isCompleteMessage ? (
+          <MarkdownRenderer
             content={content}
             className="text-foreground leading-relaxed break-words"
           />

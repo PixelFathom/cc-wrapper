@@ -105,7 +105,6 @@ export function MessageHooks({ messageId, isProcessing = false, showByDefault = 
               // Determine display content based on webhook type
               let displayContent = ''
               let displayDetail = ''
-              
               if (hook.content_type === 'tool_use') {
                 displayContent = `${hook.tool_name || 'Tool'}`
                 if (hook.tool_input?.command) {
@@ -142,6 +141,9 @@ export function MessageHooks({ messageId, isProcessing = false, showByDefault = 
                 displayDetail = hook.message || ''
               }
               
+              console.log(hook.content_type, displayDetail);
+              console.log(hook);
+              console.log(hook.data);
               // Hide content for SystemMessage types
               if (hook.message_type === 'SystemMessage') {
                 displayDetail = ''
@@ -187,7 +189,7 @@ export function MessageHooks({ messageId, isProcessing = false, showByDefault = 
                             isHookProcessing && "text-yellow-400/70",
                             !isCompleted && !isFailed && !isHookProcessing && "text-muted-foreground/70"
                           )}>
-                            {displayDetail}
+                            {/* {displayDetail} */}
                           </span>
                         )}
                         {hook.data?.error && (
