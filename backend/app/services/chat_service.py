@@ -12,7 +12,6 @@ from sqlalchemy import text
 
 from app.core.settings import get_settings
 from app.core.redis import get_redis
-from app.core.rate_limiter import assert_within_rate_limit
 from app.core.auto_continuation_config import get_auto_continuation_config
 from app.models import Chat, Task, Project, ChatHook
 from app.models.chat import CONTINUATION_STATUS_NONE, CONTINUATION_STATUS_NEEDED, CONTINUATION_STATUS_IN_PROGRESS, CONTINUATION_STATUS_COMPLETED
@@ -146,12 +145,6 @@ class ChatService:
             project = await db.get(Project, task.project_id)
             if not project:
                 raise ValueError("Project not found")
-
-            redis_client = await get_redis()
-            await assert_within_rate_limit(
-                redis_client,
-                user_id=project.user_id,
-            )
 
             # Generate webhook URL
             webhook_url = f"{self.webhook_base_url}/api/webhooks/chat/{chat_id}"

@@ -6,8 +6,6 @@ from sqlalchemy.orm import selectinload
 from uuid import UUID
 from app.models import Task, DeploymentHook, Project
 from app.core.settings import get_settings
-from app.core.redis import get_redis
-from app.core.rate_limiter import assert_within_rate_limit, RateLimitExceeded
 from datetime import datetime
 import logging
 import random
@@ -57,12 +55,6 @@ class DeploymentService:
         if not task.deployment_port:
             task.deployment_port = await self._generate_unique_port(db, task_id)
             logger.info(f"Assigned port {task.deployment_port} to task {task_id}")
-
-        redis_client = await get_redis()
-        await assert_within_rate_limit(
-            redis_client,
-            user_id=task.project.user_id,
-        )
 
         # Get GitHub token if not provided
         if not github_token and task.project.user_id:

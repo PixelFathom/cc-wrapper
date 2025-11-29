@@ -36,8 +36,6 @@ from app.core.prompts.issue_resolution_prompts import (
     TESTING_SUMMARY_PROMPT
 )
 from app.core.settings import get_settings
-from app.core.redis import get_redis
-from app.core.rate_limiter import assert_within_rate_limit, RateLimitExceeded
 
 logger = logging.getLogger(__name__)
 
@@ -822,12 +820,6 @@ class IssueResolutionOrchestrator:
 
             # Webhook URL points to deployment webhook
             webhook_url = f"{settings.webhook_base_url}/api/webhooks/deployment/{task.id}/initialization"
-
-            redis_client = await get_redis()
-            await assert_within_rate_limit(
-                redis_client,
-                user_id=project.user_id,
-            )
 
             # Prepare init payload with issue branch
             init_payload = {
