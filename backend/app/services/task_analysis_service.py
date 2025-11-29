@@ -23,6 +23,7 @@ class SubTaskSpec:
     title: str
     description: str
     testing_requirements: str
+    parallel_group: Optional[int] = None  # Tasks in same group can run in parallel
 
 
 @dataclass
@@ -31,6 +32,14 @@ class BreakdownAnalysis:
     should_breakdown: bool
     reasoning: str
     sub_tasks: List[SubTaskSpec]
+    parallel_groups: Optional[List[List[int]]] = None  # Groups of task sequences that can run in parallel
+
+
+@dataclass
+class BreakdownDecision:
+    """Simple result for quick breakdown check (no sub-task generation)"""
+    should_breakdown: bool
+    reasoning: str
 
 
 class TaskAnalysisService:
@@ -206,7 +215,536 @@ Return ONLY valid JSON, no other text."""
                 reasoning=f"Analysis error: {str(e)}",
                 sub_tasks=[]
             )
-    
+
+    async def should_breakdown_task(self, prompt: str) -> BreakdownDecision:
+        """
+        Quick check to determine if a prompt needs breakdown into sub-tasks.
+
+        This is a lightweight version of analyze_for_breakdown that only returns
+        a boolean decision without generating sub-task specifications.
+
+        Args:
+            prompt: The user's input message
+
+        Returns:
+            BreakdownDecision with should_breakdown flag and reasoning
+        """
+        try:
+            logger.info(f"🔍 Quick breakdown check (length: {len(prompt)} chars)")
+
+            # Concise system prompt focused only on the decision
+            system_prompt = """You are analyzing if a user request needs to be broken down into multiple sub-tasks.
+
+RETURN TRUE (DO breakdown) when ANY of these are true:
+1. Request describes a full application/system with 4+ distinct features or pages
+2. Request has bullet points or sections listing multiple independent pages/features
+3. Request mentions multiple user types/roles with different functionality (e.g., customer + admin)
+4. Request explicitly lists 3+ distinct, independent deliverables
+5. Request describes both frontend AND backend with multiple features each
+6. Request is comprehensive enough that completing it requires building many separate components
+
+RETURN FALSE (do NOT breakdown) for:
+- Single feature requests (e.g., "build a login page with validation")
+- Bug fixes or refactoring tasks
+- Requests with only 1-2 features
+- Vague or exploratory requests ("help me improve X")
+- Simple CRUD for a single entity
+- Code reviews or explanations
+- Configuration changes
+- Single file modifications
+
+EXAMPLES:
+❌ "Create a login page with form validation and error handling" → false (single feature)
+❌ "Add user authentication to the app" → false (single cohesive task)
+❌ "Build a simple todo app" → false (small single deliverable)
+❌ "Fix the bug in the checkout flow" → false (bug fix)
+✅ "Build an e-commerce site with product catalog, shopping cart, user accounts, checkout, and admin panel" → true (5+ major features)
+✅ "Create a project management app with tasks, teams, notifications, and reporting" → true (multiple independent modules)
+✅ "Build TechMart with home page, catalog, cart, auth, customer profiles, order tracking, admin area" → true (comprehensive app)
+✅ "1. Create user registration 2. Build dashboard 3. Add settings page 4. Implement notifications" → true (4 independent pages)
+
+IMPORTANT: For comprehensive application requests listing multiple features (especially with bullet points), RETURN TRUE.
+
+Return JSON: {"should_breakdown": boolean, "reasoning": "one sentence"}"""
+
+            user_prompt = f"""Should this request be broken into sub-tasks?
+
+---
+{prompt}
+---
+
+Return ONLY valid JSON."""
+
+            response = await self.client.chat.completions.create(
+                model="gpt-5-mini",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                response_format={"type": "json_object"}
+            )
+
+            result_text = response.choices[0].message.content
+            result = json.loads(result_text)
+
+            should_breakdown = result.get('should_breakdown', False)
+            reasoning = result.get('reasoning', 'No reasoning provided')
+
+            logger.info(f"📊 Quick check result: should_breakdown={should_breakdown}")
+
+            return BreakdownDecision(
+                should_breakdown=should_breakdown,
+                reasoning=reasoning
+            )
+
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ Failed to parse response as JSON: {e}")
+            return BreakdownDecision(
+                should_breakdown=False,
+                reasoning="Failed to parse analysis result"
+            )
+        except Exception as e:
+            logger.error(f"❌ Quick breakdown check failed: {e}")
+            return BreakdownDecision(
+                should_breakdown=False,
+                reasoning=f"Analysis error: {str(e)}"
+            )
+
+    def generate_planning_prompt(self, original_prompt: str, context: Dict[str, Any]) -> str:
+        """
+        Generate a planning prompt for the external chat service.
+
+        This prompt instructs Claude to analyze the codebase and create a
+        granular, parallel-aware task breakdown.
+
+        Args:
+            original_prompt: The user's original request
+            context: Project context (project_name, task_name, etc.)
+
+        Returns:
+            Planning prompt string for external chat service
+        """
+        project_name = context.get("project_name", "Unknown")
+        task_name = context.get("task_name", "Unknown")
+
+        planning_prompt = f"""You are in PLANNING MODE. Your job is to analyze the codebase and create a detailed task breakdown plan.
+
+⚠️ CRITICAL INSTRUCTIONS - READ CAREFULLY:
+1. You MUST stay in plan mode throughout - DO NOT implement anything
+2. DO NOT exit plan mode - DO NOT use ExitPlanMode tool
+3. DO NOT write the plan to any file - NO file creation or modification
+4. Your FINAL RESPONSE must contain the complete plan as TEXT in your message
+5. The plan must be returned in your response message, NOT saved to a file
+
+PROJECT: {project_name}
+TASK: {task_name}
+
+USER REQUEST:
+{original_prompt}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PLANNING WORKFLOW:
+
+STEP 1: ANALYZE THE CODEBASE (use Read, Glob, Grep tools)
+   - Explore directory structure and project layout
+   - Read configuration files (package.json, requirements.txt, etc.)
+   - Check existing code: models, APIs, components, utilities
+   - Identify tech stack, frameworks, and patterns
+   - Note naming conventions and code organization
+   - Find existing tests and testing patterns
+
+STEP 2: CREATE YOUR PLAN (output as text in your response)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+REQUIRED PLAN FORMAT (include ALL sections in your final response):
+
+## CODEBASE ANALYSIS
+- **Project Structure**: Directory layout and organization
+- **Tech Stack**: Frameworks, libraries, database, tools identified
+- **Existing Patterns**: Coding conventions and patterns found
+- **Reusable Components**: What already exists that we can build upon
+- **Key Files**: Important files and their purposes
+
+## API CONTRACTS (Define BEFORE task breakdown)
+
+This section defines ALL API endpoints needed. By defining contracts upfront,
+frontend and backend tasks can be built INDEPENDENTLY in parallel.
+
+### [Feature Name] APIs
+
+**Endpoint: [CREATE/MODIFY] METHOD /api/route**
+- **Action**: CREATE new | MODIFY existing (specify file if modifying)
+- **Purpose**: Brief description
+- **Authentication**: Required/Optional/None
+- **Request**:
+```json
+{{
+  "field1": "string (required) - description",
+  "field2": "number (optional) - description",
+  "nested": {{
+    "subfield": "boolean - description"
+  }}
+}}
+```
+- **Response (Success 200/201)**:
+```json
+{{
+  "id": "uuid",
+  "field1": "string",
+  "created_at": "ISO datetime"
+}}
+```
+- **Response (Error 400)**:
+```json
+{{
+  "error": "string",
+  "details": ["validation error messages"]
+}}
+```
+- **Response (Error 401/403/404)**: Standard error format
+
+[Repeat for ALL endpoints needed]
+
+## DATA MODELS (Define schemas for database/state)
+
+### [Model Name]
+- **Action**: CREATE new | MODIFY existing
+- **Location**: `path/to/model/file`
+```
+{{
+  id: UUID (primary key)
+  field1: String (required, max 255)
+  field2: Integer (optional, default 0)
+  field3: ForeignKey -> OtherModel
+  created_at: DateTime (auto)
+  updated_at: DateTime (auto)
+}}
+```
+- **Indexes**: [field1], [field2, field3]
+- **Relationships**: Has many X, Belongs to Y
+
+[Repeat for ALL models needed]
+
+## TASK BREAKDOWN
+
+### Phase 1: [Phase Name] (parallel_group: 0 - Sequential)
+Tasks that MUST run sequentially (database setup, core models, etc.)
+
+**Task 1: [Clear Descriptive Title]**
+- **parallel_group**: 0 (sequential)
+- **Action**: CREATE new files | MODIFY existing files
+- **Description**:
+  Comprehensive explanation including:
+  - Exact functionality to implement
+  - Reference to API contracts defined above (e.g., "Implement POST /api/users endpoint as defined in API Contracts")
+  - Reference to data models defined above
+  - Validation rules and error handling
+- **Files to Create/Modify**:
+  - `path/to/file1.ts` - CREATE: Description
+  - `path/to/file2.ts` - MODIFY: What changes to make
+- **API Endpoints Implemented**: List endpoints from API Contracts section
+- **Models Used**: List models from Data Models section
+- **Dependencies**: What must exist before this task
+- **Acceptance Criteria**:
+  - [ ] Criterion 1
+  - [ ] Criterion 2
+- **Test Cases**:
+  1. GIVEN [setup] WHEN [action] THEN [expected result]
+  2. GIVEN [edge case] WHEN [action] THEN [expected result]
+  3. GIVEN [error condition] WHEN [action] THEN [expected error handling]
+
+### Phase 2: [Phase Name] (parallel_group: 1 - Parallel Batch 1)
+Tasks that can run IN PARALLEL after Phase 1 completes.
+Frontend and Backend can run in parallel because API contracts are defined above.
+
+**Task 2: [Backend - Feature X API]**
+- **parallel_group**: 1
+- **Action**: CREATE/MODIFY
+- **Description**: Implement backend endpoints as defined in API Contracts
+- **API Endpoints Implemented**: POST /api/x, GET /api/x/:id, etc.
+- [Same detailed format as above]
+
+**Task 3: [Frontend - Feature X UI]**
+- **parallel_group**: 1 (CAN run parallel with Task 2 because API contract is defined)
+- **Action**: CREATE/MODIFY
+- **Description**: Build UI that calls endpoints defined in API Contracts
+- **API Endpoints Consumed**: POST /api/x, GET /api/x/:id, etc.
+- **Mock Data**: Use API contract response format for development
+- **UI/UX Requirements**: Follow minimal, aesthetic design principles (see Frontend UI Guidelines below)
+- [Same detailed format as above]
+
+### Phase 3: [Phase Name] (parallel_group: 2 - Parallel Batch 2)
+Tasks that can run IN PARALLEL after Phase 2 completes.
+
+**Task 5: [Title]**
+- **parallel_group**: 2
+- [Same detailed format as above]
+
+## PARALLEL EXECUTION SUMMARY
+```
+Sequential (parallel_group: 0): Task 1 - Database/Model setup
+Parallel Batch 1 (parallel_group: 1):
+  - Task 2 (Backend API)
+  - Task 3 (Frontend UI) <- Can run simultaneously because API contracts defined
+Parallel Batch 2 (parallel_group: 2): Tasks 5, 6, 7 (run after Batch 1)
+```
+
+## IMPLEMENTATION NOTES
+- Key patterns to follow from existing codebase
+- Shared utilities or helpers to reuse
+- Important considerations or potential issues
+
+## FRONTEND UI GUIDELINES (CRITICAL FOR ALL FRONTEND TASKS)
+
+All frontend tasks MUST follow these design principles:
+
+**DESIGN PHILOSOPHY:**
+- **Minimal & Clean**: Remove all unnecessary elements. Less is more.
+- **Aesthetic & Modern**: Use subtle gradients, smooth transitions, proper spacing
+- **Consistent**: Follow existing design patterns in the codebase
+- **Accessible**: Proper contrast, focus states, semantic HTML
+
+**VISUAL STANDARDS:**
+- Use generous whitespace and padding (avoid cramped layouts)
+- Subtle shadows and borders (avoid harsh lines)
+- Smooth transitions/animations (150-300ms duration)
+- Consistent border-radius (follow existing component patterns)
+- Muted color palette with purposeful accent colors
+- Typography hierarchy with proper font weights and sizes
+
+**COMPONENT PATTERNS:**
+- Cards with subtle borders and shadows, not flat boxes
+- Buttons with hover/active states and proper feedback
+- Form inputs with clear focus states and validation styling
+- Loading states with skeleton loaders or subtle spinners
+- Empty states with helpful messages and actions
+- Error states that are informative but not alarming
+
+**AVOID:**
+- Cluttered interfaces with too many elements
+- Harsh colors or high-contrast borders
+- Abrupt transitions or jarring animations
+- Inconsistent spacing or alignment
+- Generic/boring default styling
+- Over-engineering simple components
+
+**REFERENCE**: Look at existing components in the codebase for styling patterns, especially:
+- Color variables and theme tokens
+- Existing card, button, and form components
+- Animation/transition utilities
+- Spacing and layout conventions
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+CRITICAL REMINDERS:
+1. DO NOT write plan to a file - output it directly in your response
+2. DO NOT implement any code - only analyze and plan
+3. DO NOT use ExitPlanMode
+4. DEFINE API CONTRACTS FIRST - This enables frontend/backend parallel development
+5. Specify CREATE or MODIFY for every file/endpoint/model
+6. Each task description must be detailed enough for an AI to implement WITHOUT asking questions
+7. Include parallel_group number for EVERY task
+8. Tasks with same parallel_group run simultaneously
+9. Your final message MUST contain the complete plan text
+
+Begin by exploring the codebase, then output your complete plan in your response."""
+
+        return planning_prompt
+
+    async def parse_plan_response(self, plan_text: str, original_prompt: str) -> BreakdownAnalysis:
+        """
+        Parse a plan response from Claude into structured sub-tasks using OpenAI.
+
+        This extracts:
+        - Individual sub-tasks with descriptions
+        - Parallel execution groups
+        - Dependencies between tasks
+
+        Args:
+            plan_text: The plan response from Claude
+            original_prompt: The original user request
+
+        Returns:
+            BreakdownAnalysis with structured sub-tasks
+        """
+        try:
+            logger.info(f"📊 Parsing plan response (length: {len(plan_text)} chars)")
+
+            system_prompt = """You are extracting structured task data from a development plan and creating comprehensive task specifications for an AI coding assistant.
+
+Given a plan created by an AI assistant, extract the individual tasks into a structured format that another AI coding assistant can implement WITHOUT asking clarifying questions.
+
+EXTRACTION RULES:
+1. Each task should be atomic - one focused piece of work
+2. Identify parallel groups (tasks that can run simultaneously)
+3. Maintain the logical sequence based on dependencies
+4. Create COMPREHENSIVE descriptions and test cases
+
+DESCRIPTION REQUIREMENTS:
+Each task description MUST be detailed enough for an AI coding assistant to implement independently. Include:
+- Specific functionality to implement
+- File paths to create or modify (based on project structure from the plan)
+- Data models/schemas with field types if applicable
+- API endpoints with HTTP methods, routes, request/response formats
+- UI components with their props, state, and behavior
+- Integration points with existing code
+- Error handling requirements
+- Any business logic or validation rules
+
+FOR FRONTEND/UI TASKS, ALSO INCLUDE:
+- UI/UX design requirements emphasizing minimal, aesthetic design
+- Styling guidelines: subtle shadows, smooth transitions, proper spacing
+- Component patterns to follow from existing codebase
+- Loading states, empty states, error states to implement
+- Responsive design considerations
+
+TEST CASE REQUIREMENTS:
+Each task MUST have concrete test cases that can be used to verify the implementation:
+- Include happy path tests
+- Include edge cases (empty input, maximum values, special characters)
+- Include error scenarios (invalid input, unauthorized access, not found)
+- Format: "Given [setup], when [action], then [expected result]"
+
+PARALLEL GROUP RULES:
+- Tasks in the same parallel group MUST NOT modify the same files
+- Backend tasks for different features can often run in parallel
+- Frontend tasks for different features can often run in parallel
+- Database migrations should typically be sequential
+- Tasks that depend on each other CANNOT be in the same parallel group
+
+OUTPUT FORMAT (JSON):
+{
+    "should_breakdown": true,
+    "reasoning": "Brief explanation of why breakdown is needed",
+    "sub_tasks": [
+        {
+            "sequence": 1,
+            "title": "Short task title (3-6 words)",
+            "description": "COMPREHENSIVE description including:\\n- What to build (specific functionality)\\n- Files to create/modify with paths\\n- Data models with fields and types\\n- API endpoints (method, route, request/response)\\n- UI components (props, state, behavior)\\n- Integration with existing code\\n- Validation and error handling\\n- Business logic details",
+            "testing_requirements": "TEST CASES:\\n1. Given [setup], when [action], then [expected]\\n2. Given [edge case], when [action], then [expected]\\n3. Given [error scenario], when [action], then [expected error]",
+            "parallel_group": 0
+        }
+    ],
+    "parallel_groups": [[1], [2, 3, 4], [5, 6, 7]]
+}
+
+PARALLEL GROUP FIELD:
+- parallel_group: 0 means sequential (must run alone)
+- parallel_group: 1 means first parallel batch
+- parallel_group: 2 means second parallel batch (runs after group 1)
+- etc.
+
+Tasks with same parallel_group number run together.
+Tasks with parallel_group 0 run sequentially in their sequence order.
+
+Example:
+- Task 1 (parallel_group: 0) - runs first, alone
+- Task 2 (parallel_group: 1) - \\
+- Task 3 (parallel_group: 1) - } run together after task 1
+- Task 4 (parallel_group: 1) - /
+- Task 5 (parallel_group: 0) - runs alone after tasks 2,3,4
+- Task 6 (parallel_group: 2) - \\
+- Task 7 (parallel_group: 2) - } run together after task 5
+
+QUALITY CHECK - Before returning, verify:
+1. Each description is detailed enough that a coding AI won't need to ask questions
+2. Each task has at least 3 concrete test cases
+3. File paths are specific (not generic placeholders)
+4. API routes, methods, and payloads are specified
+5. Data model fields include types
+
+If the plan doesn't contain enough distinct tasks for breakdown, return:
+{
+    "should_breakdown": false,
+    "reasoning": "Explanation of why single task is sufficient",
+    "sub_tasks": [],
+    "parallel_groups": []
+}"""
+
+            user_prompt = f"""Extract structured task data from this development plan and create comprehensive task specifications.
+
+ORIGINAL USER REQUEST:
+{original_prompt}
+
+DEVELOPMENT PLAN:
+{plan_text}
+
+IMPORTANT:
+1. Create descriptions detailed enough for an AI coding assistant to implement WITHOUT asking questions
+2. Include specific file paths, API routes with methods, data models with field types
+3. Generate at least 3 concrete test cases per task (happy path, edge case, error scenario)
+4. Test cases should follow: "Given [setup], when [action], then [expected result]"
+
+Extract the tasks and parallel groups. Return ONLY valid JSON."""
+
+            response = await self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                response_format={"type": "json_object"}
+            )
+
+            result_text = response.choices[0].message.content
+            result = json.loads(result_text)
+
+            should_breakdown = result.get("should_breakdown", False)
+
+            if not should_breakdown:
+                logger.info(f"📝 Plan parsing: No breakdown needed - {result.get('reasoning', 'Unknown')}")
+                return BreakdownAnalysis(
+                    should_breakdown=False,
+                    reasoning=result.get("reasoning", "Single task sufficient"),
+                    sub_tasks=[],
+                    parallel_groups=[]
+                )
+
+            # Convert to SubTaskSpec objects
+            sub_tasks = [
+                SubTaskSpec(
+                    sequence=task["sequence"],
+                    title=task["title"],
+                    description=task["description"],
+                    testing_requirements=task.get("testing_requirements", "Verify functionality works correctly"),
+                    parallel_group=task.get("parallel_group", 0)
+                )
+                for task in result.get("sub_tasks", [])
+            ]
+
+            parallel_groups = result.get("parallel_groups", [])
+
+            logger.info(
+                f"✅ Plan parsed: {len(sub_tasks)} sub-tasks, "
+                f"{len([g for g in parallel_groups if len(g) > 1])} parallel groups"
+            )
+
+            return BreakdownAnalysis(
+                should_breakdown=True,
+                reasoning=result.get("reasoning", "Complex task requiring breakdown"),
+                sub_tasks=sub_tasks,
+                parallel_groups=parallel_groups
+            )
+
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ Failed to parse plan response as JSON: {e}")
+            return BreakdownAnalysis(
+                should_breakdown=False,
+                reasoning="Failed to parse plan structure",
+                sub_tasks=[],
+                parallel_groups=[]
+            )
+        except Exception as e:
+            logger.error(f"❌ Plan parsing failed: {e}")
+            return BreakdownAnalysis(
+                should_breakdown=False,
+                reasoning=f"Plan parsing error: {str(e)}",
+                sub_tasks=[],
+                parallel_groups=[]
+            )
+
     async def generate_sub_task_prompts(
         self,
         original_prompt: str,
@@ -258,19 +796,33 @@ You are currently executing: SUB-TASK {sub_task.sequence} of {total_tasks}
 
 """)
             
+            # Check if this is a frontend task
+            is_frontend_task = any(keyword in sub_task.title.lower() or keyword in sub_task.description.lower()
+                                   for keyword in ['frontend', 'ui', 'component', 'page', 'view', 'screen', 'form', 'modal', 'dashboard'])
+
             # Current sub-task instructions with enhanced formatting
+            frontend_ui_guidance = """
+🎨 UI/UX REQUIREMENTS (CRITICAL):
+- **Minimal & Aesthetic**: Clean, uncluttered design with generous whitespace
+- **Modern styling**: Subtle shadows, smooth transitions (150-300ms), proper border-radius
+- **Consistent**: Match existing component patterns and color tokens in codebase
+- **Polish**: Proper hover states, loading states, empty states, error states
+- **AVOID**: Cramped layouts, harsh borders, generic/boring styling, over-engineering
+
+""" if is_frontend_task else ""
+
             prompt_parts.append(f"""┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃  CURRENT SUB-TASK {sub_task.sequence}: {sub_task.title}
 ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 
 📋 DETAILED REQUIREMENTS:
 {sub_task.description}
-
+{frontend_ui_guidance}
 🎯 SUCCESS CRITERIA:
 - All requirements from the description above are fully implemented
 - Code is clean, well-documented, and follows best practices
 - All edge cases are handled appropriately
-- Implementation is complete and production-ready
+- Implementation is complete and production-ready{" with polished, aesthetic UI" if is_frontend_task else ""}
 
 """)
             

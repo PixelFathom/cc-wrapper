@@ -21,6 +21,44 @@ from app.services.task_orchestration_service import task_orchestration_service
 
 logger = logging.getLogger(__name__)
 
+# SuperClaude Framework system prompt for enhanced development
+SUPER_CLAUDE_MODE_PROMPT = """
+## SuperClaude Framework
+
+You have SuperClaude slash commands available. Use them for structured development workflows.
+
+### Available Commands
+- `/sc:task "description"` - Execute complex tasks with workflow management
+- `/sc:analyze "code"` - Analyze code/system before changes
+- `/sc:implement "feature"` - Implement with auto-agent selection
+- `/sc:design "system"` - Design system architecture and APIs
+- `/sc:test` - Run and validate tests
+- `/sc:troubleshoot "issue"` - Diagnose and resolve issues
+- `/sc:research "topic"` - Deep web research
+- `/sc:document "component"` - Generate documentation
+- `/sc:git` - Git operations with intelligent commits
+- `/sc:build` - Build and compile projects
+- `/sc:cleanup` - Clean up code and project structure
+
+### Specialized Agents
+Use these for domain-specific tasks:
+- `@agent-security` - Security audits, OWASP compliance
+- `@agent-frontend` - React/Vue, CSS, UI components
+- `@agent-backend` - API, database, server logic
+- `@agent-devops` - CI/CD, Docker, deployment
+- `@agent-pm` - Requirements, documentation
+
+### Guidelines
+1. ALWAYS `/sc:analyze` or `/sc:design` before major implementations
+2. Use agents IN PARALLEL for independent tasks
+3. Chain: `/sc:design` → `/sc:implement` → `/sc:test`
+
+### Example Workflow
+```
+/sc:task "implement user authentication with JWT"
+```
+"""
+
 
 class ChatService:
     def __init__(self):
@@ -57,6 +95,11 @@ class ChatService:
         text = chat.content.get("text", "")
         if len(text) < 50:
             logger.info(f"⏭️ Skipping breakdown: too short ({len(text)} chars)")
+            return False
+
+        breakdown_decision = await task_analysis_service.should_breakdown_task(text)
+        if not breakdown_decision.should_breakdown:
+            logger.info(f"⏭️ Skipping breakdown: {breakdown_decision.reasoning}")
             return False
 
         logger.info(f"✅ Analyzing for breakdown ({len(text)} chars)")
@@ -234,7 +277,7 @@ class ChatService:
                 enhanced_prompt = prompt + deployment_context
 
             prompt = enhanced_prompt
-
+            prompt = prompt + f"\n\n{SUPER_CLAUDE_MODE_PROMPT}\n"
             # Determine permission mode
             # Priority: permission_mode parameter > bypass_mode (for backward compatibility) > default to "interactive"
             if permission_mode:
@@ -262,8 +305,6 @@ class ChatService:
             # Only include agent_name if it's provided
             if agent_name:
                 payload["agent_name"] = agent_name
-
-            print(f"payload: {payload}")
             
             # Make request to remote service with retry logic for 503 errors
             max_retries = 5
@@ -664,56 +705,102 @@ class ChatService:
                     Chat.session_id == original_session_id,
                     Chat.role == "assistant"
                 ).order_by(Chat.created_at.desc()).limit(1)
-                
+
                 result = await db.execute(stmt)
                 assistant_chat = result.scalar_one_or_none()
-                
+
                 if assistant_chat:
                     # Check if next sub-task should be triggered
                     should_trigger_next = await task_orchestration_service.handle_sub_task_completion(
                         db, assistant_chat
                     )
-                    
+
                     if should_trigger_next:
-                        logger.info(f"🔄 Triggering next sub-task in breakdown")
-                        # Start next sub-task
-                        next_task_info = await task_orchestration_service.start_next_sub_task(
+                        # Get the next parallel group to execute
+                        next_group = await task_orchestration_service.get_next_parallel_group(
                             db,
                             assistant_chat.parent_session_id,
                             chat.sub_project_id
                         )
-                        
-                        if next_task_info:
-                            # Use the pre-created chat from create_breakdown_sessions
-                            sub_task_chat_id = next_task_info.get("chat_id")
-                            if sub_task_chat_id:
-                                sub_task_chat = await db.get(Chat, UUID(sub_task_chat_id))
-                            else:
-                                # Fallback: find by session_id if chat_id not available (backward compatibility)
-                                stmt = select(Chat).where(
-                                    Chat.session_id == next_task_info["session_id"],
-                                    Chat.role == "user"
-                                ).limit(1)
-                                result = await db.execute(stmt)
-                                sub_task_chat = result.scalar_one_or_none()
 
-                            if not sub_task_chat:
-                                logger.error(f"❌ Pre-created sub-task chat not found for {next_task_info['session_id']}")
-                            else:
-                                # Send the sub-task query to the remote service
-                                logger.info(f"📤 Sending sub-task {next_task_info['sequence']}: {next_task_info['title']}")
+                        if next_group is not None:
+                            logger.info(f"🔄 Starting parallel group {next_group}")
+
+                            # Start all tasks in the parallel group
+                            parallel_tasks = await task_orchestration_service.start_parallel_group_tasks(
+                                db,
+                                assistant_chat.parent_session_id,
+                                chat.sub_project_id,
+                                next_group
+                            )
+
+                            # Send queries for all parallel tasks
+                            for task_info in parallel_tasks:
+                                sub_task_chat_id = task_info.get("chat_id")
+                                if sub_task_chat_id:
+                                    sub_task_chat = await db.get(Chat, UUID(sub_task_chat_id))
+                                else:
+                                    stmt = select(Chat).where(
+                                        Chat.session_id == task_info["session_id"],
+                                        Chat.role == "user"
+                                    ).limit(1)
+                                    result = await db.execute(stmt)
+                                    sub_task_chat = result.scalar_one_or_none()
+
+                                if not sub_task_chat:
+                                    logger.error(f"❌ Pre-created sub-task chat not found for {task_info['session_id']}")
+                                    continue
+
+                                logger.info(
+                                    f"📤 Sending parallel sub-task {task_info['sequence']}: "
+                                    f"{task_info['title']} (group {next_group})"
+                                )
                                 try:
-                                    # Don't send session_id - let external service generate its own
                                     await self.send_query(
                                         db,
                                         sub_task_chat.id,
-                                        next_task_info["prompt"],
-                                        session_id=None,  # New sub-task, no previous session
+                                        task_info["prompt"],
+                                        session_id=None,
                                         bypass_mode=True,
                                         agent_name=None
                                     )
                                 except Exception as send_error:
-                                    logger.error(f"❌ Failed to send sub-task query: {send_error}")
+                                    logger.error(f"❌ Failed to send parallel sub-task query: {send_error}")
+
+                            logger.info(f"✅ Started {len(parallel_tasks)} tasks in parallel group {next_group}")
+                        else:
+                            # Fallback to sequential execution for backward compatibility
+                            next_task_info = await task_orchestration_service.start_next_sub_task(
+                                db,
+                                assistant_chat.parent_session_id,
+                                chat.sub_project_id
+                            )
+
+                            if next_task_info:
+                                sub_task_chat_id = next_task_info.get("chat_id")
+                                if sub_task_chat_id:
+                                    sub_task_chat = await db.get(Chat, UUID(sub_task_chat_id))
+                                else:
+                                    stmt = select(Chat).where(
+                                        Chat.session_id == next_task_info["session_id"],
+                                        Chat.role == "user"
+                                    ).limit(1)
+                                    result = await db.execute(stmt)
+                                    sub_task_chat = result.scalar_one_or_none()
+
+                                if sub_task_chat:
+                                    logger.info(f"📤 Sending sub-task {next_task_info['sequence']}: {next_task_info['title']}")
+                                    try:
+                                        await self.send_query(
+                                            db,
+                                            sub_task_chat.id,
+                                            next_task_info["prompt"],
+                                            session_id=None,
+                                            bypass_mode=True,
+                                            agent_name=None
+                                        )
+                                    except Exception as send_error:
+                                        logger.error(f"❌ Failed to send sub-task query: {send_error}")
             
             # Special handling for completed status webhook to ensure webhook_session_id is stored
             # Publish to Redis for real-time updates
@@ -1094,8 +1181,14 @@ class ChatService:
         context: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
         """
-        Analyze a user message for task breakdown and create breakdown structure if needed.
-        
+        Analyze a user message for task breakdown using the external chat service in plan mode.
+
+        Flow:
+        1. Quick check if breakdown might be needed (using OpenAI)
+        2. If yes, send planning query to external chat service
+        3. Return "planning_in_progress" state
+        4. When planning webhook completes, parse plan and create breakdowns (in process_webhook)
+
         Returns breakdown info if analysis recommends breakdown, None otherwise.
         """
         try:
@@ -1103,50 +1196,300 @@ class ChatService:
             if not await self._should_analyze_for_breakdown(chat):
                 logger.info(f"⏭️ Skipping breakdown analysis for chat {str(chat.id)[:8]}...")
                 return None
-            
-            # Analyze with OpenAI
+
             prompt = chat.content.get("text", "")
-            logger.info(f"🔍 Analyzing prompt for breakdown (chat_id={str(chat.id)[:8]}...)")
-            
-            analysis = await task_analysis_service.analyze_for_breakdown(prompt)
-            
-            if not analysis.should_breakdown:
-                logger.info(f"📝 No breakdown needed: {analysis.reasoning}")
-                # Set parent_session_id to self (single task)
-                chat.parent_session_id = chat.session_id
+            logger.info(f"🔍 Starting plan mode analysis (chat_id={str(chat.id)[:8]}...)")
+
+            # Generate planning prompt for external service
+            planning_prompt = task_analysis_service.generate_planning_prompt(prompt, context)
+            print(f"planning_prompt: {planning_prompt}")
+            # Get project/task info for the external service
+            from app.models import SubProject, Task as TaskModel, Project as ProjectModel
+            sub_project = await db.get(SubProject, chat.sub_project_id)
+            if not sub_project:
+                logger.error(f"❌ SubProject not found for chat {str(chat.id)[:8]}...")
+                return None
+
+            task = await db.get(TaskModel, sub_project.task_id)
+            project = await db.get(ProjectModel, task.project_id)
+            # Create a planning webhook URL
+            planning_webhook_url = f"{self.webhook_base_url}/api/webhooks/chat/{chat.id}/planning"
+            # Prepare payload for planning query
+            payload = {
+                "prompt": planning_prompt,
+                "webhook_url": planning_webhook_url,
+                "organization_name": self.org_name,
+                "project_path": f"{project.name}/{task.id}",
+                "options": {
+                    "permission_mode": "bypassPermissions"  # Planning runs without approvals
+                },
+            }
+
+            # Mark chat as planning in progress
+            from sqlalchemy.orm.attributes import flag_modified
+            current_content = chat.content.copy()
+            current_metadata = current_content.get("metadata", {})
+            current_metadata["planning_in_progress"] = True
+            current_metadata["planning_started_at"] = datetime.now(timezone.utc).isoformat()
+            current_metadata["original_prompt"] = prompt
+            current_metadata["context"] = context
+            current_content["metadata"] = current_metadata
+            chat.content = current_content
+            flag_modified(chat, "content")
+            chat.parent_session_id = chat.session_id  # Mark as parent
+            db.add(chat)
+            await db.commit()
+
+            # Send planning query to external service
+            logger.info(f"📤 Sending planning query to external service (chat_id={str(chat.id)[:8]}...)")
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    self.query_url,
+                    json=payload,
+                    headers={"Content-Type": "application/json"}
+                )
+
+                if response.status_code != 200:
+                    logger.error(f"❌ Planning query failed: {response.status_code}")
+                    # Reset planning state
+                    current_metadata["planning_in_progress"] = False
+                    current_metadata["planning_error"] = f"External service error: {response.status_code}"
+                    chat.content = current_content
+                    flag_modified(chat, "content")
+                    db.add(chat)
+                    await db.commit()
+                    return None
+
+                result = response.json()
+                planning_task_id = result.get("task_id")
+                planning_session_id = result.get("session_id")
+
+                # Store planning task info
+                current_metadata["planning_task_id"] = planning_task_id
+                current_metadata["planning_session_id"] = planning_session_id
+                chat.content = current_content
+                flag_modified(chat, "content")
                 db.add(chat)
                 await db.commit()
-                return None
-            
-            # Breakdown recommended
-            logger.info(f"✂️ Breakdown recommended: {len(analysis.sub_tasks)} sub-tasks")
-            
-            # Create breakdown structure
-            breakdown_metadata = await task_orchestration_service.create_breakdown_sessions(
-                db, chat, analysis, context
-            )
-            
+
+                logger.info(
+                    f"✅ Planning query sent | "
+                    f"chat_id={str(chat.id)[:8]}... | "
+                    f"planning_task_id={planning_task_id}"
+                )
+
+            # Return planning in progress state
+            # The UI should show a "planning" indicator
+            # When the planning webhook completes, it will parse the plan and create breakdowns
             return {
                 "is_breakdown": True,
-                "total_sub_tasks": len(analysis.sub_tasks),
-                "reasoning": analysis.reasoning,
-                "sub_tasks": [
-                    {
-                        "sequence": task.sequence,
-                        "title": task.title,
-                        "description": task.description
-                    }
-                    for task in analysis.sub_tasks
-                ]
+                "planning_in_progress": True,
+                "planning_task_id": planning_task_id,
+                "total_sub_tasks": 0,  # Will be determined when planning completes
+                "reasoning": "Analyzing codebase and creating task breakdown plan...",
+                "sub_tasks": []
             }
-            
+
         except Exception as e:
-            logger.error(f"❌ Breakdown analysis failed: {e}")
+            logger.error(f"❌ Planning analysis failed: {e}")
             # Fallback: treat as single task
             chat.parent_session_id = chat.session_id
             db.add(chat)
             await db.commit()
             return None
+
+    async def process_planning_webhook(
+        self,
+        db: AsyncSession,
+        chat_id: UUID,
+        webhook_data: Dict[str, Any]
+    ):
+        """
+        Process planning webhook from external service.
+
+        When planning completes:
+        1. Extract the plan text from the webhook
+        2. Parse the plan into structured sub-tasks using OpenAI
+        3. Create breakdown sessions
+        4. Notify UI via Redis
+        """
+        try:
+            chat = await db.get(Chat, chat_id)
+            if not chat:
+                logger.error(f"❌ Chat not found for planning webhook: {chat_id}")
+                return
+
+            status = webhook_data.get("status", "processing")
+            is_completion = status in ["completed", "failed"]
+
+            if not is_completion:
+                # Store intermediate planning hooks for UI visibility
+                hook = ChatHook(
+                    chat_id=chat_id,
+                    session_id=chat.session_id,
+                    conversation_id=webhook_data.get("conversation_id"),
+                    hook_type="planning",
+                    status=status,
+                    data=webhook_data,
+                    message=webhook_data.get("message", "Planning in progress..."),
+                    is_complete=False,
+                    step_name=webhook_data.get("step_name", "Analyzing codebase...")
+                )
+                db.add(hook)
+                await db.commit()
+                return
+
+            hook = ChatHook(
+                chat_id=chat_id,
+                session_id=chat.session_id,
+                conversation_id=webhook_data.get("conversation_id"),
+                hook_type="planning",
+                status=status,
+                data=webhook_data,
+                message=webhook_data.get("message", "Planning finished"),
+                is_complete=True,
+                step_name="Planning completed"
+            )
+            db.add(hook)
+            await db.commit()
+            # Planning completed - extract the plan
+            plan_text = webhook_data.get("result", "")
+            error_text = webhook_data.get("error", "")
+
+            if status == "failed" or not plan_text:
+                logger.error(f"❌ Planning failed: {error_text or 'No plan returned'}")
+                # Reset planning state and treat as single task
+                from sqlalchemy.orm.attributes import flag_modified
+                current_content = chat.content.copy()
+                current_metadata = current_content.get("metadata", {})
+                current_metadata["planning_in_progress"] = False
+                current_metadata["planning_error"] = error_text or "Planning failed"
+                chat.content = current_content
+                flag_modified(chat, "content")
+                db.add(chat)
+                await db.commit()
+                return
+
+            logger.info(f"📋 Planning completed, parsing plan (chat_id={str(chat_id)[:8]}...)")
+
+            # Get original prompt and context from chat metadata
+            metadata = chat.content.get("metadata", {})
+            original_prompt = metadata.get("original_prompt", "")
+            context = metadata.get("context", {})
+
+            # Parse the plan into structured sub-tasks using OpenAI
+            analysis = await task_analysis_service.parse_plan_response(plan_text, original_prompt)
+
+            if not analysis.should_breakdown:
+                logger.info(f"📝 Plan parsing: No breakdown needed - {analysis.reasoning}")
+                # Reset planning state
+                from sqlalchemy.orm.attributes import flag_modified
+                current_content = chat.content.copy()
+                current_metadata = current_content.get("metadata", {})
+                current_metadata["planning_in_progress"] = False
+                current_metadata["planning_complete"] = True
+                current_metadata["breakdown_needed"] = False
+                current_metadata["plan_reasoning"] = analysis.reasoning
+                chat.content = current_content
+                flag_modified(chat, "content")
+                db.add(chat)
+                await db.commit()
+
+                # Send the original query as a single task
+                await self.send_query(
+                    db,
+                    chat.id,
+                    original_prompt,
+                    session_id=None,
+                    bypass_mode=True
+                )
+                return
+
+            # Create breakdown structure
+            logger.info(f"✂️ Creating breakdown with {len(analysis.sub_tasks)} sub-tasks")
+
+            breakdown_metadata = await task_orchestration_service.create_breakdown_sessions(
+                db, chat, analysis, context
+            )
+
+            # Update chat with final breakdown info
+            from sqlalchemy.orm.attributes import flag_modified
+            current_content = chat.content.copy()
+            current_metadata = current_content.get("metadata", {})
+            current_metadata["planning_in_progress"] = False
+            current_metadata["planning_complete"] = True
+            current_metadata["breakdown_needed"] = True
+            current_metadata["plan_text"] = plan_text[:2000]  # Store truncated plan for reference
+            current_metadata.update(breakdown_metadata)
+            chat.content = current_content
+            flag_modified(chat, "content")
+            db.add(chat)
+            await db.commit()
+
+            logger.info(
+                f"✅ Breakdown created from plan | "
+                f"chat_id={str(chat_id)[:8]}... | "
+                f"sub_tasks={len(analysis.sub_tasks)} | "
+                f"parallel_groups={len(analysis.parallel_groups or [])}"
+            )
+
+            # Automatically start the first parallel group after breakdown creation
+            first_group = await task_orchestration_service.get_next_parallel_group(
+                db,
+                chat.session_id,
+                chat.sub_project_id
+            )
+
+            if first_group is not None:
+                logger.info(f"🚀 Auto-starting first parallel group {first_group}")
+
+                # Start all tasks in the first parallel group
+                parallel_tasks = await task_orchestration_service.start_parallel_group_tasks(
+                    db,
+                    chat.session_id,
+                    chat.sub_project_id,
+                    first_group
+                )
+
+                # Send queries for all parallel tasks
+                for task_info in parallel_tasks:
+                    sub_task_chat_id = task_info.get("chat_id")
+                    if sub_task_chat_id:
+                        sub_task_chat = await db.get(Chat, UUID(sub_task_chat_id))
+                    else:
+                        stmt = select(Chat).where(
+                            Chat.session_id == task_info["session_id"],
+                            Chat.role == "user"
+                        ).limit(1)
+                        result = await db.execute(stmt)
+                        sub_task_chat = result.scalar_one_or_none()
+
+                    if not sub_task_chat:
+                        logger.error(f"❌ Sub-task chat not found for {task_info['session_id']}")
+                        continue
+
+                    logger.info(
+                        f"📤 Sending parallel sub-task {task_info['sequence']}: "
+                        f"{task_info['title']} (group {first_group})"
+                    )
+                    try:
+                        await self.send_query(
+                            db,
+                            sub_task_chat.id,
+                            task_info["prompt"],
+                            session_id=None,
+                            bypass_mode=True,
+                            agent_name=None
+                        )
+                    except Exception as send_error:
+                        logger.error(f"❌ Failed to send parallel sub-task query: {send_error}")
+
+                logger.info(f"✅ Auto-started {len(parallel_tasks)} tasks in parallel group {first_group}")
+
+        except Exception as e:
+            logger.error(f"❌ Planning webhook processing failed: {e}")
+            raise
 
 
 # Create service instance

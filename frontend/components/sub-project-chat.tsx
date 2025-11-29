@@ -7,7 +7,7 @@ import {
   PaperPlaneIcon, PersonIcon, RocketIcon, UpdateIcon, ChevronRightIcon,
   CodeIcon, GearIcon, CheckCircledIcon, CrossCircledIcon, ClockIcon,
   FileTextIcon, CubeIcon, ChevronDownIcon, DotFilledIcon, CopyIcon,
-  ChatBubbleIcon, MixerHorizontalIcon
+  ChatBubbleIcon, MixerHorizontalIcon, CircleIcon
 } from '@radix-ui/react-icons'
 import { api, ChatHook } from '@/lib/api'
 import { Button } from './ui/button'
@@ -127,6 +127,22 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
   const [showBreakdownTimeline, setShowBreakdownTimeline] = useState(false)
   const [expandedSubTaskId, setExpandedSubTaskId] = useState<string | null>(null)
   const [expandedSubTaskHookIds, setExpandedSubTaskHookIds] = useState<Set<string>>(new Set())
+
+  // Planning state
+  const [isPlanningExpanded, setIsPlanningExpanded] = useState(true)
+  const [expandedPlanningHookIds, setExpandedPlanningHookIds] = useState<Set<string>>(new Set())
+
+  // Auto-collapse planning when complete
+  const hasPlanningInProgress = useMemo(() => {
+    return messages.some(m => m.content?.metadata?.planning_in_progress)
+  }, [messages])
+
+  useEffect(() => {
+    // Collapse planning section when planning completes
+    if (!hasPlanningInProgress) {
+      setIsPlanningExpanded(false)
+    }
+  }, [hasPlanningInProgress])
 
   // Message queue state removed - input is now blocked when waiting for response
   
@@ -471,7 +487,12 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
       return hooksMap
     },
     enabled: messages.length > 0,
-    refetchInterval: isWaitingForResponse ? 3000 : 5000,
+    // Poll more frequently when planning or waiting for response
+    refetchInterval: (() => {
+      const hasPlanningInProgress = messages.some(m => m.content?.metadata?.planning_in_progress)
+      if (hasPlanningInProgress || isWaitingForResponse) return 2000 // 2 seconds
+      return 5000 // 5 seconds
+    })(),
     staleTime: 0,
     gcTime: 5 * 60 * 1000,
   })
@@ -1439,6 +1460,225 @@ export function SubProjectChat({ projectName, taskName, subProjectId, initialSes
                               <div className="text-sm leading-relaxed text-foreground/90 whitespace-pre-wrap">
                                 {message.content?.text || (typeof message.content === 'string' ? message.content : '')}
                               </div>
+
+                              {/* Planning Progress - Show when planning is/was in progress */}
+                              {(() => {
+                                const planningHooks = hooks?.filter((h: ChatHook) => h.hook_type === 'planning') || []
+                                const isPlanningInProgress = message.content?.metadata?.planning_in_progress
+                                const hadPlanning = message.content?.metadata?.planning_complete || planningHooks.length > 0
+
+                                // Don't show if no planning happened
+                                if (!isPlanningInProgress && !hadPlanning) return null
+
+                                const totalHooks = planningHooks.length
+
+                                return (
+                                  <div className={cn(
+                                    "mt-4 pt-4 border-t",
+                                    isPlanningInProgress ? "border-cyan-500/20" : "border-green-500/20"
+                                  )}>
+                                    {/* Planning Header - Clickable */}
+                                    <button
+                                      onClick={() => setIsPlanningExpanded(!isPlanningExpanded)}
+                                      className="w-full flex items-center justify-between mb-4 group"
+                                    >
+                                      <div className="flex items-center gap-2">
+                                        {isPlanningInProgress ? (
+                                          <>
+                                            <div className="w-2 h-2 rounded-full bg-cyan-500 animate-pulse" />
+                                            <span className="text-sm font-semibold text-cyan-400">
+                                              📋 Planning Phase
+                                            </span>
+                                            <span className="text-xs bg-cyan-500/20 text-cyan-400 px-2 py-0.5 rounded-full">
+                                              Analyzing codebase
+                                            </span>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <CheckCircledIcon className="w-4 h-4 text-green-500" />
+                                            <span className="text-sm font-semibold text-green-400">
+                                              📋 Planning Complete
+                                            </span>
+                                            <span className="text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full">
+                                              {totalHooks} steps
+                                            </span>
+                                          </>
+                                        )}
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-xs text-muted-foreground">
+                                          {totalHooks} steps
+                                        </span>
+                                        <ChevronDownIcon className={cn(
+                                          "h-4 w-4 text-muted-foreground transition-transform",
+                                          isPlanningExpanded && "rotate-180"
+                                        )} />
+                                      </div>
+                                    </button>
+
+                                    {/* Collapsible Planning Steps - Same style as sub-task hooks */}
+                                    <AnimatePresence>
+                                      {isPlanningExpanded && (
+                                        <motion.div
+                                          initial={{ opacity: 0, height: 0 }}
+                                          animate={{ opacity: 1, height: 'auto' }}
+                                          exit={{ opacity: 0, height: 0 }}
+                                          transition={{ duration: 0.2 }}
+                                          className="space-y-2"
+                                        >
+                                          {planningHooks.length > 0 ? (
+                                            planningHooks.map((hook: ChatHook, hookIdx: number) => {
+                                              const hookId = hook.id || `planning-hook-${hookIdx}`
+                                              const isHookExpanded = expandedPlanningHookIds.has(hookId)
+                                              const hookData = hook.data || {}
+                                              const dataStatus = hookData.status || hook.status
+
+                                              // Get preview text from data.result
+                                              const preview = hookData.result || hookData.error || hook.message || ''
+                                              const previewText = typeof preview === 'string' ? preview.substring(0, 60) : ''
+
+                                              return (
+                                                <div
+                                                  key={hookId}
+                                                  className={cn(
+                                                    "rounded-md border text-xs overflow-hidden transition-all",
+                                                    dataStatus === 'completed' && "border-green-500/20",
+                                                    dataStatus === 'processing' && "border-cyan-500/20",
+                                                    dataStatus === 'pending' && "border-border/30",
+                                                    dataStatus === 'failed' && "border-red-500/20"
+                                                  )}
+                                                >
+                                                  {/* Hook Header - Clickable */}
+                                                  <button
+                                                    onClick={() => {
+                                                      const newSet = new Set(expandedPlanningHookIds)
+                                                      if (isHookExpanded) {
+                                                        newSet.delete(hookId)
+                                                      } else {
+                                                        newSet.add(hookId)
+                                                      }
+                                                      setExpandedPlanningHookIds(newSet)
+                                                    }}
+                                                    className={cn(
+                                                      "w-full p-2 flex items-center gap-2 transition-colors",
+                                                      dataStatus === 'completed' && "bg-green-500/10 hover:bg-green-500/15",
+                                                      dataStatus === 'processing' && "bg-cyan-500/10 hover:bg-cyan-500/15",
+                                                      dataStatus === 'pending' && "bg-muted/30 hover:bg-muted/40",
+                                                      dataStatus === 'failed' && "bg-red-500/10 hover:bg-red-500/15"
+                                                    )}
+                                                  >
+                                                    {/* Expand Icon */}
+                                                    <motion.div
+                                                      animate={{ rotate: isHookExpanded ? 90 : 0 }}
+                                                      transition={{ duration: 0.15 }}
+                                                      className="flex-shrink-0"
+                                                    >
+                                                      <ChevronRightIcon className="h-3 w-3 text-muted-foreground" />
+                                                    </motion.div>
+
+                                                    {/* Status Icon */}
+                                                    {dataStatus === 'completed' ? (
+                                                      <CheckCircledIcon className="h-3 w-3 text-green-400 flex-shrink-0" />
+                                                    ) : dataStatus === 'processing' ? (
+                                                      <UpdateIcon className="h-3 w-3 text-cyan-400 animate-spin flex-shrink-0" />
+                                                    ) : dataStatus === 'failed' ? (
+                                                      <CrossCircledIcon className="h-3 w-3 text-red-400 flex-shrink-0" />
+                                                    ) : (
+                                                      <ClockIcon className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                                                    )}
+
+                                                    {/* Hook Type */}
+                                                    <span className="font-medium text-foreground truncate">
+                                                      {hookData.type || hook.step_name || 'planning'}
+                                                    </span>
+
+                                                    {/* Tool Name Badge if available */}
+                                                    {(hook.tool_name || hookData.tool_name) && (
+                                                      <span className="px-1.5 py-0.5 rounded bg-muted/50 text-muted-foreground text-[10px] truncate max-w-[100px]">
+                                                        {hook.tool_name || hookData.tool_name}
+                                                      </span>
+                                                    )}
+
+                                                    {/* Preview when collapsed */}
+                                                    {!isHookExpanded && previewText && (
+                                                      <span className="text-muted-foreground text-[10px] truncate flex-1 text-left max-w-[200px]">
+                                                        {previewText.length < (preview?.length || 0) ? `${previewText}...` : previewText}
+                                                      </span>
+                                                    )}
+
+                                                    {/* Timestamp */}
+                                                    {hookData.timestamp && (
+                                                      <span className="text-muted-foreground/50 text-[10px] ml-auto flex-shrink-0">
+                                                        {new Date(hookData.timestamp).toLocaleTimeString()}
+                                                      </span>
+                                                    )}
+                                                  </button>
+
+                                                  {/* Expanded Content */}
+                                                  <AnimatePresence>
+                                                    {isHookExpanded && (
+                                                      <motion.div
+                                                        initial={{ height: 0, opacity: 0 }}
+                                                        animate={{ height: 'auto', opacity: 1 }}
+                                                        exit={{ height: 0, opacity: 0 }}
+                                                        transition={{ duration: 0.15 }}
+                                                        className="border-t border-border/30 bg-muted/20"
+                                                      >
+                                                        <div className="p-2 space-y-2">
+                                                          {/* Result/Error content */}
+                                                          {(hookData.result || hookData.error) && (
+                                                            <div className="space-y-1">
+                                                              <span className="text-[10px] font-medium text-muted-foreground uppercase">
+                                                                {hookData.error ? 'Error' : 'Result'}
+                                                              </span>
+                                                              <pre className={cn(
+                                                                "text-[11px] font-mono whitespace-pre-wrap break-words p-2 rounded max-h-[500px] overflow-y-auto",
+                                                                hookData.error ? "bg-red-500/10 text-red-300" : "bg-muted/30 text-foreground/80"
+                                                              )}>
+                                                                {typeof (hookData.result || hookData.error) === 'string'
+                                                                  ? (hookData.result || hookData.error)
+                                                                  : JSON.stringify(hookData.result || hookData.error, null, 2)}
+                                                              </pre>
+                                                            </div>
+                                                          )}
+
+                                                          {/* Message if no result */}
+                                                          {!hookData.result && !hookData.error && hook.message && (
+                                                            <div className="space-y-1">
+                                                              <span className="text-[10px] font-medium text-muted-foreground uppercase">Message</span>
+                                                              <p className="text-[11px] text-foreground/80">{hook.message}</p>
+                                                            </div>
+                                                          )}
+
+                                                          {/* Additional metadata */}
+                                                          <div className="flex flex-wrap gap-2 text-[10px] text-muted-foreground/60">
+                                                            {hookData.message_type && (
+                                                              <span className="px-1.5 py-0.5 bg-muted/30 rounded">{hookData.message_type}</span>
+                                                            )}
+                                                            {hookData.content_type && (
+                                                              <span className="px-1.5 py-0.5 bg-muted/30 rounded">{hookData.content_type}</span>
+                                                            )}
+                                                          </div>
+                                                        </div>
+                                                      </motion.div>
+                                                    )}
+                                                  </AnimatePresence>
+                                                </div>
+                                              )
+                                            })
+                                          ) : (
+                                            /* Show loading if no hooks yet */
+                                            <div className="flex items-center gap-2 p-2 rounded-md border border-cyan-500/20 bg-cyan-500/10">
+                                              <UpdateIcon className="h-3 w-3 text-cyan-400 animate-spin flex-shrink-0" />
+                                              <span className="text-xs text-foreground">Starting analysis...</span>
+                                            </div>
+                                          )}
+                                        </motion.div>
+                                      )}
+                                    </AnimatePresence>
+                                  </div>
+                                )
+                              })()}
 
                               {/* Breakdown Timeline - Inline under parent message */}
                               {message.content?.metadata?.is_breakdown_parent && breakdownStatus && (

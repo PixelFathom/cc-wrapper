@@ -66,6 +66,11 @@ class TaskOrchestrationService:
                 # Link to next session (None for last task)
                 next_session_id = session_ids[i + 1] if i < len(session_ids) - 1 else None
 
+                # Get parallel group info from the sub-task spec if available
+                parallel_group = getattr(
+                    analysis.sub_tasks[i], 'parallel_group', 0
+                ) if i < len(analysis.sub_tasks) else 0
+
                 sub_task_info = {
                     "sequence": prompt_spec["sequence"],
                     "title": prompt_spec["title"],
@@ -78,7 +83,8 @@ class TaskOrchestrationService:
                     "status": "pending",
                     "started_at": None,
                     "completed_at": None,
-                    "result_summary": None
+                    "result_summary": None,
+                    "parallel_group": parallel_group  # Group for parallel execution
                 }
 
                 # Create Chat entry for this sub-task (user message)
@@ -97,7 +103,8 @@ class TaskOrchestrationService:
                             "description": prompt_spec["description"],
                             "testing_requirements": prompt_spec["testing_requirements"],
                             "next_session_id": next_session_id,
-                            "status": "pending"
+                            "status": "pending",
+                            "parallel_group": parallel_group
                         }
                     }
                 )
@@ -126,6 +133,8 @@ class TaskOrchestrationService:
                 "total_sub_tasks": len(analysis.sub_tasks),
                 "completed_sub_tasks": 0,
                 "current_sub_task": 0,
+                "current_parallel_group": 0,  # Track which parallel group is active
+                "parallel_groups": analysis.parallel_groups or [],  # [[1], [2,3,4], [5,6,7]]
                 "sub_task_sessions": sub_task_sessions
             }
 
@@ -283,13 +292,224 @@ class TaskOrchestrationService:
                 "session_id": sub_task_session_id,
                 "chat_id": sub_task_chat_id,
                 "parent_session_id": parent_session_id,
-                "sub_project_id": str(sub_project_id)
+                "sub_project_id": str(sub_project_id),
+                "parallel_group": pending_task.get("parallel_group", 0)
             }
-            
+
         except Exception as e:
             logger.error(f"❌ Failed to start next sub-task: {e}")
             raise
-    
+
+    async def start_parallel_group_tasks(
+        self,
+        db: AsyncSession,
+        parent_session_id: str,
+        sub_project_id: UUID,
+        parallel_group: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Start all tasks in a specific parallel group.
+
+        Tasks in the same parallel group can be executed simultaneously
+        as they don't have interdependencies.
+
+        Args:
+            db: Database session
+            parent_session_id: The parent session ID
+            sub_project_id: The sub-project ID
+            parallel_group: The parallel group number to start
+
+        Returns:
+            List of task info dicts for all tasks started
+        """
+        try:
+            # Get parent chat to access breakdown metadata
+            stmt = select(Chat).where(
+                Chat.session_id == parent_session_id,
+                Chat.role == "user",
+                Chat.sub_project_id == sub_project_id
+            ).order_by(Chat.created_at.asc()).limit(1)
+
+            result = await db.execute(stmt)
+            parent_chat = result.scalar_one_or_none()
+
+            if not parent_chat:
+                logger.error(f"❌ Parent chat not found for session {parent_session_id}")
+                return []
+
+            metadata = parent_chat.content.get("metadata", {})
+            if not metadata.get("is_breakdown_parent"):
+                logger.error(f"❌ Chat is not a breakdown parent")
+                return []
+
+            sub_task_sessions = metadata.get("sub_task_sessions", [])
+
+            # Find all pending tasks in the specified parallel group
+            tasks_to_start = []
+            for i, task_info in enumerate(sub_task_sessions):
+                if (task_info.get("parallel_group") == parallel_group and
+                    task_info["status"] == "pending"):
+                    tasks_to_start.append((i, task_info))
+
+            if not tasks_to_start:
+                logger.info(f"ℹ️ No pending tasks in parallel group {parallel_group}")
+                return []
+
+            started_tasks = []
+
+            for index, task_info in tasks_to_start:
+                sub_task_session_id = task_info.get("session_id")
+                sub_task_chat_id = task_info.get("chat_id")
+
+                # Update task status to processing
+                task_info["status"] = "processing"
+                task_info["started_at"] = datetime.now(timezone.utc).isoformat()
+
+                # Update sub-task chat metadata
+                if sub_task_chat_id:
+                    sub_task_chat = await db.get(Chat, UUID(sub_task_chat_id))
+                    if sub_task_chat:
+                        content = sub_task_chat.content.copy()
+                        if "metadata" in content:
+                            content["metadata"]["status"] = "processing"
+                            sub_task_chat.content = content
+                            flag_modified(sub_task_chat, "content")
+                            db.add(sub_task_chat)
+
+                started_tasks.append({
+                    "sequence": task_info["sequence"],
+                    "title": task_info["title"],
+                    "description": task_info["description"],
+                    "prompt": task_info["prompt"],
+                    "session_id": sub_task_session_id,
+                    "chat_id": sub_task_chat_id,
+                    "parent_session_id": parent_session_id,
+                    "sub_project_id": str(sub_project_id),
+                    "parallel_group": parallel_group
+                })
+
+            # Update parent chat metadata
+            metadata["current_parallel_group"] = parallel_group
+            metadata["sub_task_sessions"] = sub_task_sessions
+
+            current_content = parent_chat.content.copy()
+            current_content["metadata"] = metadata
+            parent_chat.content = current_content
+            flag_modified(parent_chat, "content")
+
+            db.add(parent_chat)
+            await db.commit()
+
+            logger.info(
+                f"▶️ Started {len(started_tasks)} tasks in parallel group {parallel_group} | "
+                f"tasks: {[t['sequence'] for t in started_tasks]}"
+            )
+
+            return started_tasks
+
+        except Exception as e:
+            logger.error(f"❌ Failed to start parallel group tasks: {e}")
+            raise
+
+    async def get_next_parallel_group(
+        self,
+        db: AsyncSession,
+        parent_session_id: str,
+        sub_project_id: UUID
+    ) -> Optional[int]:
+        """
+        Determine the next parallel group to execute.
+
+        Returns the next group number if there are pending tasks,
+        or None if all tasks are completed.
+
+        Args:
+            db: Database session
+            parent_session_id: The parent session ID
+            sub_project_id: The sub-project ID
+
+        Returns:
+            Next parallel group number, or None if all done
+        """
+        try:
+            stmt = select(Chat).where(
+                Chat.session_id == parent_session_id,
+                Chat.role == "user",
+                Chat.sub_project_id == sub_project_id
+            ).order_by(Chat.created_at.asc()).limit(1)
+
+            result = await db.execute(stmt)
+            parent_chat = result.scalar_one_or_none()
+
+            if not parent_chat:
+                return None
+
+            metadata = parent_chat.content.get("metadata", {})
+            sub_task_sessions = metadata.get("sub_task_sessions", [])
+
+            # Find the lowest parallel_group with pending tasks
+            pending_groups = set()
+            for task_info in sub_task_sessions:
+                if task_info["status"] == "pending":
+                    pending_groups.add(task_info.get("parallel_group", 0))
+
+            if not pending_groups:
+                return None
+
+            # Return the lowest group number (respects execution order)
+            return min(pending_groups)
+
+        except Exception as e:
+            logger.error(f"❌ Failed to get next parallel group: {e}")
+            return None
+
+    async def is_parallel_group_complete(
+        self,
+        db: AsyncSession,
+        parent_session_id: str,
+        sub_project_id: UUID,
+        parallel_group: int
+    ) -> bool:
+        """
+        Check if all tasks in a parallel group are completed.
+
+        Args:
+            db: Database session
+            parent_session_id: The parent session ID
+            sub_project_id: The sub-project ID
+            parallel_group: The parallel group to check
+
+        Returns:
+            True if all tasks in the group are completed
+        """
+        try:
+            stmt = select(Chat).where(
+                Chat.session_id == parent_session_id,
+                Chat.role == "user",
+                Chat.sub_project_id == sub_project_id
+            ).order_by(Chat.created_at.asc()).limit(1)
+
+            result = await db.execute(stmt)
+            parent_chat = result.scalar_one_or_none()
+
+            if not parent_chat:
+                return False
+
+            metadata = parent_chat.content.get("metadata", {})
+            sub_task_sessions = metadata.get("sub_task_sessions", [])
+
+            # Check all tasks in the parallel group
+            for task_info in sub_task_sessions:
+                if task_info.get("parallel_group") == parallel_group:
+                    if task_info["status"] not in ["completed", "failed"]:
+                        return False
+
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ Failed to check parallel group completion: {e}")
+            return False
+
     async def handle_sub_task_completion(
         self,
         db: AsyncSession,
@@ -382,22 +602,60 @@ class TaskOrchestrationService:
             current_content["metadata"] = metadata
             parent_chat.content = current_content
             flag_modified(parent_chat, "content")
-            
+
             db.add(parent_chat)
             await db.commit()
-            
+
             # Check if all sub-tasks are completed
             total = metadata.get("total_sub_tasks", 0)
             completed = metadata.get("completed_sub_tasks", 0)
-            
+
             if completed >= total:
                 logger.info(f"🎉 All sub-tasks completed for breakdown {parent_chat.session_id[:8]}...")
                 return False
-            
-            # Trigger next sub-task
-            logger.info(f"⏭️ Triggering next sub-task ({completed + 1}/{total})")
-            return True
-            
+
+            # Check if the completed task was part of a parallel group
+            completed_task = None
+            for task_info in sub_task_sessions:
+                if task_info["session_id"] == completed_chat.session_id:
+                    completed_task = task_info
+                    break
+
+            if completed_task:
+                parallel_group = completed_task.get("parallel_group", 0)
+
+                # Check if parallel group is complete
+                group_complete = await self.is_parallel_group_complete(
+                    db,
+                    completed_chat.parent_session_id,
+                    completed_chat.sub_project_id,
+                    parallel_group
+                )
+
+                if not group_complete:
+                    # Other tasks in the same parallel group are still running
+                    logger.info(
+                        f"⏳ Parallel group {parallel_group} still has running tasks, "
+                        f"waiting for completion..."
+                    )
+                    return False
+
+                logger.info(f"✅ Parallel group {parallel_group} complete")
+
+            # Find the next parallel group to execute
+            next_group = await self.get_next_parallel_group(
+                db,
+                completed_chat.parent_session_id,
+                completed_chat.sub_project_id
+            )
+
+            if next_group is not None:
+                logger.info(f"⏭️ Next parallel group to execute: {next_group}")
+                return True
+
+            logger.info(f"ℹ️ No more parallel groups to execute")
+            return False
+
         except Exception as e:
             logger.error(f"❌ Failed to handle sub-task completion: {e}")
             return False

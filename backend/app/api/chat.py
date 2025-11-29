@@ -466,9 +466,55 @@ async def get_message_hooks(
             # If it's a user message, get hooks directly
             hooks = await chat_service.get_chat_hooks(session, message_id, message.session_id, limit)
         
+        # Check if this is a breakdown parent and include sub-task hooks
+        metadata = message.content.get("metadata", {}) if message.content else {}
+        if metadata.get("is_breakdown_parent"):
+            sub_task_sessions = metadata.get("sub_task_sessions", [])
+            sub_task_hooks = []
+
+            for sub_task in sub_task_sessions:
+                sub_task_chat_id = sub_task.get("chat_id")
+                if sub_task_chat_id:
+                    # Get hooks for this sub-task
+                    result = await session.execute(
+                        select(ChatHook)
+                        .where(ChatHook.chat_id == UUID(sub_task_chat_id))
+                        .order_by(ChatHook.received_at)
+                        .limit(100)
+                    )
+                    sub_hooks = result.scalars().all()
+
+                    for hook in sub_hooks:
+                        sub_task_hooks.append({
+                            "id": str(hook.id),
+                            "hook_type": hook.hook_type,
+                            "status": hook.status,
+                            "message": hook.message,
+                            "data": hook.data,
+                            "is_complete": hook.is_complete,
+                            "received_at": hook.received_at.isoformat(),
+                            "step_name": hook.step_name,
+                            "step_index": hook.step_index,
+                            "total_steps": hook.total_steps,
+                            "message_type": hook.message_type,
+                            "content_type": hook.content_type,
+                            "tool_name": hook.tool_name,
+                            "tool_input": hook.tool_input,
+                            "conversation_id": hook.conversation_id,
+                            "sub_task_sequence": sub_task.get("sequence"),
+                            "sub_task_title": sub_task.get("title"),
+                            "sub_task_session_id": sub_task.get("session_id")
+                        })
+
+            # Combine parent hooks with sub-task hooks
+            hooks.extend(sub_task_hooks)
+            # Sort all hooks by received_at
+            hooks.sort(key=lambda x: x.get("received_at", ""))
+
         return {
             "message_id": str(message_id),
             "session_id": message.session_id,
+            "is_breakdown_parent": metadata.get("is_breakdown_parent", False),
             "hooks": hooks
         }
     except RateLimitExceeded as e:
@@ -486,6 +532,121 @@ async def get_message_hooks(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to get message hooks: {str(e)}"
+        )
+
+
+@router.get("/sessions/{session_id}/all-hooks")
+async def get_session_all_hooks(
+    session_id: str,
+    include_sub_tasks: bool = True,
+    limit: int = 1000,
+    session: AsyncSession = Depends(get_session)
+):
+    """Get all hooks for a session, including sub-task hooks if it's a breakdown parent.
+
+    This endpoint returns all webhook data for a conversation, making it easy
+    to show the complete execution history including all sub-tasks.
+    """
+    try:
+        # Get the parent message to check if it's a breakdown
+        result = await session.execute(
+            select(Chat)
+            .where(Chat.session_id == session_id)
+            .where(Chat.role == "user")
+            .order_by(Chat.created_at.asc())
+            .limit(1)
+        )
+        parent_chat = result.scalar_one_or_none()
+
+        if not parent_chat:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        all_hooks = []
+        session_ids_to_query = [session_id]
+
+        # Check if this is a breakdown parent
+        metadata = parent_chat.content.get("metadata", {}) if parent_chat.content else {}
+        is_breakdown = metadata.get("is_breakdown_parent", False)
+
+        if is_breakdown and include_sub_tasks:
+            sub_task_sessions = metadata.get("sub_task_sessions", [])
+            for sub_task in sub_task_sessions:
+                sub_session_id = sub_task.get("session_id")
+                if sub_session_id:
+                    session_ids_to_query.append(sub_session_id)
+
+        # Get hooks for all sessions
+        for sid in session_ids_to_query:
+            # Find the chat for this session
+            result = await session.execute(
+                select(Chat)
+                .where(Chat.session_id == sid)
+                .where(Chat.role == "user")
+                .limit(1)
+            )
+            chat = result.scalar_one_or_none()
+
+            if chat:
+                result = await session.execute(
+                    select(ChatHook)
+                    .where(ChatHook.chat_id == chat.id)
+                    .order_by(ChatHook.received_at)
+                    .limit(limit // len(session_ids_to_query))
+                )
+                hooks = result.scalars().all()
+
+                # Get sub-task metadata if available
+                chat_metadata = chat.content.get("metadata", {}) if chat.content else {}
+                is_sub_task = chat_metadata.get("is_breakdown_subtask", False)
+                sub_task_info = None
+                if is_sub_task:
+                    sub_task_info = {
+                        "sequence": chat_metadata.get("sequence"),
+                        "title": chat_metadata.get("title"),
+                        "parallel_group": chat_metadata.get("parallel_group")
+                    }
+
+                for hook in hooks:
+                    hook_data = {
+                        "id": str(hook.id),
+                        "chat_id": str(hook.chat_id),
+                        "session_id": hook.session_id,
+                        "hook_type": hook.hook_type,
+                        "status": hook.status,
+                        "message": hook.message,
+                        "data": hook.data,
+                        "is_complete": hook.is_complete,
+                        "received_at": hook.received_at.isoformat(),
+                        "step_name": hook.step_name,
+                        "step_index": hook.step_index,
+                        "total_steps": hook.total_steps,
+                        "message_type": hook.message_type,
+                        "content_type": hook.content_type,
+                        "tool_name": hook.tool_name,
+                        "tool_input": hook.tool_input,
+                        "conversation_id": hook.conversation_id,
+                        "is_sub_task": is_sub_task,
+                        "sub_task_info": sub_task_info
+                    }
+                    all_hooks.append(hook_data)
+
+        # Sort all hooks by received_at
+        all_hooks.sort(key=lambda x: x.get("received_at", ""))
+
+        return {
+            "session_id": session_id,
+            "is_breakdown": is_breakdown,
+            "total_sessions": len(session_ids_to_query),
+            "hooks": all_hooks
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get session hooks: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get session hooks: {str(e)}"
         )
 
 

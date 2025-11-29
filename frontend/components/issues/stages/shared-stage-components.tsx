@@ -155,14 +155,23 @@ export function StageHookDetailsModal({ hook, isOpen, onClose }: HookDetailsModa
             )}
             {Object.entries(hook.details).map(([key, value]: [string, any]) => {
               if (!value) return null
+              const stringValue = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+              const isResult = key.toLowerCase() === 'result'
+
               return (
                 <div key={key}>
                   <h4 className="text-sm font-semibold mb-2 flex items-center gap-2 capitalize">
                     <Info className="h-4 w-4" />
                     {key.replace(/([A-Z])/g, ' $1').trim()}
                   </h4>
-                  <div className="rounded-lg bg-muted/50 border p-4">
-                    <pre className="text-xs font-mono whitespace-pre-wrap break-all leading-relaxed">{value}</pre>
+                  <div className="rounded-lg bg-muted/50 border p-4 overflow-auto max-h-[400px]">
+                    {isResult ? (
+                      <div className="prose prose-sm dark:prose-invert max-w-none prose-pre:bg-black/40 prose-pre:border prose-code:text-xs">
+                        <ReactMarkdown>{stringValue}</ReactMarkdown>
+                      </div>
+                    ) : (
+                      <pre className="text-xs font-mono whitespace-pre-wrap break-all leading-relaxed">{stringValue}</pre>
+                    )}
                   </div>
                 </div>
               )

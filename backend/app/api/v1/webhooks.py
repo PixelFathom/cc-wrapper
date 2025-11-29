@@ -77,6 +77,38 @@ async def receive_chat_webhook(
         raise HTTPException(status_code=500, detail="Failed to process chat webhook")
 
 
+@router.post("/webhooks/chat/{chat_id}/planning")
+async def receive_planning_webhook(
+    chat_id: UUID,
+    webhook_data: Dict[str, Any],
+    session: AsyncSession = Depends(get_session),
+    redis_client: redis.Redis = Depends(get_redis_client)
+):
+    """Receive planning phase webhooks from external service.
+
+    This endpoint handles webhooks specifically for the planning phase,
+    where Claude analyzes the codebase and creates a task breakdown plan.
+    """
+    try:
+        logger.info(
+            f"📋 Planning webhook endpoint called | "
+            f"chat_id={chat_id} | "
+            f"status={webhook_data.get('status', 'unknown')}"
+        )
+        # Set Redis client for real-time updates
+        chat_service.set_redis_client(redis_client)
+        await chat_service.process_planning_webhook(session, chat_id, webhook_data)
+        return {"status": "received", "chat_id": chat_id, "phase": "planning"}
+    except ValueError as e:
+        logger.error(f"❌ Planning webhook ValueError: {e}")
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ Planning webhook Exception: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Failed to process planning webhook")
+
+
 @router.post("/webhooks/test-case/{test_case_id}")
 async def receive_test_case_webhook(
     test_case_id: UUID,
